@@ -117,6 +117,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	queryName := r.URL.Query().Get("query")
 	query, ok := (q.Configuration.Query)[queryName]
 	if !ok {
+		log.Errorf("query='%s' unknown query", queryName)
 		http.Error(w, fmt.Sprintf("Unknown query '%s'", queryName), 400)
 		queryRequestErrors.Inc()
 		return
@@ -125,6 +126,8 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	queryRequest.WithLabelValues(queryName).Inc()
 
 	db := q.Configuration.Database[query.Database]
+
+	log.Debugf("query='%s' start", queryName)
 
 	result := &Result{
 		Query:    queryName,
@@ -137,8 +140,11 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	result.QueryDuration = time.Since(start).Seconds()
 	result.Count = len(result.R)
 
+	log.Debugf("query='%s' query_time=%f rows=%d",
+		queryName, result.QueryDuration, result.Count)
+
 	if err != nil {
-		log.Errorf("query error for '%s': %s", queryName, err)
+		log.Errorf("query='%s' execute error: %s", queryName, err)
 		http.Error(w, fmt.Sprintf("Query error: '%s'", err), 400)
 		queryRequestErrors.Inc()
 		return
@@ -147,7 +153,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
 	err = query.MetricTpl.Execute(w, result)
 	if err != nil {
-		log.Errorf("execute template error: %v", err)
+		log.Errorf("query='%s' execute template error: %v", queryName, err)
 		http.Error(w, fmt.Sprintf("Internal error: '%s'", err), 400)
 		queryRequestErrors.Inc()
 		return
@@ -155,7 +161,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
 	duration := float64(time.Since(start).Seconds())
 	queryDuration.WithLabelValues(queryName).Observe(duration)
-	log.Debugf("Scrape of query '%s' took %f seconds", queryName, duration)
+	log.Debugf("query='%s' scrape_time=%f", queryName, duration)
 }
 
 func main() {
@@ -175,6 +181,7 @@ func main() {
 	}
 
 	for query := range c.Query {
+		log.Debugf("found query '%s'", query)
 		queryRequest.WithLabelValues(query)
 		queryDuration.WithLabelValues(query)
 	}
