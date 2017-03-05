@@ -32,8 +32,6 @@ type (
 
 	// Database define database connection
 	Database struct {
-		// URL to SQL-Agent
-		AgentURL string `yaml:"agent_url"`
 		// Driver name - see sql-agent
 		Driver string
 		// Connection params - see sql-agent

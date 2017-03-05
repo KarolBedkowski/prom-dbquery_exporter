@@ -1,16 +1,22 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	//      _ "github.com/denisenkom/go-mssqldb"
+	//      _ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
+	//      _ "github.com/mattn/go-oci8"
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/chop-dbhi/sql-agent"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/log"
@@ -48,12 +54,10 @@ var (
 )
 
 type (
-	record map[string]interface{}
-
 	// Result keep query result and some metadata parsed to template
 	Result struct {
 		// Records (rows)
-		R              []record
+		R              []sqlagent.Record
 		QueryStartTime int64
 		QueryDuration  float64
 		Count          int
@@ -69,41 +73,30 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func sendQuery(q *Query, d *Database) ([]record, error) {
-	payload, err := json.Marshal(map[string]interface{}{
-		"driver":     d.Driver,
-		"connection": d.Connection,
-		"sql":        q.SQL,
-		"params":     q.Params,
-	})
+func sendQuery(q *Query, d *Database) ([]sqlagent.Record, error) {
+	if _, ok := sqlagent.Drivers[d.Driver]; !ok {
+		return nil, fmt.Errorf("unsupported driver '%s'", d.Driver)
+	}
+
+	db, err := sqlagent.PersistentConnect(d.Driver, d.Connection)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error connecting to db: %s", err)
 	}
 
-	req, err := http.NewRequest("POST", d.AgentURL, bytes.NewBuffer(payload))
+	iter, err := sqlagent.Execute(db, q.SQL, q.Params)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error executing query: %s", err)
 	}
 
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("accept", "application/json")
+	defer iter.Close()
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if err == nil && resp.StatusCode != 200 {
-		b, _ := ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("query error (%s) %s", resp.Status, string(b))
-	}
-
-	var records []record
-
-	defer resp.Body.Close()
-	if err = json.NewDecoder(resp.Body).Decode(&records); err != nil {
-		return nil, err
+	var records []sqlagent.Record
+	for iter.Next() {
+		rec := make(sqlagent.Record)
+		if err := iter.Scan(rec); err != nil {
+			return nil, fmt.Errorf("error scanning record: %s", err)
+		}
+		records = append(records, rec)
 	}
 
 	return records, nil
@@ -164,6 +157,14 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	log.Debugf("query='%s' scrape_time=%f", queryName, duration)
 }
 
+func onConfLoaded(c *Configuration) {
+	for query := range c.Query {
+		log.Debugf("found query '%s'", query)
+		queryRequest.WithLabelValues(query)
+		queryDuration.WithLabelValues(query)
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -179,15 +180,28 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
+	handler := queryHandler{c}
+	onConfLoaded(c)
 
-	for query := range c.Query {
-		log.Debugf("found query '%s'", query)
-		queryRequest.WithLabelValues(query)
-		queryDuration.WithLabelValues(query)
-	}
+	hup := make(chan os.Signal)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for {
+			select {
+			case <-hup:
+				if newConf, err := loadConfiguration(*configFile); err == nil {
+					handler.Configuration = newConf
+					onConfLoaded(newConf)
+					log.Info("configuration reloaded")
+				} else {
+					log.Errorf("reloading configuration err: %s", err)
+					log.Errorf("using old configuration")
+				}
+			}
+		}
+	}()
 
 	http.Handle("/metrics", promhttp.Handler())
-	handler := queryHandler{c}
 	http.HandleFunc("/query", handler.handler)
 	log.Infof("Listening on %s", *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
