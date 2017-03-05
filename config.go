@@ -62,7 +62,7 @@ func (c *Configuration) validate() error {
 		if query.SQL == "" {
 			return fmt.Errorf("missing SQL for query '%s'", name)
 		}
-		m := strings.TrimSpace(query.Metrics)
+		m := strings.TrimSpace(query.Metrics) + "\n"
 		if m == "" {
 			return fmt.Errorf("missing metrics for query '%s'", name)
 		}
