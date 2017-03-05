@@ -6,6 +6,8 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	//      _ "github.com/denisenkom/go-mssqldb"
@@ -155,6 +157,14 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	log.Debugf("query='%s' scrape_time=%f", queryName, duration)
 }
 
+func onConfLoaded(c *Configuration) {
+	for query := range c.Query {
+		log.Debugf("found query '%s'", query)
+		queryRequest.WithLabelValues(query)
+		queryDuration.WithLabelValues(query)
+	}
+}
+
 func main() {
 	flag.Parse()
 
@@ -170,15 +180,28 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
+	handler := queryHandler{c}
+	onConfLoaded(c)
 
-	for query := range c.Query {
-		log.Debugf("found query '%s'", query)
-		queryRequest.WithLabelValues(query)
-		queryDuration.WithLabelValues(query)
-	}
+	hup := make(chan os.Signal)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for {
+			select {
+			case <-hup:
+				if newConf, err := loadConfiguration(*configFile); err == nil {
+					handler.Configuration = newConf
+					onConfLoaded(newConf)
+					log.Info("configuration reloaded")
+				} else {
+					log.Errorf("reloading configuration err: %s", err)
+					log.Errorf("using old configuration")
+				}
+			}
+		}
+	}()
 
 	http.Handle("/metrics", promhttp.Handler())
-	handler := queryHandler{c}
 	http.HandleFunc("/query", handler.handler)
 	log.Infof("Listening on %s", *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
