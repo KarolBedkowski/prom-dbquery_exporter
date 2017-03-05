@@ -32,6 +32,13 @@ var (
 		},
 		[]string{"query"},
 	)
+	queryRequest = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "dbquery_request_total",
+			Help: "Total numbers requests given query",
+		},
+		[]string{"query"},
+	)
 	queryRequestErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "dbquery_request_errors_total",
@@ -57,6 +64,7 @@ type (
 
 func init() {
 	prometheus.MustRegister(queryDuration)
+	prometheus.MustRegister(queryRequest)
 	prometheus.MustRegister(queryRequestErrors)
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
@@ -114,6 +122,8 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queryRequest.WithLabelValues(queryName).Inc()
+
 	db := q.Configuration.Database[query.Database]
 
 	result := &Result{
@@ -165,6 +175,7 @@ func main() {
 	}
 
 	for query := range c.Query {
+		queryRequest.WithLabelValues(query)
 		queryDuration.WithLabelValues(query)
 	}
 
