@@ -1,0 +1,20 @@
+database:
+  testdb:
+    agent_url: http://localhost:5000/
+    driver: sqlite
+    connection:
+      database: rwr3.db
+query:
+  testq1:
+    database: testdb
+    sql: >
+       select s.name, count(t.id) as cnt from sports s left join trips t on s.id = t.sport_id group by s.name
+
+    metrics: |
+      {{- range .R }}
+      rwr3_trip_count{sport="{{ .name }}"} {{ .cnt }}
+      {{- end  }}
+      rwr3_trip_count_rows {{ .Count }}
+      rwr3_trip_query_secounds {{ .QueryDuration }}
+      rwr3_trip_last_query_unix {{ .QueryStartTime }}
+
