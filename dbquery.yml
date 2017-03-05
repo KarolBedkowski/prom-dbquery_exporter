@@ -1,6 +1,5 @@
 database:
   testdb:
-    agent_url: http://localhost:5000/
     driver: sqlite
     connection:
       database: rwr3.db

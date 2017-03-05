@@ -2,8 +2,6 @@
 
 The DBQuery exporter allows get metrics from sql databases by user-defined sql-s.
 
-For now - uses sql-agent (https://godoc.org/github.com/chop-dbhi/sql-agent) for accessing databases.
-
 Metrics templates uses golang text/template format.
 
 
@@ -14,6 +12,7 @@ Metrics templates uses golang text/template format.
 * github.com/prometheus/client_golang/
 * github.com/prometheus/common
 * gopkg.in/yaml.v2
+* github.com/chop-dbhi/sql-agent
 
 
 ### Local Build
@@ -22,8 +21,7 @@ Metrics templates uses golang text/template format.
     ./prom-dbquery_exporter
 
 Configure `dbquery.yml` file, and visit`http://localhost:9122/query?query=<query_name>`
-
-Required working sql-agent.
+See sql-agent for connection configuration.
 
 #### Prometheus config
 
