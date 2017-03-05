@@ -25,6 +25,31 @@ Configure `dbquery.yml` file, and visit`http://localhost:9122/query?query=<query
 
 Required working sql-agent.
 
+#### Prometheus config
+
+    scrape_configs:
+
+        [...]
+
+     - job_name: dbquery_scrape
+         static_configs:
+         - targets:
+             - testq1
+         metrics_path: /query
+         relabel_configs:
+         - source_labels: [__address__]
+             target_label: __param_query
+         - source_labels: [__param_query]
+             target_label: query
+         - target_label: __address__
+             replacement: 127.0.0.1:9122       # dbquery_exporter address
+
+     - job_name: dbquery
+         static_configs:
+         - targets:
+                - 127.0.0.1:9122       # dbquery_exporter address
+
+
 ## License
 Copyright (c) 2017, Karol Będkowski.
 
