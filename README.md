@@ -33,6 +33,8 @@ See sql-agent for connection configuration.
          static_configs:
          - targets:
              - testq1
+         params:
+           database: [testdb]
          metrics_path: /query
          relabel_configs:
          - source_labels: [__address__]
@@ -41,6 +43,21 @@ See sql-agent for connection configuration.
              target_label: query
          - target_label: __address__
              replacement: 127.0.0.1:9122       # dbquery_exporter address
+
+     - job_name: dbquery_scrape_db
+       static_configs:
+         - targets:
+             - testdbpgsql
+       metrics_path: /query
+       params:
+         query: [pg_stats_activity_state, pg_stat_database]  # launch many queries
+       relabel_configs:
+         - source_labels: [__address__]
+           target_label: __param_database
+         - source_labels: [__param_database]
+           target_label: database
+         - target_label: __address__
+           replacement: 127.0.0.1:9122
 
      - job_name: dbquery
          static_configs:

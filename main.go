@@ -107,54 +107,71 @@ type queryHandler struct {
 }
 
 func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
-	queryName := r.URL.Query().Get("query")
-	query, ok := (q.Configuration.Query)[queryName]
-	if !ok {
-		log.Errorf("query='%s' unknown query", queryName)
-		http.Error(w, fmt.Sprintf("Unknown query '%s'", queryName), 400)
-		queryRequestErrors.Inc()
-		return
-	}
 
-	queryRequest.WithLabelValues(queryName).Inc()
+	log.Debugf("query: %s", r.URL)
 
-	db := q.Configuration.Database[query.Database]
+	queryNames := r.URL.Query()["query"]
+	dbNames := r.URL.Query()["database"]
 
-	log.Debugf("query='%s' start", queryName)
-
-	result := &Result{
-		Query:    queryName,
-		Database: query.Database,
-	}
-	var err error
-	start := time.Now()
-	result.R, err = sendQuery(query, db)
-	result.QueryStartTime = start.Unix()
-	result.QueryDuration = time.Since(start).Seconds()
-	result.Count = len(result.R)
-
-	log.Debugf("query='%s' query_time=%f rows=%d",
-		queryName, result.QueryDuration, result.Count)
-
-	if err != nil {
-		log.Errorf("query='%s' execute error: %s", queryName, err)
-		http.Error(w, fmt.Sprintf("Query error: '%s'", err), 400)
-		queryRequestErrors.Inc()
-		return
-	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	err = query.MetricTpl.Execute(w, result)
-	if err != nil {
-		log.Errorf("query='%s' execute template error: %v", queryName, err)
-		http.Error(w, fmt.Sprintf("Internal error: '%s'", err), 400)
-		queryRequestErrors.Inc()
-		return
-	}
+	anySuccess := false
 
-	duration := float64(time.Since(start).Seconds())
-	queryDuration.WithLabelValues(queryName).Observe(duration)
-	log.Debugf("query='%s' scrape_time=%f", queryName, duration)
+	for _, queryName := range queryNames {
+		query, ok := (q.Configuration.Query)[queryName]
+		if !ok {
+			log.Errorf("query='%s' unknown query", queryName)
+			queryRequestErrors.Inc()
+			continue
+		}
+		queryRequest.WithLabelValues(queryName).Inc()
+
+		for _, dbName := range dbNames {
+			db, ok := q.Configuration.Database[dbName]
+			if !ok {
+				log.Errorf("query='%s' unknown database='%s'", queryName, dbName)
+				queryRequestErrors.Inc()
+				continue
+			}
+
+			result := &Result{
+				Query:    queryName,
+				Database: dbName,
+			}
+
+			var err error
+			start := time.Now()
+			result.R, err = sendQuery(query, db)
+			result.QueryStartTime = start.Unix()
+			result.QueryDuration = time.Since(start).Seconds()
+			result.Count = len(result.R)
+
+			log.Debugf("query='%s' query_time=%f rows=%d",
+				queryName, result.QueryDuration, result.Count)
+
+			if err != nil {
+				log.Errorf("query='%s' db='%s' execute error: %s", queryName, dbName, err)
+				queryRequestErrors.Inc()
+				continue
+			}
+
+			err = query.MetricTpl.Execute(w, result)
+			if err != nil {
+				log.Errorf("query='%s' db='%s' execute template error: %v", queryName, dbName, err)
+				queryRequestErrors.Inc()
+				continue
+			}
+
+			anySuccess = true
+
+			duration := float64(time.Since(start).Seconds())
+			queryDuration.WithLabelValues(queryName).Observe(duration)
+			log.Debugf("query='%s' db='%s' scrape_time=%f", queryName, dbName, duration)
+		}
+	}
+	if !anySuccess {
+		http.Error(w, "error", 400)
+	}
 }
 
 func onConfLoaded(c *Configuration) {

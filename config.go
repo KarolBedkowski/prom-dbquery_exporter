@@ -18,8 +18,6 @@ import (
 type (
 	// Query is definition of single query
 	Query struct {
-		// database name
-		Database string
 		// SQL script to launch
 		SQL string
 		// Template to generate from query result
@@ -70,11 +68,6 @@ func (c *Configuration) validate() error {
 				name, err)
 		}
 		query.MetricTpl = tmpl
-		// check mapping
-		if _, ok := c.Database[query.Database]; !ok {
-			return fmt.Errorf("missing database '%s' for query '%s'",
-				query.Database, name)
-		}
 	}
 	return nil
 }
