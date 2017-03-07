@@ -1,16 +1,24 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
-	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
+	//      _ "github.com/denisenkom/go-mssqldb"
+	//      _ "github.com/go-sql-driver/mysql"
+	_ "github.com/lib/pq"
+	//      _ "github.com/mattn/go-oci8"
+	_ "github.com/mattn/go-sqlite3"
+
+	"github.com/chop-dbhi/sql-agent"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/log"
@@ -27,17 +35,17 @@ var (
 	// Metrics about the exporter itself.
 	queryDuration = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
-			Name: "dbquery_collection_duration_seconds",
-			Help: "Duration of collections by the DBQuery exporter",
+			Name: "dbquery_query_duration_seconds",
+			Help: "Duration of query by the DBQuery exporter",
 		},
-		[]string{"query"},
+		[]string{"query", "database"},
 	)
 	queryRequest = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "dbquery_request_total",
 			Help: "Total numbers requests given query",
 		},
-		[]string{"query"},
+		[]string{"query", "database"},
 	)
 	queryRequestErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
@@ -48,17 +56,28 @@ var (
 )
 
 type (
-	record map[string]interface{}
-
 	// Result keep query result and some metadata parsed to template
 	Result struct {
 		// Records (rows)
-		R              []record
+		R              []sqlagent.Record
 		QueryStartTime int64
 		QueryDuration  float64
 		Count          int
-		Query          string
-		Database       string
+		// Query name
+		Query string
+		// Database name
+		Database string
+	}
+
+	cacheItem struct {
+		expireTS time.Time
+		content  []byte
+	}
+
+	queryResult struct {
+		records  []sqlagent.Record
+		duration float64
+		start    time.Time
 	}
 )
 
@@ -69,99 +88,147 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func sendQuery(q *Query, d *Database) ([]record, error) {
-	payload, err := json.Marshal(map[string]interface{}{
-		"driver":     d.Driver,
-		"connection": d.Connection,
-		"sql":        q.SQL,
-		"params":     q.Params,
-	})
+func queryDatabase(q *Query, d *Database) (*queryResult, error) {
+	start := time.Now()
+
+	if _, ok := sqlagent.Drivers[d.Driver]; !ok {
+		return nil, fmt.Errorf("unsupported driver '%s'", d.Driver)
+	}
+
+	db, err := sqlagent.PersistentConnect(d.Driver, d.Connection)
+	if err != nil {
+		return nil, fmt.Errorf("error connecting to db: %s", err)
+	}
+
+	iter, err := sqlagent.Execute(db, q.SQL, q.Params)
+	if err != nil {
+		return nil, fmt.Errorf("error executing query: %s", err)
+	}
+
+	defer iter.Close()
+
+	result := &queryResult{
+		start: start,
+	}
+
+	for iter.Next() {
+		rec := make(sqlagent.Record)
+		if err := iter.Scan(rec); err != nil {
+			return nil, fmt.Errorf("error scanning record: %s", err)
+		}
+		result.records = append(result.records, rec)
+	}
+
+	result.duration = float64(time.Since(start).Seconds())
+
+	return result, nil
+}
+
+func formatResult(db *Database, query *Query, dbName, queryName string, result *queryResult) ([]byte, error) {
+	data := &Result{
+		Query:          queryName,
+		Database:       dbName,
+		R:              result.records,
+		QueryStartTime: result.start.Unix(),
+		QueryDuration:  result.duration,
+		Count:          len(result.records),
+	}
+
+	log.Debugf("query='%s' db='%s' query_time=%f rows=%d",
+		queryName, dbName, data.QueryDuration, data.Count)
+
+	var output bytes.Buffer
+	bw := bufio.NewWriter(&output)
+
+	err := query.MetricTpl.Execute(bw, data)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("POST", d.AgentURL, bytes.NewBuffer(payload))
-	if err != nil {
-		return nil, err
-	}
+	bw.Flush()
 
-	req.Header.Set("content-type", "application/json")
-	req.Header.Set("accept", "application/json")
-
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if err == nil && resp.StatusCode != 200 {
-		b, _ := ioutil.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("query error (%s) %s", resp.Status, string(b))
-	}
-
-	var records []record
-
-	defer resp.Body.Close()
-	if err = json.NewDecoder(resp.Body).Decode(&records); err != nil {
-		return nil, err
-	}
-
-	return records, nil
+	return output.Bytes(), nil
 }
 
 type queryHandler struct {
 	Configuration *Configuration
+	cache         map[string]*cacheItem
 }
 
 func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
-	queryName := r.URL.Query().Get("query")
-	query, ok := (q.Configuration.Query)[queryName]
-	if !ok {
-		log.Errorf("query='%s' unknown query", queryName)
-		http.Error(w, fmt.Sprintf("Unknown query '%s'", queryName), 400)
-		queryRequestErrors.Inc()
-		return
-	}
 
-	queryRequest.WithLabelValues(queryName).Inc()
+	log.Debugf("query: %s", r.URL)
 
-	db := q.Configuration.Database[query.Database]
+	queryNames := r.URL.Query()["query"]
+	dbNames := r.URL.Query()["database"]
 
-	log.Debugf("query='%s' start", queryName)
-
-	result := &Result{
-		Query:    queryName,
-		Database: query.Database,
-	}
-	var err error
-	start := time.Now()
-	result.R, err = sendQuery(query, db)
-	result.QueryStartTime = start.Unix()
-	result.QueryDuration = time.Since(start).Seconds()
-	result.Count = len(result.R)
-
-	log.Debugf("query='%s' query_time=%f rows=%d",
-		queryName, result.QueryDuration, result.Count)
-
-	if err != nil {
-		log.Errorf("query='%s' execute error: %s", queryName, err)
-		http.Error(w, fmt.Sprintf("Query error: '%s'", err), 400)
-		queryRequestErrors.Inc()
-		return
-	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	err = query.MetricTpl.Execute(w, result)
-	if err != nil {
-		log.Errorf("query='%s' execute template error: %v", queryName, err)
-		http.Error(w, fmt.Sprintf("Internal error: '%s'", err), 400)
-		queryRequestErrors.Inc()
-		return
-	}
+	anySuccess := false
 
-	duration := float64(time.Since(start).Seconds())
-	queryDuration.WithLabelValues(queryName).Observe(duration)
-	log.Debugf("query='%s' scrape_time=%f", queryName, duration)
+	for _, queryName := range queryNames {
+		query, ok := (q.Configuration.Query)[queryName]
+		if !ok {
+			log.Errorf("query='%s' unknown query", queryName)
+			queryRequestErrors.Inc()
+			continue
+		}
+
+		for _, dbName := range dbNames {
+			db, ok := q.Configuration.Database[dbName]
+			if !ok {
+				log.Errorf("query='%s' unknown database='%s'", queryName, dbName)
+				queryRequestErrors.Inc()
+				continue
+			}
+
+			queryRequest.WithLabelValues(queryName, dbName).Inc()
+
+			// try to get item from cache
+			if query.CachingTime > 0 {
+				ci, ok := q.cache[queryName+"\t"+dbName]
+				if ok && ci.expireTS.After(time.Now()) {
+					log.Debugf("query='%s' db='%s' cache hit", queryName, dbName)
+					w.Write(ci.content)
+					anySuccess = true
+					continue
+				}
+			}
+
+			// get rows
+			result, err := queryDatabase(query, db)
+			if err != nil {
+				log.Errorf("query='%s' db='%s' query error: %s", queryName, dbName, err)
+				queryRequestErrors.Inc()
+				continue
+			}
+
+			// format metrics
+			output, err := formatResult(db, query, dbName, queryName, result)
+			if err != nil {
+				log.Errorf("query='%s' db='%s' format result error: %s", queryName, dbName, err)
+				queryRequestErrors.Inc()
+				continue
+			}
+
+			w.Write(output)
+
+			queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
+
+			if query.CachingTime > 0 {
+				// update cache
+				q.cache[queryName+"\t"+dbName] = &cacheItem{
+					expireTS: time.Now().Add(time.Duration(query.CachingTime) * time.Second),
+					content:  output,
+				}
+			}
+
+			anySuccess = true
+		}
+	}
+	if !anySuccess {
+		http.Error(w, "error", 400)
+	}
 }
 
 func main() {
@@ -179,15 +246,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
+	handler := queryHandler{c, make(map[string]*cacheItem)}
 
-	for query := range c.Query {
-		log.Debugf("found query '%s'", query)
-		queryRequest.WithLabelValues(query)
-		queryDuration.WithLabelValues(query)
-	}
+	hup := make(chan os.Signal)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for {
+			select {
+			case <-hup:
+				if newConf, err := loadConfiguration(*configFile); err == nil {
+					handler.Configuration = newConf
+					log.Info("configuration reloaded")
+				} else {
+					log.Errorf("reloading configuration err: %s", err)
+					log.Errorf("using old configuration")
+				}
+			}
+		}
+	}()
 
 	http.Handle("/metrics", promhttp.Handler())
-	handler := queryHandler{c}
 	http.HandleFunc("/query", handler.handler)
 	log.Infof("Listening on %s", *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
