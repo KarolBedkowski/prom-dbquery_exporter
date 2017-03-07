@@ -35,17 +35,17 @@ var (
 	// Metrics about the exporter itself.
 	queryDuration = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
-			Name: "dbquery_collection_duration_seconds",
-			Help: "Duration of collections by the DBQuery exporter",
+			Name: "dbquery_query_duration_seconds",
+			Help: "Duration of query by the DBQuery exporter",
 		},
-		[]string{"query"},
+		[]string{"query", "database"},
 	)
 	queryRequest = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "dbquery_request_total",
 			Help: "Total numbers requests given query",
 		},
-		[]string{"query"},
+		[]string{"query", "database"},
 	)
 	queryRequestErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
@@ -173,7 +173,6 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 			queryRequestErrors.Inc()
 			continue
 		}
-		queryRequest.WithLabelValues(queryName).Inc()
 
 		for _, dbName := range dbNames {
 			db, ok := q.Configuration.Database[dbName]
@@ -182,6 +181,8 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 				queryRequestErrors.Inc()
 				continue
 			}
+
+			queryRequest.WithLabelValues(queryName, dbName).Inc()
 
 			// try to get item from cache
 			if query.CachingTime > 0 {
@@ -212,7 +213,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
 			w.Write(output)
 
-			queryDuration.WithLabelValues(queryName).Observe(result.duration)
+			queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
 
 			if query.CachingTime > 0 {
 				// update cache
@@ -227,14 +228,6 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	if !anySuccess {
 		http.Error(w, "error", 400)
-	}
-}
-
-func onConfLoaded(c *Configuration) {
-	for query := range c.Query {
-		log.Debugf("found query '%s'", query)
-		queryRequest.WithLabelValues(query)
-		queryDuration.WithLabelValues(query)
 	}
 }
 
@@ -254,7 +247,6 @@ func main() {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
 	handler := queryHandler{c, make(map[string]*cacheItem)}
-	onConfLoaded(c)
 
 	hup := make(chan os.Signal)
 	signal.Notify(hup, syscall.SIGHUP)
@@ -264,7 +256,6 @@ func main() {
 			case <-hup:
 				if newConf, err := loadConfiguration(*configFile); err == nil {
 					handler.Configuration = newConf
-					onConfLoaded(newConf)
 					log.Info("configuration reloaded")
 				} else {
 					log.Errorf("reloading configuration err: %s", err)
