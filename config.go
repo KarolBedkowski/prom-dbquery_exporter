@@ -24,6 +24,8 @@ type (
 		Metrics string
 		// Query params
 		Params map[string]interface{}
+		// Result caching time
+		CachingTime int `yaml:"caching_time"`
 		// Parsed template  (internal)
 		MetricTpl *template.Template `yaml:"-"`
 	}

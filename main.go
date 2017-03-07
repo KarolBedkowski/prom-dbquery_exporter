@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"net/http"
@@ -33,17 +35,17 @@ var (
 	// Metrics about the exporter itself.
 	queryDuration = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
-			Name: "dbquery_collection_duration_seconds",
-			Help: "Duration of collections by the DBQuery exporter",
+			Name: "dbquery_query_duration_seconds",
+			Help: "Duration of query by the DBQuery exporter",
 		},
-		[]string{"query"},
+		[]string{"query", "database"},
 	)
 	queryRequest = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "dbquery_request_total",
 			Help: "Total numbers requests given query",
 		},
-		[]string{"query"},
+		[]string{"query", "database"},
 	)
 	queryRequestErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
@@ -61,8 +63,21 @@ type (
 		QueryStartTime int64
 		QueryDuration  float64
 		Count          int
-		Query          string
-		Database       string
+		// Query name
+		Query string
+		// Database name
+		Database string
+	}
+
+	cacheItem struct {
+		expireTS time.Time
+		content  []byte
+	}
+
+	queryResult struct {
+		records  []sqlagent.Record
+		duration float64
+		start    time.Time
 	}
 )
 
@@ -73,7 +88,9 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func sendQuery(q *Query, d *Database) ([]sqlagent.Record, error) {
+func queryDatabase(q *Query, d *Database) (*queryResult, error) {
+	start := time.Now()
+
 	if _, ok := sqlagent.Drivers[d.Driver]; !ok {
 		return nil, fmt.Errorf("unsupported driver '%s'", d.Driver)
 	}
@@ -90,20 +107,52 @@ func sendQuery(q *Query, d *Database) ([]sqlagent.Record, error) {
 
 	defer iter.Close()
 
-	var records []sqlagent.Record
+	result := &queryResult{
+		start: start,
+	}
+
 	for iter.Next() {
 		rec := make(sqlagent.Record)
 		if err := iter.Scan(rec); err != nil {
 			return nil, fmt.Errorf("error scanning record: %s", err)
 		}
-		records = append(records, rec)
+		result.records = append(result.records, rec)
 	}
 
-	return records, nil
+	result.duration = float64(time.Since(start).Seconds())
+
+	return result, nil
+}
+
+func formatResult(db *Database, query *Query, dbName, queryName string, result *queryResult) ([]byte, error) {
+	data := &Result{
+		Query:          queryName,
+		Database:       dbName,
+		R:              result.records,
+		QueryStartTime: result.start.Unix(),
+		QueryDuration:  result.duration,
+		Count:          len(result.records),
+	}
+
+	log.Debugf("query='%s' db='%s' query_time=%f rows=%d",
+		queryName, dbName, data.QueryDuration, data.Count)
+
+	var output bytes.Buffer
+	bw := bufio.NewWriter(&output)
+
+	err := query.MetricTpl.Execute(bw, data)
+	if err != nil {
+		return nil, err
+	}
+
+	bw.Flush()
+
+	return output.Bytes(), nil
 }
 
 type queryHandler struct {
 	Configuration *Configuration
+	cache         map[string]*cacheItem
 }
 
 func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
@@ -124,7 +173,6 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 			queryRequestErrors.Inc()
 			continue
 		}
-		queryRequest.WithLabelValues(queryName).Inc()
 
 		for _, dbName := range dbNames {
 			db, ok := q.Configuration.Database[dbName]
@@ -134,51 +182,52 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			result := &Result{
-				Query:    queryName,
-				Database: dbName,
+			queryRequest.WithLabelValues(queryName, dbName).Inc()
+
+			// try to get item from cache
+			if query.CachingTime > 0 {
+				ci, ok := q.cache[queryName+"\t"+dbName]
+				if ok && ci.expireTS.After(time.Now()) {
+					log.Debugf("query='%s' db='%s' cache hit", queryName, dbName)
+					w.Write(ci.content)
+					anySuccess = true
+					continue
+				}
 			}
 
-			var err error
-			start := time.Now()
-			result.R, err = sendQuery(query, db)
-			result.QueryStartTime = start.Unix()
-			result.QueryDuration = time.Since(start).Seconds()
-			result.Count = len(result.R)
-
-			log.Debugf("query='%s' query_time=%f rows=%d",
-				queryName, result.QueryDuration, result.Count)
-
+			// get rows
+			result, err := queryDatabase(query, db)
 			if err != nil {
-				log.Errorf("query='%s' db='%s' execute error: %s", queryName, dbName, err)
+				log.Errorf("query='%s' db='%s' query error: %s", queryName, dbName, err)
 				queryRequestErrors.Inc()
 				continue
 			}
 
-			err = query.MetricTpl.Execute(w, result)
+			// format metrics
+			output, err := formatResult(db, query, dbName, queryName, result)
 			if err != nil {
-				log.Errorf("query='%s' db='%s' execute template error: %v", queryName, dbName, err)
+				log.Errorf("query='%s' db='%s' format result error: %s", queryName, dbName, err)
 				queryRequestErrors.Inc()
 				continue
+			}
+
+			w.Write(output)
+
+			queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
+
+			if query.CachingTime > 0 {
+				// update cache
+				q.cache[queryName+"\t"+dbName] = &cacheItem{
+					expireTS: time.Now().Add(time.Duration(query.CachingTime) * time.Second),
+					content:  output,
+				}
 			}
 
 			anySuccess = true
-
-			duration := float64(time.Since(start).Seconds())
-			queryDuration.WithLabelValues(queryName).Observe(duration)
-			log.Debugf("query='%s' db='%s' scrape_time=%f", queryName, dbName, duration)
 		}
 	}
 	if !anySuccess {
 		http.Error(w, "error", 400)
-	}
-}
-
-func onConfLoaded(c *Configuration) {
-	for query := range c.Query {
-		log.Debugf("found query '%s'", query)
-		queryRequest.WithLabelValues(query)
-		queryDuration.WithLabelValues(query)
 	}
 }
 
@@ -197,8 +246,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
-	handler := queryHandler{c}
-	onConfLoaded(c)
+	handler := queryHandler{c, make(map[string]*cacheItem)}
 
 	hup := make(chan os.Signal)
 	signal.Notify(hup, syscall.SIGHUP)
@@ -208,7 +256,6 @@ func main() {
 			case <-hup:
 				if newConf, err := loadConfiguration(*configFile); err == nil {
 					handler.Configuration = newConf
-					onConfLoaded(newConf)
 					log.Info("configuration reloaded")
 				} else {
 					log.Errorf("reloading configuration err: %s", err)
