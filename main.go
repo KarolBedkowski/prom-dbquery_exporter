@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bufio"
+	"bytes"
 	"flag"
 	"fmt"
 	"net/http"
@@ -64,6 +66,11 @@ type (
 		Query          string
 		Database       string
 	}
+
+	cacheItem struct {
+		expireTS time.Time
+		content  []byte
+	}
 )
 
 func init() {
@@ -104,6 +111,7 @@ func sendQuery(q *Query, d *Database) ([]sqlagent.Record, error) {
 
 type queryHandler struct {
 	Configuration *Configuration
+	cache         map[string]*cacheItem
 }
 
 func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +142,17 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
+			// try to get item from cache
+			if query.CachingTime > 0 {
+				ci, ok := q.cache[queryName+"\t"+dbName]
+				if ok && ci.expireTS.After(time.Now()) {
+					log.Debugf("query='%s' db='%s' cache hit", query, dbName)
+					w.Write(ci.content)
+					anySuccess = true
+					continue
+				}
+			}
+
 			result := &Result{
 				Query:    queryName,
 				Database: dbName,
@@ -155,11 +174,25 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			err = query.MetricTpl.Execute(w, result)
+			var buf bytes.Buffer
+			bw := bufio.NewWriter(&buf)
+
+			err = query.MetricTpl.Execute(bw, result)
 			if err != nil {
 				log.Errorf("query='%s' db='%s' execute template error: %v", queryName, dbName, err)
 				queryRequestErrors.Inc()
 				continue
+			}
+
+			bw.Flush()
+			w.Write(buf.Bytes())
+
+			if query.CachingTime > 0 {
+				// update cache
+				q.cache[queryName+"\t"+dbName] = &cacheItem{
+					expireTS: time.Now().Add(time.Duration(query.CachingTime) * time.Second),
+					content:  buf.Bytes(),
+				}
 			}
 
 			anySuccess = true
@@ -197,7 +230,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
-	handler := queryHandler{c}
+	handler := queryHandler{c, make(map[string]*cacheItem)}
 	onConfLoaded(c)
 
 	hup := make(chan os.Signal)

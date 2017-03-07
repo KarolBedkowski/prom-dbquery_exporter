@@ -15,6 +15,7 @@ query:
   testq1:
     sql: >
        select s.name, count(t.id) as cnt from sports s left join trips t on s.id = t.sport_id group by s.name
+    caching_time: 20
 
     metrics: |
       {{- range .R }}
