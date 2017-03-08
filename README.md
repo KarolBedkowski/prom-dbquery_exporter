@@ -12,7 +12,7 @@ Metrics templates uses golang text/template format.
 * github.com/prometheus/client_golang/
 * github.com/prometheus/common
 * gopkg.in/yaml.v2
-* github.com/chop-dbhi/sql-agent
+* github.com/jmoiron/sqlx
 
 
 ### Local Build
@@ -80,4 +80,3 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
-

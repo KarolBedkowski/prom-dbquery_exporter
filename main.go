@@ -18,7 +18,6 @@ import (
 	//      _ "github.com/mattn/go-oci8"
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/chop-dbhi/sql-agent"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/log"
@@ -59,7 +58,7 @@ type (
 	// Result keep query result and some metadata parsed to template
 	Result struct {
 		// Records (rows)
-		R              []sqlagent.Record
+		R              []Record
 		QueryStartTime int64
 		QueryDuration  float64
 		Count          int
@@ -75,7 +74,7 @@ type (
 	}
 
 	queryResult struct {
-		records  []sqlagent.Record
+		records  []Record
 		duration float64
 		start    time.Time
 	}
@@ -91,32 +90,20 @@ func init() {
 func queryDatabase(q *Query, d *Database) (*queryResult, error) {
 	start := time.Now()
 
-	if _, ok := sqlagent.Drivers[d.Driver]; !ok {
+	loader, err := GetLoader(d)
+	if err != nil {
 		return nil, fmt.Errorf("unsupported driver '%s'", d.Driver)
 	}
 
-	db, err := sqlagent.PersistentConnect(d.Driver, d.Connection)
+	rows, err := loader.Query(q)
 	if err != nil {
-		return nil, fmt.Errorf("error connecting to db: %s", err)
-	}
+		return nil, fmt.Errorf("execute query error %s", err)
 
-	iter, err := sqlagent.Execute(db, q.SQL, q.Params)
-	if err != nil {
-		return nil, fmt.Errorf("error executing query: %s", err)
 	}
-
-	defer iter.Close()
 
 	result := &queryResult{
-		start: start,
-	}
-
-	for iter.Next() {
-		rec := make(sqlagent.Record)
-		if err := iter.Scan(rec); err != nil {
-			return nil, fmt.Errorf("error scanning record: %s", err)
-		}
-		result.records = append(result.records, rec)
+		start:   start,
+		records: rows,
 	}
 
 	result.duration = float64(time.Since(start).Seconds())
