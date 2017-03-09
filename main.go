@@ -202,7 +202,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 				queryRequestErrors.Inc()
 				continue
 			}
-
+			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
 			w.Write(output)
 
 			queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
