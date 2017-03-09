@@ -34,12 +34,14 @@ type (
 func (g *genericLoader) Query(q *Query) ([]Record, error) {
 	var err error
 	if g.conn == nil {
-		log.Debugf("genericQuery connect to '%s' '%s'", g.driver, g.connStr)
+		log.With("driver", g.driver).Debugf("genericQuery connect to '%s'", g.connStr)
 		g.conn, err = sqlx.Connect(g.driver, g.connStr)
 		if err != nil {
 			return nil, err
 		}
 	}
+
+	log.With("driver", g.driver).Debugf("genericQuery execute '%v', '%v'", q.SQL, q.Params)
 
 	var rows *sqlx.Rows
 
@@ -70,11 +72,16 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 
 func (g *genericLoader) Close() {
 	if g.conn != nil {
-		log.Debugf("genericQuery disconnect '%s' '%s'", g.driver, g.connStr)
+		log.With("driver", g.driver).Debugf("genericQuery disconnect from %s'", g.connStr)
 		g.conn.Close()
 		g.conn = nil
 	}
 
+}
+
+func (g *genericLoader) String() string {
+	return fmt.Sprintf("genericLoader driver='%s' connstr='%s' connected=%v",
+		g.driver, g.connStr, g.conn != nil)
 }
 
 func newPostgresLoader(d *Database) (Loader, error) {
@@ -85,10 +92,12 @@ func newPostgresLoader(d *Database) (Loader, error) {
 			p = append(p, k+"="+vstr)
 		}
 	}
-	return &genericLoader{
+	l := &genericLoader{
 		connStr: strings.Join(p, " "),
 		driver:  "postgres",
-	}, nil
+	}
+	log.Debugf("created loader: %s", l.String())
+	return l, nil
 }
 
 func newSqliteLoader(d *Database) (Loader, error) {
@@ -111,6 +120,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	if len(p) > 0 {
 		l.connStr += "?" + strings.Join(p, "&")
 	}
+	log.Debugf("created loader: %s", l.String())
 	return l, nil
 }
 
