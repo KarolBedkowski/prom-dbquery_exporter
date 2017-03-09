@@ -129,7 +129,9 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 
 	bw.Flush()
 
-	return output.Bytes(), nil
+	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
+
+	return b, nil
 }
 
 type queryHandler struct {
