@@ -18,30 +18,35 @@ type (
 
 	// Loader load data from database
 	Loader interface {
+		// Query execute sql and returns records or error. Open connection when necessary.
 		Query(q *Query) ([]Record, error)
+		// Close db connection.
+		Close()
 	}
 
 	genericLoader struct {
 		connStr string
 		driver  string
+		conn    *sqlx.DB
 	}
 )
 
 func (g *genericLoader) Query(q *Query) ([]Record, error) {
-	log.Debugf("genericQuery '%s' '%s'", g.driver, g.connStr)
-	con, err := sqlx.Connect(g.driver, g.connStr)
-	if err != nil {
-		return nil, err
+	var err error
+	if g.conn == nil {
+		log.Debugf("genericQuery connect to '%s' '%s'", g.driver, g.connStr)
+		g.conn, err = sqlx.Connect(g.driver, g.connStr)
+		if err != nil {
+			return nil, err
+		}
 	}
-
-	defer con.Close()
 
 	var rows *sqlx.Rows
 
 	if q.Params != nil && len(q.Params) > 0 {
-		rows, err = con.NamedQuery(q.SQL, q.Params)
+		rows, err = g.conn.NamedQuery(q.SQL, q.Params)
 	} else {
-		rows, err = con.Queryx(q.SQL)
+		rows, err = g.conn.Queryx(q.SQL)
 	}
 
 	var records []Record
@@ -61,6 +66,15 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 	}
 
 	return records, nil
+}
+
+func (g *genericLoader) Close() {
+	if g.conn != nil {
+		log.Debugf("genericQuery disconnect '%s' '%s'", g.driver, g.connStr)
+		g.conn.Close()
+		g.conn = nil
+	}
+
 }
 
 func newPostgresLoader(d *Database) (Loader, error) {
@@ -93,7 +107,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	if dbname == "" {
 		return nil, fmt.Errorf("missing database")
 	}
-	l := &genericLoader{dbname, "sqlite3"}
+	l := &genericLoader{connStr: dbname, driver: "sqlite3"}
 	if len(p) > 0 {
 		l.connStr += "?" + strings.Join(p, "&")
 	}

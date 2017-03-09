@@ -87,15 +87,10 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func queryDatabase(q *Query, d *Database) (*queryResult, error) {
+func queryDatabase(q *Query, l Loader) (*queryResult, error) {
 	start := time.Now()
 
-	loader, err := GetLoader(d)
-	if err != nil {
-		return nil, fmt.Errorf("unsupported driver '%s'", d.Driver)
-	}
-
-	rows, err := loader.Query(q)
+	rows, err := l.Query(q)
 	if err != nil {
 		return nil, fmt.Errorf("execute query error %s", err)
 
@@ -152,19 +147,27 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	anySuccess := false
-
-	for _, queryName := range queryNames {
-		query, ok := (q.Configuration.Query)[queryName]
+	for _, dbName := range dbNames {
+		db, ok := q.Configuration.Database[dbName]
 		if !ok {
-			log.Errorf("query='%s' unknown query", queryName)
+			log.Errorf("unknown database='%s'", dbName)
 			queryRequestErrors.Inc()
 			continue
 		}
 
-		for _, dbName := range dbNames {
-			db, ok := q.Configuration.Database[dbName]
+		loader, err := GetLoader(db)
+		if err != nil {
+			log.Errorf("get loader error for db='%s': %s", dbName, err)
+			queryRequestErrors.Inc()
+			continue
+		}
+
+		defer loader.Close()
+
+		for _, queryName := range queryNames {
+			query, ok := (q.Configuration.Query)[queryName]
 			if !ok {
-				log.Errorf("query='%s' unknown database='%s'", queryName, dbName)
+				log.Errorf("query='%s' unknown query", queryName)
 				queryRequestErrors.Inc()
 				continue
 			}
@@ -183,7 +186,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// get rows
-			result, err := queryDatabase(query, db)
+			result, err := queryDatabase(query, loader)
 			if err != nil {
 				log.Errorf("query='%s' db='%s' query error: %s", queryName, dbName, err)
 				queryRequestErrors.Inc()
