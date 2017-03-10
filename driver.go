@@ -124,6 +124,51 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	return l, nil
 }
 
+func newOracleLoader(d *Database) (Loader, error) {
+	p := make([]string, 0, len(d.Connection))
+	var dbname, user, pass, host, port string
+	for k, v := range d.Connection {
+		vstr := fmt.Sprintf("%s", v)
+		if vstr == "" {
+			continue
+		}
+		switch k {
+		case "database":
+			dbname = vstr
+		case "host":
+			host = vstr
+		case "port":
+			port = vstr
+		case "user":
+			user = vstr
+		case "password":
+			pass = vstr
+		default:
+			p = append(p, k+"="+vstr)
+		}
+	}
+	if dbname == "" {
+		return nil, fmt.Errorf("missing database")
+	}
+	var connstr string
+	if user != "" {
+		if pass != "" {
+			connstr = user + "/" + pass + "@"
+		} else {
+			connstr = user + "@"
+		}
+	}
+	connstr += host
+	if port != "" {
+		connstr += ":" + port
+	}
+	connstr += "/" + dbname
+	if len(p) > 0 {
+		connstr += "?" + strings.Join(p, "&")
+	}
+	l := &genericLoader{connStr: connstr, driver: "ocl8"}
+	log.Debugf("created loader: %s", l.String())
+	return l, nil
 }
 
 func GetLoader(d *Database) (Loader, error) {
@@ -134,6 +179,9 @@ func GetLoader(d *Database) (Loader, error) {
 	case "sqlite3":
 	case "sqlite":
 		return newSqliteLoader(d)
+	case "oracle":
+	case "oci8":
+		return newOracleLoader(d)
 	}
 	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
 }
