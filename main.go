@@ -260,6 +260,7 @@ func main() {
 	}
 	handler := queryHandler{c, make(map[string]*cacheItem)}
 
+	// handle hup for reloading configuration
 	hup := make(chan os.Signal)
 	signal.Notify(hup, syscall.SIGHUP)
 	go func() {

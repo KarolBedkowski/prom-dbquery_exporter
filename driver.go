@@ -43,18 +43,23 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 		}
 	}
 
+	// connect to database
 	if g.conn == nil {
-		log.With("driver", g.driver).Debugf("genericQuery connect to '%s'", g.connStr)
+		log.With("driver", g.driver).
+			Debugf("genericQuery connect to '%s'", g.connStr)
+
 		g.conn, err = sqlx.Connect(g.driver, g.connStr)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	log.With("driver", g.driver).Debugf("genericQuery execute '%v', '%v'", q.SQL, q.Params)
+	log.With("driver", g.driver).
+		Debugf("genericQuery execute '%v', '%v'", q.SQL, q.Params)
 
 	var rows *sqlx.Rows
 
+	// query
 	if q.Params != nil && len(q.Params) > 0 {
 		rows, err = g.conn.NamedQuery(q.SQL, q.Params)
 	} else {
@@ -67,11 +72,14 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 
 	var records []Record
 
+	// load records
 	for rows.Next() {
 		rec := Record{}
 		if err := rows.MapScan(rec); err != nil {
 			return nil, err
 		}
+
+		// convert []byte to string
 		for k, v := range rec {
 			switch v.(type) {
 			case []byte:
@@ -84,13 +92,13 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 	return records, nil
 }
 
+// Close database connection
 func (g *genericLoader) Close() {
 	if g.conn != nil {
 		log.With("driver", g.driver).Debugf("genericQuery disconnect from %s'", g.connStr)
 		g.conn.Close()
 		g.conn = nil
 	}
-
 }
 
 func (g *genericLoader) String() string {
@@ -107,11 +115,14 @@ func newPostgresLoader(d *Database) (Loader, error) {
 		}
 		p = append(p, k+"="+vstr)
 	}
+
 	l := &genericLoader{
 		connStr: strings.Join(p, " "),
 		driver:  "postgres",
 	}
+
 	log.Debugf("created loader: %s", l.String())
+
 	return l, nil
 }
 
@@ -129,14 +140,17 @@ func newSqliteLoader(d *Database) (Loader, error) {
 			p = append(p, fmt.Sprintf("%s=%v", k, vstr))
 		}
 	}
+
 	if dbname == "" {
 		return nil, fmt.Errorf("missing database")
 	}
+
 	l := &genericLoader{connStr: dbname, driver: "sqlite3"}
 	if len(p) > 0 {
 		l.connStr += "?" + strings.Join(p, "&")
 	}
 	log.Debugf("created loader: %s", l.String())
+
 	return l, nil
 }
 
@@ -166,9 +180,11 @@ func newMysqlLoader(d *Database) (Loader, error) {
 			p = append(p, k+"="+vstr)
 		}
 	}
+
 	if dbname == "" {
 		return nil, fmt.Errorf("missing database")
 	}
+
 	var connstr string
 	if user != "" {
 		if pass != "" {
@@ -181,8 +197,10 @@ func newMysqlLoader(d *Database) (Loader, error) {
 	if len(p) > 0 {
 		connstr += "?" + strings.Join(p, "&")
 	}
+
 	l := &genericLoader{connStr: connstr, driver: "mysql"}
 	log.Debugf("created loader: %s", l.String())
+
 	return l, nil
 }
 
@@ -209,9 +227,11 @@ func newOracleLoader(d *Database) (Loader, error) {
 			p = append(p, k+"="+vstr)
 		}
 	}
+
 	if dbname == "" {
 		return nil, fmt.Errorf("missing database")
 	}
+
 	var connstr string
 	if user != "" {
 		if pass != "" {
@@ -228,11 +248,14 @@ func newOracleLoader(d *Database) (Loader, error) {
 	if len(p) > 0 {
 		connstr += "?" + strings.Join(p, "&")
 	}
+
 	l := &genericLoader{connStr: connstr, driver: "ocl8"}
 	log.Debugf("created loader: %s", l.String())
+
 	return l, nil
 }
 
+// GetLoader returns configured Loader for given configuration.
 func GetLoader(d *Database) (Loader, error) {
 	switch d.Driver {
 	case "postgresql":
