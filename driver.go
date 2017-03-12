@@ -124,6 +124,55 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	return l, nil
 }
 
+func newMysqlLoader(d *Database) (Loader, error) {
+	p := make([]string, 0, len(d.Connection))
+	host := "localhost"
+	port := "3306"
+	var dbname, user, pass string
+
+	for k, v := range d.Connection {
+		if v == nil {
+			continue
+		}
+		vstr := fmt.Sprintf("%v", v)
+		if vstr == "" {
+			continue
+		}
+		switch k {
+		case "database":
+			dbname = vstr
+		case "host":
+			host = vstr
+		case "port":
+			port = vstr
+		case "user":
+			user = vstr
+		case "password":
+			pass = vstr
+		default:
+			p = append(p, k+"="+vstr)
+		}
+	}
+	if dbname == "" {
+		return nil, fmt.Errorf("missing database")
+	}
+	var connstr string
+	if user != "" {
+		if pass != "" {
+			connstr = user + ":" + pass + "@"
+		} else {
+			connstr = user + "@"
+		}
+	}
+	connstr += "tcp(" + host + ":" + port + ")/" + dbname
+	if len(p) > 0 {
+		connstr += "?" + strings.Join(p, "&")
+	}
+	l := &genericLoader{connStr: connstr, driver: "mysql"}
+	log.Debugf("created loader: %s", l.String())
+	return l, nil
+}
+
 func newOracleLoader(d *Database) (Loader, error) {
 	p := make([]string, 0, len(d.Connection))
 	var dbname, user, pass, host, port string
@@ -179,6 +228,10 @@ func GetLoader(d *Database) (Loader, error) {
 	case "sqlite3":
 	case "sqlite":
 		return newSqliteLoader(d)
+	case "mysql":
+	case "mariadb":
+	case "tidb":
+		return newMysqlLoader(d)
 	case "oracle":
 	case "oci8":
 		return newOracleLoader(d)
