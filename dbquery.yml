@@ -11,6 +11,14 @@ database:
       user: dbquery_exporter
       password: dbquery_exporter
       port: 5432
+  testtib:
+    driver: tidb
+    connection:
+      database: test
+      host: localhost
+      user: root
+      password:
+      port: 4000
 query:
   testq1:
     sql: >
@@ -72,3 +80,13 @@ query:
       pg_stat_database_blk_read_time{name="{{.datname}}"} {{.blk_read_time}}
       pg_stat_database_blk_write_time{name="{{.datname}}"} {{.blk_write_time}}
       {{- end }}
+
+  tidb_test:
+    sql: >
+      select id, aa from test
+
+    metrics: |
+      {{- range .R }}
+      tidb_test{key="{{ .aa }}"} {{ .id }}
+      {{- end }}
+
