@@ -4,6 +4,8 @@ The DBQuery exporter allows get metrics from sql databases by user-defined sql-s
 
 Metrics templates uses golang text/template format.
 
+Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, MSSQL (not tested), Oracle (not tested)
+
 
 ## Building and running
 
@@ -13,6 +15,13 @@ Metrics templates uses golang text/template format.
 * github.com/prometheus/common
 * gopkg.in/yaml.v2
 * github.com/jmoiron/sqlx
+
+#### Database drivers
+* MySQL/MariaDB/TiB: github.com/go-sql-driver/mysql
+* PostgrSQL: github.com/lib/pq
+* SQLite: github.com/mattn/go-sqlite3
+* Oracle: github.com/mattn/go-oci8
+* MSSQL: github.com/denisenkom/go-mssqldb
 
 
 ### Local Build
