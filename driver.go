@@ -51,6 +51,10 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 		rows, err = g.conn.Queryx(q.SQL)
 	}
 
+	if err != nil {
+		return nil, err
+	}
+
 	var records []Record
 
 	for rows.Next() {
