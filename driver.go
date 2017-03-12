@@ -255,6 +255,31 @@ func newOracleLoader(d *Database) (Loader, error) {
 	return l, nil
 }
 
+func newMssqlLoader(d *Database) (Loader, error) {
+	p := make([]string, 0, len(d.Connection))
+	databaseConfigured := false
+	for k, v := range d.Connection {
+		if v != nil {
+			vstr := fmt.Sprintf("%v", v)
+			p = append(p, k+"="+vstr)
+			if k == "database" {
+				databaseConfigured = true
+			}
+		}
+	}
+
+	if !databaseConfigured {
+		return nil, fmt.Errorf("missing database")
+	}
+
+	connstr := strings.Join(p, "&")
+
+	l := &genericLoader{connStr: connstr, driver: "mssql"}
+	log.Debugf("created loader: %s", l.String())
+
+	return l, nil
+}
+
 // GetLoader returns configured Loader for given configuration.
 func GetLoader(d *Database) (Loader, error) {
 	switch d.Driver {
@@ -271,6 +296,8 @@ func GetLoader(d *Database) (Loader, error) {
 	case "oracle":
 	case "oci8":
 		return newOracleLoader(d)
+	case "mssql":
+		return newMysqlLoader(d)
 	}
 	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
 }
