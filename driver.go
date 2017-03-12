@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -111,7 +112,7 @@ func newPostgresLoader(d *Database) (Loader, error) {
 	for k, v := range d.Connection {
 		vstr := ""
 		if v != nil {
-			vstr = fmt.Sprintf("%v", v)
+			vstr = fmt.Sprintf("'%v'", v)
 		}
 		p = append(p, k+"="+vstr)
 	}
@@ -127,7 +128,7 @@ func newPostgresLoader(d *Database) (Loader, error) {
 }
 
 func newSqliteLoader(d *Database) (Loader, error) {
-	p := make([]string, 0, len(d.Connection))
+	p := url.Values{}
 	var dbname string
 	for k, v := range d.Connection {
 		vstr := ""
@@ -137,7 +138,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 		if k == "database" {
 			dbname = vstr
 		} else {
-			p = append(p, fmt.Sprintf("%s=%v", k, vstr))
+			p.Add(k, vstr)
 		}
 	}
 
@@ -147,7 +148,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 
 	l := &genericLoader{connStr: dbname, driver: "sqlite3"}
 	if len(p) > 0 {
-		l.connStr += "?" + strings.Join(p, "&")
+		l.connStr += "?" + p.Encode()
 	}
 	log.Debugf("created loader: %s", l.String())
 
@@ -155,7 +156,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 }
 
 func newMysqlLoader(d *Database) (Loader, error) {
-	p := make([]string, 0, len(d.Connection))
+	p := url.Values{}
 	host := "localhost"
 	port := "3306"
 	var dbname, user, pass string
@@ -177,7 +178,7 @@ func newMysqlLoader(d *Database) (Loader, error) {
 		case "password":
 			pass = vstr
 		default:
-			p = append(p, k+"="+vstr)
+			p.Add(k, vstr)
 		}
 	}
 
@@ -195,7 +196,7 @@ func newMysqlLoader(d *Database) (Loader, error) {
 	}
 	connstr += "tcp(" + host + ":" + port + ")/" + dbname
 	if len(p) > 0 {
-		connstr += "?" + strings.Join(p, "&")
+		connstr += "?" + p.Encode()
 	}
 
 	l := &genericLoader{connStr: connstr, driver: "mysql"}
@@ -205,7 +206,7 @@ func newMysqlLoader(d *Database) (Loader, error) {
 }
 
 func newOracleLoader(d *Database) (Loader, error) {
-	p := make([]string, 0, len(d.Connection))
+	p := url.Values{}
 	var dbname, user, pass, host, port string
 	for k, v := range d.Connection {
 		vstr := ""
@@ -224,7 +225,7 @@ func newOracleLoader(d *Database) (Loader, error) {
 		case "password":
 			pass = vstr
 		default:
-			p = append(p, k+"="+vstr)
+			p.Add(k, vstr)
 		}
 	}
 
@@ -246,7 +247,7 @@ func newOracleLoader(d *Database) (Loader, error) {
 	}
 	connstr += "/" + dbname
 	if len(p) > 0 {
-		connstr += "?" + strings.Join(p, "&")
+		connstr += "?" + p.Encode()
 	}
 
 	l := &genericLoader{connStr: connstr, driver: "ocl8"}
@@ -256,12 +257,12 @@ func newOracleLoader(d *Database) (Loader, error) {
 }
 
 func newMssqlLoader(d *Database) (Loader, error) {
-	p := make([]string, 0, len(d.Connection))
+	p := url.Values{}
 	databaseConfigured := false
 	for k, v := range d.Connection {
 		if v != nil {
 			vstr := fmt.Sprintf("%v", v)
-			p = append(p, k+"="+vstr)
+			p.Add(k, vstr)
 			if k == "database" {
 				databaseConfigured = true
 			}
@@ -272,7 +273,7 @@ func newMssqlLoader(d *Database) (Loader, error) {
 		return nil, fmt.Errorf("missing database")
 	}
 
-	connstr := strings.Join(p, "&")
+	connstr := p.Encode()
 
 	l := &genericLoader{connStr: connstr, driver: "mssql"}
 	log.Debugf("created loader: %s", l.String())
