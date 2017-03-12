@@ -33,6 +33,16 @@ type (
 
 func (g *genericLoader) Query(q *Query) ([]Record, error) {
 	var err error
+
+	if g.conn != nil {
+		// test existing connection
+		err = g.conn.Ping()
+		if err != nil {
+			g.conn.Close()
+			g.conn = nil
+		}
+	}
+
 	if g.conn == nil {
 		log.With("driver", g.driver).Debugf("genericQuery connect to '%s'", g.connStr)
 		g.conn, err = sqlx.Connect(g.driver, g.connStr)
