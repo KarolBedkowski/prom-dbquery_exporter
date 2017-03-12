@@ -84,17 +84,18 @@ func (g *genericLoader) Close() {
 }
 
 func (g *genericLoader) String() string {
-	return fmt.Sprintf("genericLoader driver='%s' connstr='%s' connected=%v",
+	return fmt.Sprintf("genericLoader driver='%s' connstr='%v' connected=%v",
 		g.driver, g.connStr, g.conn != nil)
 }
 
 func newPostgresLoader(d *Database) (Loader, error) {
 	p := make([]string, 0, len(d.Connection))
 	for k, v := range d.Connection {
-		vstr := fmt.Sprintf("%v", v)
-		if vstr != "" {
-			p = append(p, k+"="+vstr)
+		vstr := ""
+		if v != nil {
+			vstr = fmt.Sprintf("%v", v)
 		}
+		p = append(p, k+"="+vstr)
 	}
 	l := &genericLoader{
 		connStr: strings.Join(p, " "),
@@ -108,10 +109,11 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	p := make([]string, 0, len(d.Connection))
 	var dbname string
 	for k, v := range d.Connection {
-		vstr := fmt.Sprintf("%s", v)
-		if vstr == "" {
-			continue
-		} else if k == "database" {
+		vstr := ""
+		if v != nil {
+			vstr = fmt.Sprintf("%v", v)
+		}
+		if k == "database" {
 			dbname = vstr
 		} else {
 			p = append(p, fmt.Sprintf("%s=%v", k, vstr))
@@ -135,12 +137,9 @@ func newMysqlLoader(d *Database) (Loader, error) {
 	var dbname, user, pass string
 
 	for k, v := range d.Connection {
-		if v == nil {
-			continue
-		}
-		vstr := fmt.Sprintf("%v", v)
-		if vstr == "" {
-			continue
+		vstr := ""
+		if v != nil {
+			vstr = fmt.Sprintf("%v", v)
 		}
 		switch k {
 		case "database":
@@ -181,9 +180,9 @@ func newOracleLoader(d *Database) (Loader, error) {
 	p := make([]string, 0, len(d.Connection))
 	var dbname, user, pass, host, port string
 	for k, v := range d.Connection {
-		vstr := fmt.Sprintf("%s", v)
-		if vstr == "" {
-			continue
+		vstr := ""
+		if v != nil {
+			vstr = fmt.Sprintf("%v", v)
 		}
 		switch k {
 		case "database":
