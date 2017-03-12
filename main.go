@@ -9,16 +9,16 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"sync/atomic"
 	"syscall"
 	"time"
 
-	//      _ "github.com/denisenkom/go-mssqldb"
-	//      _ "github.com/go-sql-driver/mysql"
+	//_ "github.com/denisenkom/go-mssqldb"
+	//_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
-	//      _ "github.com/mattn/go-oci8"
+	//_ "github.com/mattn/go-oci8"
 	_ "github.com/mattn/go-sqlite3"
 
-	"github.com/chop-dbhi/sql-agent"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/log"
@@ -53,13 +53,14 @@ var (
 			Help: "Errors in requests to the DBQuery exporter",
 		},
 	)
+	requestID uint64
 )
 
 type (
 	// Result keep query result and some metadata parsed to template
 	Result struct {
 		// Records (rows)
-		R              []sqlagent.Record
+		R              []Record
 		QueryStartTime int64
 		QueryDuration  float64
 		Count          int
@@ -75,7 +76,7 @@ type (
 	}
 
 	queryResult struct {
-		records  []sqlagent.Record
+		records  []Record
 		duration float64
 		start    time.Time
 	}
@@ -88,35 +89,18 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func queryDatabase(q *Query, d *Database) (*queryResult, error) {
+func queryDatabase(q *Query, l Loader) (*queryResult, error) {
 	start := time.Now()
 
-	if _, ok := sqlagent.Drivers[d.Driver]; !ok {
-		return nil, fmt.Errorf("unsupported driver '%s'", d.Driver)
-	}
-
-	db, err := sqlagent.PersistentConnect(d.Driver, d.Connection)
+	rows, err := l.Query(q)
 	if err != nil {
-		return nil, fmt.Errorf("error connecting to db: %s", err)
-	}
+		return nil, fmt.Errorf("execute query error %s", err)
 
-	iter, err := sqlagent.Execute(db, q.SQL, q.Params)
-	if err != nil {
-		return nil, fmt.Errorf("error executing query: %s", err)
 	}
-
-	defer iter.Close()
 
 	result := &queryResult{
-		start: start,
-	}
-
-	for iter.Next() {
-		rec := make(sqlagent.Record)
-		if err := iter.Scan(rec); err != nil {
-			return nil, fmt.Errorf("error scanning record: %s", err)
-		}
-		result.records = append(result.records, rec)
+		start:   start,
+		records: rows,
 	}
 
 	result.duration = float64(time.Since(start).Seconds())
@@ -134,8 +118,9 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 		Count:          len(result.records),
 	}
 
-	log.Debugf("query='%s' db='%s' query_time=%f rows=%d",
-		queryName, dbName, data.QueryDuration, data.Count)
+	log.With("query", queryName).
+		With("db", dbName).
+		Debugf("query_time=%f rows=%d", data.QueryDuration, data.Count)
 
 	var output bytes.Buffer
 	bw := bufio.NewWriter(&output)
@@ -147,7 +132,9 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 
 	bw.Flush()
 
-	return output.Bytes(), nil
+	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
+
+	return b, nil
 }
 
 type queryHandler struct {
@@ -157,7 +144,9 @@ type queryHandler struct {
 
 func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
-	log.Debugf("query: %s", r.URL)
+	requestID := atomic.AddUint64(&requestID, 1)
+	log.With("req_id", requestID).
+		Info("request remote='%s', url='%s'", r.RemoteAddr, r.URL)
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
@@ -165,19 +154,32 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	anySuccess := false
-
-	for _, queryName := range queryNames {
-		query, ok := (q.Configuration.Query)[queryName]
+	for _, dbName := range dbNames {
+		db, ok := q.Configuration.Database[dbName]
 		if !ok {
-			log.Errorf("query='%s' unknown query", queryName)
+			log.With("req_id", requestID).
+				Errorf("unknown database='%s'", dbName)
 			queryRequestErrors.Inc()
 			continue
 		}
 
-		for _, dbName := range dbNames {
-			db, ok := q.Configuration.Database[dbName]
+		loader, err := GetLoader(db)
+		if err != nil {
+			log.With("req_id", requestID).
+				With("db", dbName).
+				Errorf("get loader error '%s'", err)
+			queryRequestErrors.Inc()
+			continue
+		}
+
+		defer loader.Close()
+
+		for _, queryName := range queryNames {
+			query, ok := (q.Configuration.Query)[queryName]
 			if !ok {
-				log.Errorf("query='%s' unknown database='%s'", queryName, dbName)
+				log.With("req_id", requestID).
+					With("db", dbName).
+					Errorf("unknown query '%s'", queryName)
 				queryRequestErrors.Inc()
 				continue
 			}
@@ -188,7 +190,10 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 			if query.CachingTime > 0 {
 				ci, ok := q.cache[queryName+"\t"+dbName]
 				if ok && ci.expireTS.After(time.Now()) {
-					log.Debugf("query='%s' db='%s' cache hit", queryName, dbName)
+					log.With("req_id", requestID).
+						With("query", queryName).
+						With("db", dbName).
+						Debugf("cache hit")
 					w.Write(ci.content)
 					anySuccess = true
 					continue
@@ -196,9 +201,12 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// get rows
-			result, err := queryDatabase(query, db)
+			result, err := queryDatabase(query, loader)
 			if err != nil {
-				log.Errorf("query='%s' db='%s' query error: %s", queryName, dbName, err)
+				log.With("req_id", requestID).
+					With("query", queryName).
+					With("db", dbName).
+					Errorf("query error: %s", err)
 				queryRequestErrors.Inc()
 				continue
 			}
@@ -206,11 +214,14 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 			// format metrics
 			output, err := formatResult(db, query, dbName, queryName, result)
 			if err != nil {
-				log.Errorf("query='%s' db='%s' format result error: %s", queryName, dbName, err)
+				log.With("req_id", requestID).
+					With("query", queryName).
+					With("db", dbName).
+					Errorf("format result error: %s", err)
 				queryRequestErrors.Inc()
 				continue
 			}
-
+			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
 			w.Write(output)
 
 			queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
@@ -229,6 +240,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 	if !anySuccess {
 		http.Error(w, "error", 400)
 	}
+	log.With("req_id", requestID).Debugf("done")
 }
 
 func main() {
@@ -248,6 +260,7 @@ func main() {
 	}
 	handler := queryHandler{c, make(map[string]*cacheItem)}
 
+	// handle hup for reloading configuration
 	hup := make(chan os.Signal)
 	signal.Notify(hup, syscall.SIGHUP)
 	go func() {
