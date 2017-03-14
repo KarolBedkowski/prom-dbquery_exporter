@@ -71,6 +71,13 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 		return nil, err
 	}
 
+	if cols, err := rows.Columns(); err == nil {
+		log.With("driver", g.driver).
+			Debugf("genericQuery columns: %v", cols)
+	} else {
+		return nil, err
+	}
+
 	var records []Record
 
 	// load records
