@@ -250,7 +250,7 @@ func newOracleLoader(d *Database) (Loader, error) {
 		connstr += "?" + p.Encode()
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "ocl8"}
+	l := &genericLoader{connStr: connstr, driver: "oci8"}
 	log.Debugf("created loader: %s", l.String())
 
 	return l, nil

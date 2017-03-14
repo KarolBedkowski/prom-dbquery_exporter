@@ -4,7 +4,7 @@ The DBQuery exporter allows get metrics from sql databases by user-defined sql-s
 
 Metrics templates uses golang text/template format.
 
-Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, MSSQL (not tested), Oracle (not tested)
+Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, Oracle, MSSQL (not tested)
 
 
 ## Building and running
