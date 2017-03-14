@@ -73,6 +73,11 @@ See sql-agent for connection configuration.
          - targets:
                 - 127.0.0.1:9122       # dbquery_exporter address
 
+### Note
+
+Oracle return columnt in upper case. Propably NLS_LANG environment variable should be used
+(i.e. `NLS_LANG=American_America.UTF8`).
+
 
 ## License
 Copyright (c) 2017, Karol Będkowski.
