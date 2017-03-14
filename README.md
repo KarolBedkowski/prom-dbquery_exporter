@@ -78,6 +78,20 @@ See sql-agent for connection configuration.
 Oracle return columnt in upper case. Propably NLS_LANG environment variable should be used
 (i.e. `NLS_LANG=American_America.UTF8`).
 
+### Template functions
+
+* toLower - convert value to lower case
+* toUpper - convert value to upper case
+* trim - trim non-printable characters
+* quote - quote " characters
+* replaceSpaces - replace spaces by "_"
+* removeSpaces - remove spaces
+* keepAlfaNum - keep only A-Za-z0-9 characters
+* keepAlfaNumUnderline - keep only A-Za-z0-9 and "_" characters
+* keepAlfaNumUnderlineSpace - keep only A-Za-z0-9, "_" and space characters
+* keepAlfaNumUnderlineU - keep only unicode letter, digits and "_"
+* keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
+
 
 ## License
 Copyright (c) 2017, Karol Będkowski.
