@@ -24,15 +24,17 @@ Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, Oracle, MSSQL (not tested)
 * MSSQL: github.com/denisenkom/go-mssqldb
 
 
-### Local Build
+### Local Build & Run
 
     go build
     ./prom-dbquery_exporter
 
-Configure `dbquery.yml` file, and visit`http://localhost:9122/query?query=<query_name>`
-See sql-agent for connection configuration.
+    ./prom-dbquery_exporter -help
 
-#### Prometheus config
+Configure `dbquery.yml` file, and visit `http://localhost:9122/query?query=<query_name>&database=<database_name>`
+See dbquery.yml for configuration examples.
+
+### Prometheus config
 
     scrape_configs:
 
@@ -41,9 +43,9 @@ See sql-agent for connection configuration.
      - job_name: dbquery_scrape
          static_configs:
          - targets:
-             - testq1
+             - testq1  # query name
          params:
-           database: [testdb]
+           database: [testdb]  # databases list
          metrics_path: /query
          relabel_configs:
          - source_labels: [__address__]
@@ -56,7 +58,7 @@ See sql-agent for connection configuration.
      - job_name: dbquery_scrape_db
        static_configs:
          - targets:
-             - testdbpgsql
+             - testdbpgsql  # database names
        metrics_path: /query
        params:
          query: [pg_stats_activity_state, pg_stat_database]  # launch many queries
@@ -93,7 +95,7 @@ Oracle return columnt in upper case. Propably NLS_LANG environment variable shou
 * keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
 
 
-## License
+# License
 Copyright (c) 2017, Karol Będkowski.
 
 This program is free software: you can redistribute it and/or modify
