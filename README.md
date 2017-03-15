@@ -93,6 +93,7 @@ Oracle return columnt in upper case. Propably NLS_LANG environment variable shou
 * keepAlfaNumUnderlineSpace - keep only A-Za-z0-9, "_" and space characters
 * keepAlfaNumUnderlineU - keep only unicode letter, digits and "_"
 * keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
+* clean - keep only A-Za-z0-9 and "_", replace spaces to "_", trim, convert to lower case
 
 
 # License
