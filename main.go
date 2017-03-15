@@ -94,7 +94,7 @@ func queryDatabase(q *Query, l Loader) (*queryResult, error) {
 
 	rows, err := l.Query(q)
 	if err != nil {
-		return nil, fmt.Errorf("execute query error %s", err)
+		return nil, fmt.Errorf("execute query error: %s", err)
 
 	}
 

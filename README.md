@@ -4,7 +4,7 @@ The DBQuery exporter allows get metrics from sql databases by user-defined sql-s
 
 Metrics templates uses golang text/template format.
 
-Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, MSSQL (not tested), Oracle (not tested)
+Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, Oracle, MSSQL (not tested)
 
 
 ## Building and running
@@ -24,15 +24,17 @@ Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, MSSQL (not tested), Oracle (not 
 * MSSQL: github.com/denisenkom/go-mssqldb
 
 
-### Local Build
+### Local Build & Run
 
     go build
     ./prom-dbquery_exporter
 
-Configure `dbquery.yml` file, and visit`http://localhost:9122/query?query=<query_name>`
-See sql-agent for connection configuration.
+    ./prom-dbquery_exporter -help
 
-#### Prometheus config
+Configure `dbquery.yml` file, and visit `http://localhost:9122/query?query=<query_name>&database=<database_name>`
+See dbquery.yml for configuration examples.
+
+### Prometheus config
 
     scrape_configs:
 
@@ -41,9 +43,9 @@ See sql-agent for connection configuration.
      - job_name: dbquery_scrape
          static_configs:
          - targets:
-             - testq1
+             - testq1  # query name
          params:
-           database: [testdb]
+           database: [testdb]  # databases list
          metrics_path: /query
          relabel_configs:
          - source_labels: [__address__]
@@ -56,7 +58,7 @@ See sql-agent for connection configuration.
      - job_name: dbquery_scrape_db
        static_configs:
          - targets:
-             - testdbpgsql
+             - testdbpgsql  # database names
        metrics_path: /query
        params:
          query: [pg_stats_activity_state, pg_stat_database]  # launch many queries
@@ -73,8 +75,28 @@ See sql-agent for connection configuration.
          - targets:
                 - 127.0.0.1:9122       # dbquery_exporter address
 
+### Note
 
-## License
+Oracle return columnt in upper case. Propably NLS_LANG environment variable should be used
+(i.e. `NLS_LANG=American_America.UTF8`).
+
+### Template functions
+
+* toLower - convert value to lower case
+* toUpper - convert value to upper case
+* trim - trim non-printable characters
+* quote - quote " characters
+* replaceSpaces - replace spaces by "_"
+* removeSpaces - remove spaces
+* keepAlfaNum - keep only A-Za-z0-9 characters
+* keepAlfaNumUnderline - keep only A-Za-z0-9 and "_" characters
+* keepAlfaNumUnderlineSpace - keep only A-Za-z0-9, "_" and space characters
+* keepAlfaNumUnderlineU - keep only unicode letter, digits and "_"
+* keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
+* clean - keep only A-Za-z0-9 and "_", replace spaces to "_", trim, convert to lower case
+
+
+# License
 Copyright (c) 2017, Karol Będkowski.
 
 This program is free software: you can redistribute it and/or modify

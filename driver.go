@@ -71,6 +71,13 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 		return nil, err
 	}
 
+	if cols, err := rows.Columns(); err == nil {
+		log.With("driver", g.driver).
+			Debugf("genericQuery columns: %v", cols)
+	} else {
+		return nil, err
+	}
+
 	var records []Record
 
 	// load records
@@ -250,7 +257,7 @@ func newOracleLoader(d *Database) (Loader, error) {
 		connstr += "?" + p.Encode()
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "ocl8"}
+	l := &genericLoader{connStr: connstr, driver: "oci8"}
 	log.Debugf("created loader: %s", l.String())
 
 	return l, nil

@@ -19,6 +19,15 @@ database:
       user: root
       password:
       port: 4000
+  testoracle:
+    driver: oci8
+    connection:
+      database: test
+      host: 127.0.0.1
+      user: testuser
+      password: testpass
+      port: 1521
+
 query:
   testq1:
     sql: >
@@ -90,3 +99,12 @@ query:
       tidb_test{key="{{ .aa }}"} {{ .id }}
       {{- end }}
 
+  oracle_v_sysmetric:
+    sql: >
+       select metric_name as name, to_char(value) as value from V$SYSMETRIC where GROUP_ID=2
+    caching_time: 10
+
+    metrics: |
+      {{- range .R }}
+      oracle_v_sysmetric_{{ .NAME | keepAlfaNumUnderlineSpace | trim | replaceSpaces | toLower }} {{ .VALUE }}
+      {{- end  }}

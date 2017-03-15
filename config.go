@@ -1,9 +1,5 @@
 //
 // config.go
-// Copyright (C) 2017 Karol Będkowski <Karol Będkowski@kntbk>
-//
-// Distributed under terms of the MIT license.
-//
 
 package main
 
@@ -64,7 +60,7 @@ func (c *Configuration) validate() error {
 		if m == "" {
 			return fmt.Errorf("missing metrics for query '%s'", name)
 		}
-		tmpl, err := template.New("main").Parse(m)
+		tmpl, err := template.New("main").Funcs(templateFuncsMap).Parse(m)
 		if err != nil {
 			return fmt.Errorf("parsing metrics template for query '%s' error: '%s'",
 				name, err)
