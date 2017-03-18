@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/common/log"
@@ -20,9 +21,16 @@ type (
 	// Loader load data from database
 	Loader interface {
 		// Query execute sql and returns records or error. Open connection when necessary.
-		Query(q *Query) ([]Record, error)
+		Query(q *Query, params map[string]string) (*queryResult, error)
 		// Close db connection.
 		Close()
+	}
+
+	queryResult struct {
+		records  []Record
+		duration float64
+		start    time.Time
+		params   map[string]interface{}
 	}
 
 	genericLoader struct {
@@ -32,7 +40,7 @@ type (
 	}
 )
 
-func (g *genericLoader) Query(q *Query) ([]Record, error) {
+func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult, error) {
 	var err error
 
 	if g.conn != nil {
@@ -58,11 +66,27 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 	log.With("driver", g.driver).
 		Debugf("genericQuery execute '%v', '%v'", q.SQL, q.Params)
 
-	var rows *sqlx.Rows
+	p := make(map[string]interface{})
+	if q.Params != nil {
+		for k, v := range q.Params {
+			p[k] = v
+		}
+	}
+	if params != nil {
+		for k, v := range params {
+			p[k] = v
+		}
+	}
 
+	result := &queryResult{
+		start:  time.Now(),
+		params: p,
+	}
+
+	var rows *sqlx.Rows
 	// query
-	if q.Params != nil && len(q.Params) > 0 {
-		rows, err = g.conn.NamedQuery(q.SQL, q.Params)
+	if len(p) > 0 {
+		rows, err = g.conn.NamedQuery(q.SQL, p)
 	} else {
 		rows, err = g.conn.Queryx(q.SQL)
 	}
@@ -78,8 +102,6 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 		return nil, err
 	}
 
-	var records []Record
-
 	// load records
 	for rows.Next() {
 		rec := Record{}
@@ -94,10 +116,11 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 				rec[k] = string(v.([]byte))
 			}
 		}
-		records = append(records, rec)
+		result.records = append(result.records, rec)
 	}
 
-	return records, nil
+	result.duration = float64(time.Since(result.start).Seconds())
+	return result, nil
 }
 
 // Close database connection

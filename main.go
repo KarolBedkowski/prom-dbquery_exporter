@@ -61,6 +61,7 @@ type (
 	Result struct {
 		// Records (rows)
 		R              []Record
+		P              map[string]interface{}
 		QueryStartTime int64
 		QueryDuration  float64
 		Count          int
@@ -74,12 +75,6 @@ type (
 		expireTS time.Time
 		content  []byte
 	}
-
-	queryResult struct {
-		records  []Record
-		duration float64
-		start    time.Time
-	}
 )
 
 func init() {
@@ -89,30 +84,12 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func queryDatabase(q *Query, l Loader) (*queryResult, error) {
-	start := time.Now()
-
-	rows, err := l.Query(q)
-	if err != nil {
-		return nil, fmt.Errorf("execute query error: %s", err)
-
-	}
-
-	result := &queryResult{
-		start:   start,
-		records: rows,
-	}
-
-	result.duration = float64(time.Since(start).Seconds())
-
-	return result, nil
-}
-
 func formatResult(db *Database, query *Query, dbName, queryName string, result *queryResult) ([]byte, error) {
 	data := &Result{
 		Query:          queryName,
 		Database:       dbName,
 		R:              result.records,
+		P:              result.params,
 		QueryStartTime: result.start.Unix(),
 		QueryDuration:  result.duration,
 		Count:          len(result.records),
@@ -146,10 +123,16 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
 	requestID := atomic.AddUint64(&requestID, 1)
 	log.With("req_id", requestID).
-		Info("request remote='%s', url='%s'", r.RemoteAddr, r.URL)
+		Infof("request remote='%s', url='%s'", r.RemoteAddr, r.URL)
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
+	params := make(map[string]string)
+	for k, v := range r.URL.Query() {
+		if k != "query" && k != "database" {
+			params[k] = v[0]
+		}
+	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
@@ -201,7 +184,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// get rows
-			result, err := queryDatabase(query, loader)
+			result, err := loader.Query(query, params)
 			if err != nil {
 				log.With("req_id", requestID).
 					With("query", queryName).
