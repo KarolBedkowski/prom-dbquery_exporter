@@ -89,10 +89,10 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func queryDatabase(q *Query, l Loader) (*queryResult, error) {
+func queryDatabase(q *Query, l Loader, params map[string]string) (*queryResult, error) {
 	start := time.Now()
 
-	rows, err := l.Query(q)
+	rows, err := l.Query(q, params)
 	if err != nil {
 		return nil, fmt.Errorf("execute query error: %s", err)
 
@@ -150,6 +150,12 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
+	params := make(map[string]string)
+	for k, v := range r.URL.Query() {
+		if k != "query" && k != "database" {
+			params[k] = v[0]
+		}
+	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
@@ -201,7 +207,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// get rows
-			result, err := queryDatabase(query, loader)
+			result, err := queryDatabase(query, loader, params)
 			if err != nil {
 				log.With("req_id", requestID).
 					With("query", queryName).

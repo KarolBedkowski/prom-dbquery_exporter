@@ -20,7 +20,7 @@ type (
 	// Loader load data from database
 	Loader interface {
 		// Query execute sql and returns records or error. Open connection when necessary.
-		Query(q *Query) ([]Record, error)
+		Query(q *Query, params map[string]string) ([]Record, error)
 		// Close db connection.
 		Close()
 	}
@@ -32,7 +32,7 @@ type (
 	}
 )
 
-func (g *genericLoader) Query(q *Query) ([]Record, error) {
+func (g *genericLoader) Query(q *Query, params map[string]string) ([]Record, error) {
 	var err error
 
 	if g.conn != nil {
@@ -60,9 +60,21 @@ func (g *genericLoader) Query(q *Query) ([]Record, error) {
 
 	var rows *sqlx.Rows
 
+	p := make(map[string]interface{})
+	if q.Params != nil {
+		for k, v := range q.Params {
+			p[k] = v
+		}
+	}
+	if params != nil {
+		for k, v := range params {
+			p[k] = v
+		}
+	}
+
 	// query
-	if q.Params != nil && len(q.Params) > 0 {
-		rows, err = g.conn.NamedQuery(q.SQL, q.Params)
+	if len(p) > 0 {
+		rows, err = g.conn.NamedQuery(q.SQL, p)
 	} else {
 		rows, err = g.conn.Queryx(q.SQL)
 	}
