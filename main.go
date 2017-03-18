@@ -123,7 +123,7 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
 	requestID := atomic.AddUint64(&requestID, 1)
 	log.With("req_id", requestID).
-		Info("request remote='%s', url='%s'", r.RemoteAddr, r.URL)
+		Infof("request remote='%s', url='%s'", r.RemoteAddr, r.URL)
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
