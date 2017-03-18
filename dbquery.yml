@@ -59,8 +59,9 @@ query:
       select count(t.id) as cnt from trips t where id > :id
 
     metrics: |
+      {{ $top := . }}
       {{- range .R }}
-      rwr3_trips_count {{ .cnt }}
+      rwr3_trips_count_limited{limit="{{ $top.P.id }}"} {{ .cnt }}
       {{- end  }}
 
     params:
