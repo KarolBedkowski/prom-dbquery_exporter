@@ -46,6 +46,7 @@ See dbquery.yml for configuration examples.
              - testq1  # query name
          params:
            database: [testdb]  # databases list
+           other_query_param: [100]  # additional query params
          metrics_path: /query
          relabel_configs:
          - source_labels: [__address__]
