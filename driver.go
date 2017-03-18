@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 	"github.com/prometheus/common/log"
@@ -20,9 +21,16 @@ type (
 	// Loader load data from database
 	Loader interface {
 		// Query execute sql and returns records or error. Open connection when necessary.
-		Query(q *Query, params map[string]string) ([]Record, error)
+		Query(q *Query, params map[string]string) (*queryResult, error)
 		// Close db connection.
 		Close()
+	}
+
+	queryResult struct {
+		records  []Record
+		duration float64
+		start    time.Time
+		params   map[string]interface{}
 	}
 
 	genericLoader struct {
@@ -32,7 +40,7 @@ type (
 	}
 )
 
-func (g *genericLoader) Query(q *Query, params map[string]string) ([]Record, error) {
+func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult, error) {
 	var err error
 
 	if g.conn != nil {
@@ -58,8 +66,6 @@ func (g *genericLoader) Query(q *Query, params map[string]string) ([]Record, err
 	log.With("driver", g.driver).
 		Debugf("genericQuery execute '%v', '%v'", q.SQL, q.Params)
 
-	var rows *sqlx.Rows
-
 	p := make(map[string]interface{})
 	if q.Params != nil {
 		for k, v := range q.Params {
@@ -72,6 +78,12 @@ func (g *genericLoader) Query(q *Query, params map[string]string) ([]Record, err
 		}
 	}
 
+	result := &queryResult{
+		start:  time.Now(),
+		params: p,
+	}
+
+	var rows *sqlx.Rows
 	// query
 	if len(p) > 0 {
 		rows, err = g.conn.NamedQuery(q.SQL, p)
@@ -90,8 +102,6 @@ func (g *genericLoader) Query(q *Query, params map[string]string) ([]Record, err
 		return nil, err
 	}
 
-	var records []Record
-
 	// load records
 	for rows.Next() {
 		rec := Record{}
@@ -106,10 +116,11 @@ func (g *genericLoader) Query(q *Query, params map[string]string) ([]Record, err
 				rec[k] = string(v.([]byte))
 			}
 		}
-		records = append(records, rec)
+		result.records = append(result.records, rec)
 	}
 
-	return records, nil
+	result.duration = float64(time.Since(result.start).Seconds())
+	return result, nil
 }
 
 // Close database connection
