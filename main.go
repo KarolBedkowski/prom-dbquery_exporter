@@ -9,6 +9,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -117,6 +118,13 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 type queryHandler struct {
 	Configuration *Configuration
 	cache         map[string]*cacheItem
+	cacheLock     sync.Mutex
+}
+
+func (q *queryHandler) clearCache() {
+	q.cacheLock.Lock()
+	defer q.cacheLock.Unlock()
+	q.cache = make(map[string]*cacheItem)
 }
 
 func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +179,9 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
 			// try to get item from cache
 			if query.CachingTime > 0 {
+				q.cacheLock.Lock()
 				ci, ok := q.cache[queryName+"\t"+dbName]
+				q.cacheLock.Unlock()
 				if ok && ci.expireTS.After(time.Now()) {
 					log.With("req_id", requestID).
 						With("query", queryName).
@@ -211,10 +221,12 @@ func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
 
 			if query.CachingTime > 0 {
 				// update cache
+				q.cacheLock.Lock()
 				q.cache[queryName+"\t"+dbName] = &cacheItem{
 					expireTS: time.Now().Add(time.Duration(query.CachingTime) * time.Second),
 					content:  output,
 				}
+				q.cacheLock.Unlock()
 			}
 
 			anySuccess = true
@@ -241,7 +253,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
-	handler := queryHandler{c, make(map[string]*cacheItem)}
+	handler := queryHandler{Configuration: c}
+	handler.clearCache()
 
 	// handle hup for reloading configuration
 	hup := make(chan os.Signal)
@@ -252,6 +265,7 @@ func main() {
 			case <-hup:
 				if newConf, err := loadConfiguration(*configFile); err == nil {
 					handler.Configuration = newConf
+					handler.clearCache()
 					log.Info("configuration reloaded")
 				} else {
 					log.Errorf("reloading configuration err: %s", err)
