@@ -1,2 +1,5 @@
+v0.5 2016-03-25
+* fix concurrency problems with cache
+
 v0.4 2017-03-18
 * support sql params in remote call (unknown query params are used in sql execute)
