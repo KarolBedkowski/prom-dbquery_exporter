@@ -127,7 +127,7 @@ func (q *queryHandler) clearCache() {
 	q.cache = make(map[string]*cacheItem)
 }
 
-func (q *queryHandler) handler(w http.ResponseWriter, r *http.Request) {
+func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	requestID := atomic.AddUint64(&requestID, 1)
 	log.With("req_id", requestID).
@@ -276,7 +276,7 @@ func main() {
 	}()
 
 	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/query", handler.handler)
+	http.Handle("/query", prometheus.InstrumentHandler("query", handler))
 	log.Infof("Listening on %s", *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
