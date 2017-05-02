@@ -3,6 +3,8 @@ database:
     driver: sqlite
     connection:
       database: rwr3.db
+    labels:
+      env: test
   testdbpgsql:
     driver: postgres
     connection:
@@ -35,8 +37,9 @@ query:
     caching_time: 20
 
     metrics: |
+      {{ $top := . }}
       {{- range .R }}
-      rwr3_sport_trip_count{sport="{{ .name }}"} {{ .cnt }}
+      rwr3_sport_trip_count{sport="{{ .name }}", dbname="{{ $top.L.env }}"} {{ .cnt }}
       {{- end  }}
       rwr3_sport_trip_count_rows {{ .Count }}
       rwr3_sport_trip_query_secounds {{ .QueryDuration }}
@@ -121,3 +124,4 @@ query:
       {{- range .R }}
       oracle_v_sysmetric_{{ .NAME | keepAlfaNumUnderlineSpace | trim | replaceSpaces | toLower }} {{ .VALUE }}
       {{- end  }}
+

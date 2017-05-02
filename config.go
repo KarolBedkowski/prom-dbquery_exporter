@@ -32,6 +32,8 @@ type (
 		Driver string
 		// Connection params - see sql-agent
 		Connection map[string]interface{}
+		// Labels configured per database; may be used in templates
+		Labels map[string]interface{}
 	}
 
 	// Configuration keep application configuration

@@ -61,8 +61,12 @@ type (
 	// Result keep query result and some metadata parsed to template
 	Result struct {
 		// Records (rows)
-		R              []Record
-		P              map[string]interface{}
+		R []Record
+		// Parameters
+		P map[string]interface{}
+		// Labels
+		L map[string]interface{}
+
 		QueryStartTime int64
 		QueryDuration  float64
 		Count          int
@@ -91,6 +95,7 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 		Database:       dbName,
 		R:              result.records,
 		P:              result.params,
+		L:              db.Labels,
 		QueryStartTime: result.start.Unix(),
 		QueryDuration:  result.duration,
 		Count:          len(result.records),
