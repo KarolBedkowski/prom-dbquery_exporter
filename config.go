@@ -4,7 +4,7 @@
 package main
 
 import (
-	"fmt"
+	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"strings"
@@ -47,25 +47,25 @@ type (
 
 func (c *Configuration) validate() error {
 	if len(c.Database) == 0 {
-		return fmt.Errorf("no database configured")
+		return errors.Errorf("no database configured")
 	}
 
 	if len(c.Query) == 0 {
-		return fmt.Errorf("no query configured")
+		return errors.Errorf("no query configured")
 	}
 
 	for name, query := range c.Query {
 		if query.SQL == "" {
-			return fmt.Errorf("missing SQL for query '%s'", name)
+			return errors.Errorf("missing SQL for query '%s'", name)
 		}
 		m := strings.TrimSpace(query.Metrics) + "\n"
 		if m == "" {
-			return fmt.Errorf("missing metrics for query '%s'", name)
+			return errors.Errorf("missing metrics for query '%s'", name)
 		}
 		tmpl, err := template.New("main").Funcs(templateFuncsMap).Parse(m)
 		if err != nil {
-			return fmt.Errorf("parsing metrics template for query '%s' error: '%s'",
-				name, err)
+			return errors.Wrapf(err, "parsing metrics template for query '%s' error: '%s'",
+				name)
 		}
 		query.MetricTpl = tmpl
 	}
@@ -77,15 +77,15 @@ func loadConfiguration(filename string) (*Configuration, error) {
 	b, err := ioutil.ReadFile(filename)
 
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "read file error")
 	}
 
 	if err = yaml.Unmarshal(b, c); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "unmarshal file error")
 	}
 
 	if err = c.validate(); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "validate error")
 	}
 
 	return c, nil

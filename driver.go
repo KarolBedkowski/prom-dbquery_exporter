@@ -6,6 +6,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/pkg/errors"
 	"net/url"
 	"strings"
 	"time"
@@ -173,7 +174,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	}
 
 	if dbname == "" {
-		return nil, fmt.Errorf("missing database")
+		return nil, errors.Errorf("missing database")
 	}
 
 	l := &genericLoader{connStr: dbname, driver: "sqlite3"}
@@ -213,7 +214,7 @@ func newMysqlLoader(d *Database) (Loader, error) {
 	}
 
 	if dbname == "" {
-		return nil, fmt.Errorf("missing database")
+		return nil, errors.Errorf("missing database")
 	}
 
 	var connstr string
@@ -260,7 +261,7 @@ func newOracleLoader(d *Database) (Loader, error) {
 	}
 
 	if dbname == "" {
-		return nil, fmt.Errorf("missing database")
+		return nil, errors.Errorf("missing database")
 	}
 
 	var connstr string
@@ -300,7 +301,7 @@ func newMssqlLoader(d *Database) (Loader, error) {
 	}
 
 	if !databaseConfigured {
-		return nil, fmt.Errorf("missing database")
+		return nil, errors.Errorf("missing database")
 	}
 
 	connstr := p.Encode()
@@ -330,5 +331,5 @@ func GetLoader(d *Database) (Loader, error) {
 	case "mssql":
 		return newMysqlLoader(d)
 	}
-	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
+	return nil, errors.Errorf("unsupported database type '%s'", d.Driver)
 }

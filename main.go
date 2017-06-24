@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"github.com/pkg/errors"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -110,7 +111,7 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 
 	err := query.MetricTpl.Execute(bw, data)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "execute template error")
 	}
 
 	bw.Flush()
