@@ -125,6 +125,17 @@ type queryHandler struct {
 	Configuration *Configuration
 	cache         map[string]*cacheItem
 	cacheLock     sync.Mutex
+
+	runningQuery     map[string]bool
+	runningQueryLock sync.Mutex
+}
+
+func NewQueryHandler(c *Configuration) *queryHandler {
+	return &queryHandler{
+		Configuration: c,
+		cache:         make(map[string]*cacheItem),
+		runningQuery:  make(map[string]bool),
+	}
 }
 
 func (q *queryHandler) clearCache() {
@@ -171,13 +182,38 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		defer loader.Close()
 
+	queryLoop:
 		for _, queryName := range queryNames {
+			queryKey := queryName + "\t" + dbName
+
+			// TODO: configure
+			for i := 120; ; i-- { // 10min
+				q.runningQueryLock.Lock()
+				running, ok := q.runningQuery[queryKey]
+				if !ok || !running {
+					q.runningQuery[queryKey] = true
+					q.runningQueryLock.Unlock()
+					break
+				}
+				q.runningQueryLock.Unlock()
+				if i == 0 {
+					log.Warn("timeout while waiting for query finish")
+					continue queryLoop
+				}
+				time.Sleep(time.Duration(5) * time.Second)
+				//log.Debugf("waiting %d", i)
+			}
+
 			query, ok := (q.Configuration.Query)[queryName]
 			if !ok {
 				log.With("req_id", requestID).
 					With("db", dbName).
 					Errorf("unknown query '%s'", queryName)
 				queryRequestErrors.Inc()
+
+				q.runningQueryLock.Lock()
+				q.runningQuery[queryKey] = false
+				q.runningQueryLock.Unlock()
 				continue
 			}
 
@@ -186,7 +222,7 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			// try to get item from cache
 			if query.CachingTime > 0 {
 				q.cacheLock.Lock()
-				ci, ok := q.cache[queryName+"\t"+dbName]
+				ci, ok := q.cache[queryKey]
 				q.cacheLock.Unlock()
 				if ok && ci.expireTS.After(time.Now()) {
 					log.With("req_id", requestID).
@@ -195,6 +231,9 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 						Debugf("cache hit")
 					w.Write(ci.content)
 					anySuccess = true
+					q.runningQueryLock.Lock()
+					q.runningQuery[queryKey] = false
+					q.runningQueryLock.Unlock()
 					continue
 				}
 			}
@@ -207,8 +246,13 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					With("db", dbName).
 					Errorf("query error: %s", err)
 				queryRequestErrors.Inc()
+				q.runningQueryLock.Lock()
+				q.runningQuery[queryKey] = false
+				q.runningQueryLock.Unlock()
 				continue
 			}
+
+			time.Sleep(time.Duration(30) * time.Second)
 
 			// format metrics
 			output, err := formatResult(db, query, dbName, queryName, result)
@@ -218,6 +262,9 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					With("db", dbName).
 					Errorf("format result error: %s", err)
 				queryRequestErrors.Inc()
+				q.runningQueryLock.Lock()
+				q.runningQuery[queryKey] = false
+				q.runningQueryLock.Unlock()
 				continue
 			}
 			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
@@ -228,13 +275,16 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if query.CachingTime > 0 {
 				// update cache
 				q.cacheLock.Lock()
-				q.cache[queryName+"\t"+dbName] = &cacheItem{
+				q.cache[queryKey] = &cacheItem{
 					expireTS: time.Now().Add(time.Duration(query.CachingTime) * time.Second),
 					content:  output,
 				}
 				q.cacheLock.Unlock()
 			}
 
+			q.runningQueryLock.Lock()
+			q.runningQuery[queryKey] = false
+			q.runningQueryLock.Unlock()
 			anySuccess = true
 		}
 	}
@@ -259,8 +309,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
-	handler := queryHandler{Configuration: c}
-	handler.clearCache()
+	handler := NewQueryHandler(c)
+	iHandler := infoHndler{Configuration: c}
 
 	// handle hup for reloading configuration
 	hup := make(chan os.Signal)
