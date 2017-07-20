@@ -125,17 +125,19 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 type queryHandler struct {
 	Configuration *Configuration
 	cache         map[string]*cacheItem
-	cacheLock     sync.Mutex
+	cacheLock     *sync.Mutex
 
 	runningQuery     map[string]bool
-	runningQueryLock sync.Mutex
+	runningQueryLock *sync.Mutex
 }
 
 func NewQueryHandler(c *Configuration) *queryHandler {
 	return &queryHandler{
-		Configuration: c,
-		cache:         make(map[string]*cacheItem),
-		runningQuery:  make(map[string]bool),
+		Configuration:    c,
+		cache:            make(map[string]*cacheItem),
+		cacheLock:        &sync.Mutex{},
+		runningQuery:     make(map[string]bool),
+		runningQueryLock: &sync.Mutex{},
 	}
 }
 
