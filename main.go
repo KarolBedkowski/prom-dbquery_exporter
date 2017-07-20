@@ -56,6 +56,13 @@ var (
 			Help: "Errors in requests to the DBQuery exporter",
 		},
 	)
+	queryCacheHits = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Name: "dbquery_cache_hit",
+			Help: "Number of result loaded from cache",
+		},
+	)
+
 	requestID uint64
 )
 
@@ -88,6 +95,7 @@ func init() {
 	prometheus.MustRegister(queryDuration)
 	prometheus.MustRegister(queryRequest)
 	prometheus.MustRegister(queryRequestErrors)
+	prometheus.MustRegister(queryCacheHits)
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
@@ -161,6 +169,7 @@ func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Load
 		ci, ok := q.cache[queryKey]
 		q.cacheLock.Unlock()
 		if ok && ci.expireTS.After(time.Now()) {
+			queryCacheHits.Inc()
 			return ci.content, nil
 		}
 	}
