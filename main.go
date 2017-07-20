@@ -145,6 +145,52 @@ func (q *queryHandler) clearCache() {
 	q.cache = make(map[string]*cacheItem)
 }
 
+func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Loader,
+	params map[string]string, db *Database) ([]byte, error) {
+
+	query, ok := (q.Configuration.Query)[queryName]
+	if !ok {
+		return nil, errors.Errorf("unknown query '%s'", queryName)
+	}
+
+	// try to get item from cache
+	if query.CachingTime > 0 {
+		q.cacheLock.Lock()
+		ci, ok := q.cache[queryKey]
+		q.cacheLock.Unlock()
+		if ok && ci.expireTS.After(time.Now()) {
+			return ci.content, nil
+		}
+	}
+
+	// get rows
+	result, err := loader.Query(query, params)
+	if err != nil {
+		return nil, errors.Wrap(err, "query error")
+	}
+
+	queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
+
+	// format metrics
+	output, err := formatResult(db, query, dbName, queryName, result)
+	if err != nil {
+		return nil, errors.Wrap(err, "format result error")
+	}
+
+	if query.CachingTime > 0 {
+		// update cache
+		q.cacheLock.Lock()
+		q.cache[queryKey] = &cacheItem{
+			expireTS: time.Now().Add(time.Duration(query.CachingTime) * time.Second),
+			content:  output,
+		}
+		q.cacheLock.Unlock()
+	}
+
+	return output, nil
+
+}
+
 func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	requestID := atomic.AddUint64(&requestID, 1)
@@ -202,88 +248,27 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 					continue queryLoop
 				}
 				time.Sleep(time.Duration(5) * time.Second)
-				//log.Debugf("waiting %d", i)
-			}
-
-			query, ok := (q.Configuration.Query)[queryName]
-			if !ok {
-				log.With("req_id", requestID).
-					With("db", dbName).
-					Errorf("unknown query '%s'", queryName)
-				queryRequestErrors.Inc()
-
-				q.runningQueryLock.Lock()
-				q.runningQuery[queryKey] = false
-				q.runningQueryLock.Unlock()
-				continue
 			}
 
 			queryRequest.WithLabelValues(queryName, dbName).Inc()
-
-			// try to get item from cache
-			if query.CachingTime > 0 {
-				q.cacheLock.Lock()
-				ci, ok := q.cache[queryKey]
-				q.cacheLock.Unlock()
-				if ok && ci.expireTS.After(time.Now()) {
-					log.With("req_id", requestID).
-						With("query", queryName).
-						With("db", dbName).
-						Debugf("cache hit")
-					w.Write(ci.content)
-					anySuccess = true
-					q.runningQueryLock.Lock()
-					q.runningQuery[queryKey] = false
-					q.runningQueryLock.Unlock()
-					continue
-				}
-			}
-
-			// get rows
-			result, err := loader.Query(query, params)
-			if err != nil {
-				log.With("req_id", requestID).
-					With("query", queryName).
-					With("db", dbName).
-					Errorf("query error: %s", err)
-				queryRequestErrors.Inc()
-				q.runningQueryLock.Lock()
-				q.runningQuery[queryKey] = false
-				q.runningQueryLock.Unlock()
-				continue
-			}
-
-			// format metrics
-			output, err := formatResult(db, query, dbName, queryName, result)
-			if err != nil {
-				log.With("req_id", requestID).
-					With("query", queryName).
-					With("db", dbName).
-					Errorf("format result error: %s", err)
-				queryRequestErrors.Inc()
-				q.runningQueryLock.Lock()
-				q.runningQuery[queryKey] = false
-				q.runningQueryLock.Unlock()
-				continue
-			}
-			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
-			w.Write(output)
-
-			queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
-
-			if query.CachingTime > 0 {
-				// update cache
-				q.cacheLock.Lock()
-				q.cache[queryKey] = &cacheItem{
-					expireTS: time.Now().Add(time.Duration(query.CachingTime) * time.Second),
-					content:  output,
-				}
-				q.cacheLock.Unlock()
-			}
+			output, err := q.makeQuery(queryName, dbName, queryKey, loader, params, db)
 
 			q.runningQueryLock.Lock()
 			q.runningQuery[queryKey] = false
 			q.runningQueryLock.Unlock()
+
+			if err != nil {
+				queryRequestErrors.Inc()
+				log.With("req_id", requestID).
+					With("db", dbName).
+					With("query", queryName).
+					Errorf("query error: %s", err)
+				continue
+			}
+
+			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
+			w.Write(output)
+
 			anySuccess = true
 		}
 	}
