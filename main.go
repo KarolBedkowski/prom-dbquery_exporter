@@ -253,8 +253,6 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 
-			time.Sleep(time.Duration(30) * time.Second)
-
 			// format metrics
 			output, err := formatResult(db, query, dbName, queryName, result)
 			if err != nil {
