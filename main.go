@@ -199,7 +199,23 @@ func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Load
 	}
 
 	return output, nil
+}
 
+func (q *queryHandler) waitQueryFinish(queryKey string) (ok bool) {
+	// TODO: configure
+	for i := 120; i > 0; i-- { // 10min
+		q.runningQueryLock.Lock()
+		running, ok := q.runningQuery[queryKey]
+		if !ok || !running {
+			q.runningQuery[queryKey] = true
+			q.runningQueryLock.Unlock()
+			return true
+		}
+		q.runningQueryLock.Unlock()
+		time.Sleep(time.Duration(5) * time.Second)
+	}
+
+	return false
 }
 
 func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -240,25 +256,15 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		defer loader.Close()
 
-	queryLoop:
 		for _, queryName := range queryNames {
 			queryKey := queryName + "\t" + dbName
 
-			// TODO: configure
-			for i := 120; ; i-- { // 10min
-				q.runningQueryLock.Lock()
-				running, ok := q.runningQuery[queryKey]
-				if !ok || !running {
-					q.runningQuery[queryKey] = true
-					q.runningQueryLock.Unlock()
-					break
-				}
-				q.runningQueryLock.Unlock()
-				if i == 0 {
-					log.Warn("timeout while waiting for query finish")
-					continue queryLoop
-				}
-				time.Sleep(time.Duration(5) * time.Second)
+			if !q.waitQueryFinish(queryKey) {
+				log.With("req_id", requestID).
+					With("db", dbName).
+					With("query", queryName).
+					Warn("timeout while waiting for query finish")
+				continue
 			}
 
 			queryRequest.WithLabelValues(queryName, dbName).Inc()
