@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-	"github.com/prometheus/common/log"
 )
 
 type (

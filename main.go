@@ -24,7 +24,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/log"
 	"github.com/prometheus/common/version"
 )
 
@@ -34,6 +33,8 @@ var (
 		"Path to configuration file.")
 	listenAddress = flag.String("web.listen-address", ":9122",
 		"Address to listen on for web interface and telemetry.")
+	loglevel = flag.String("log.level", "info",
+		"Logging level (debug, info, warn, error, fatal)")
 
 	// Metrics about the exporter itself.
 	queryDuration = prometheus.NewSummaryVec(
@@ -246,6 +247,10 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		loader, err := GetLoader(db)
+		if loader != nil {
+			defer loader.Close()
+		}
+
 		if err != nil {
 			log.With("req_id", requestID).
 				With("db", dbName).
@@ -253,8 +258,6 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			queryRequestErrors.Inc()
 			continue
 		}
-
-		defer loader.Close()
 
 		for _, queryName := range queryNames {
 			queryKey := queryName + "\t" + dbName
@@ -310,7 +313,7 @@ func (q infoHndler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Write([]byte("DATABASES\n========="))
 	for name, db := range q.Configuration.Database {
-		w.Write([]byte("\n"))
+		w.Write([]byte{'\n'})
 		w.Write([]byte(name))
 		w.Write([]byte("\n-----"))
 		w.Write([]byte("\n - driver: "))
@@ -325,7 +328,7 @@ func (q infoHndler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			} else {
 				w.Write([]byte(fmt.Sprintf("%v", v)))
 			}
-			w.Write([]byte("\n"))
+			w.Write([]byte{'\n'})
 		}
 		w.Write([]byte(" - labels:\n"))
 		for k, v := range db.Labels {
@@ -333,13 +336,13 @@ func (q infoHndler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(k))
 			w.Write([]byte(": "))
 			w.Write([]byte(fmt.Sprintf("%v", v)))
-			w.Write([]byte("\n"))
+			w.Write([]byte{'\n'})
 		}
 	}
 
 	w.Write([]byte("\n\nQueries\n======="))
 	for name, q := range q.Configuration.Query {
-		w.Write([]byte("\n"))
+		w.Write([]byte{'\n'})
 		w.Write([]byte(name))
 		w.Write([]byte("\n-----"))
 		w.Write([]byte("\n - sql: "))
@@ -354,7 +357,7 @@ func (q infoHndler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(k))
 			w.Write([]byte(": "))
 			w.Write([]byte(fmt.Sprintf("%v", v)))
-			w.Write([]byte("\n"))
+			w.Write([]byte{'\n'})
 		}
 	}
 }
@@ -367,6 +370,7 @@ func main() {
 		os.Exit(0)
 	}
 
+	InitializeLogger(*loglevel)
 	log.Infoln("Starting DBQuery exporter", version.Info())
 	log.Infoln("Build context", version.BuildContext())
 
