@@ -222,8 +222,9 @@ func (q *queryHandler) waitQueryFinish(queryKey string) (ok bool) {
 func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	requestID := atomic.AddUint64(&requestID, 1)
-	log.With("req_id", requestID).
-		Infof("request remote='%s', url='%s'", r.RemoteAddr, r.URL)
+	tstart := time.Now()
+	l := log.With("req_id", requestID)
+	l.Infof("request remote='%s', url='%s'", r.RemoteAddr, r.URL)
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
@@ -236,12 +237,11 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	anySuccess := false
+	anyProcessed := false
 	for _, dbName := range dbNames {
 		db, ok := q.Configuration.Database[dbName]
 		if !ok {
-			log.With("req_id", requestID).
-				Errorf("unknown database='%s'", dbName)
+			l.Errorf("unknown database='%s'", dbName)
 			queryRequestErrors.Inc()
 			continue
 		}
@@ -252,9 +252,7 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err != nil {
-			log.With("req_id", requestID).
-				With("db", dbName).
-				Errorf("get loader error '%s'", err)
+			l.With("db", dbName).Errorf("get loader error '%s'", err)
 			queryRequestErrors.Inc()
 			continue
 		}
@@ -263,8 +261,7 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			queryKey := queryName + "\t" + dbName
 
 			if !q.waitQueryFinish(queryKey) {
-				log.With("req_id", requestID).
-					With("db", dbName).
+				l.With("db", dbName).
 					With("query", queryName).
 					Warn("timeout while waiting for query finish")
 				continue
@@ -279,8 +276,7 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			if err != nil {
 				queryRequestErrors.Inc()
-				log.With("req_id", requestID).
-					With("db", dbName).
+				l.With("db", dbName).
 					With("query", queryName).
 					Errorf("query error: %s", err)
 				continue
@@ -289,13 +285,13 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
 			w.Write(output)
 
-			anySuccess = true
+			anyProcessed = true
 		}
 	}
-	if !anySuccess {
+	if !anyProcessed {
 		http.Error(w, "error", 400)
 	}
-	log.With("req_id", requestID).Debugf("done")
+	l.Debugf("done in %s", time.Now().Sub(tstart))
 }
 
 type infoHndler struct {
