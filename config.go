@@ -34,6 +34,9 @@ type (
 		Connection map[string]interface{}
 		// Labels configured per database; may be used in templates
 		Labels map[string]interface{}
+		// InitialQuery allow run custom query or set some parameters after
+		// connect and before target query
+		InitialQuery []string `yaml:"initial_query"`
 	}
 
 	// Configuration keep application configuration
@@ -64,7 +67,7 @@ func (c *Configuration) validate() error {
 		}
 		tmpl, err := template.New("main").Funcs(templateFuncsMap).Parse(m)
 		if err != nil {
-			return errors.Wrapf(err, "parsing metrics template for query '%s' error: '%s'",
+			return errors.Wrapf(err, "parsing metrics template for query '%s' error",
 				name)
 		}
 		query.MetricTpl = tmpl

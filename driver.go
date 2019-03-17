@@ -34,9 +34,10 @@ type (
 	}
 
 	genericLoader struct {
-		connStr string
-		driver  string
-		conn    *sqlx.DB
+		connStr    string
+		driver     string
+		conn       *sqlx.DB
+		initialSQL []string
 	}
 )
 
@@ -60,6 +61,18 @@ func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult,
 		g.conn, err = sqlx.Connect(g.driver, g.connStr)
 		if err != nil {
 			return nil, err
+		}
+
+		// launch initial sqls if defined
+		if g.initialSQL != nil {
+			for _, sql := range g.initialSQL {
+				log.With("driver", g.driver).
+					Debugf("genericQuery execute initial sql '%s'", sql)
+				_, err = g.conn.Queryx(sql)
+				if err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 
@@ -148,8 +161,9 @@ func newPostgresLoader(d *Database) (Loader, error) {
 	}
 
 	l := &genericLoader{
-		connStr: strings.Join(p, " "),
-		driver:  "postgres",
+		connStr:    strings.Join(p, " "),
+		driver:     "postgres",
+		initialSQL: d.InitialQuery,
 	}
 
 	log.Debugf("created loader: %s", l.String())
@@ -176,7 +190,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 		return nil, errors.Errorf("missing database")
 	}
 
-	l := &genericLoader{connStr: dbname, driver: "sqlite3"}
+	l := &genericLoader{connStr: dbname, driver: "sqlite3", initialSQL: d.InitialQuery}
 	if len(p) > 0 {
 		l.connStr += "?" + p.Encode()
 	}
@@ -229,7 +243,7 @@ func newMysqlLoader(d *Database) (Loader, error) {
 		connstr += "?" + p.Encode()
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "mysql"}
+	l := &genericLoader{connStr: connstr, driver: "mysql", initialSQL: d.InitialQuery}
 	log.Debugf("created loader: %s", l.String())
 
 	return l, nil
@@ -280,7 +294,7 @@ func newOracleLoader(d *Database) (Loader, error) {
 		connstr += "?" + p.Encode()
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "oci8"}
+	l := &genericLoader{connStr: connstr, driver: "oci8", initialSQL: d.InitialQuery}
 	log.Debugf("created loader: %s", l.String())
 
 	return l, nil
@@ -305,7 +319,8 @@ func newMssqlLoader(d *Database) (Loader, error) {
 
 	connstr := p.Encode()
 
-	l := &genericLoader{connStr: connstr, driver: "mssql"}
+	l := &genericLoader{connStr: connstr, driver: "mssql",
+		initialSQL: d.InitialQuery}
 	log.Debugf("created loader: %s", l.String())
 
 	return l, nil

@@ -5,6 +5,8 @@ database:
       database: rwr3.db
     labels:
       env: test
+    initial_query:
+      - select 1
   testdbpgsql:
     driver: postgres
     connection:
@@ -29,6 +31,8 @@ database:
       user: testuser
       password: testpass
       port: 1521
+    initial_query:
+      - alter session set default_schema=test
 
 query:
   testq1:
