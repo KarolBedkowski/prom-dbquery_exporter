@@ -399,10 +399,11 @@ func main() {
 		prometheus.HistogramOpts{
 			Name:    "dbquery_exporter_request_duration_seconds",
 			Help:    "A histogram of latencies for requests.",
-			Buckets: []float64{.5, 1, 10, 30, 60, 90, 300},
+			Buckets: []float64{.5, 1, 10, 30, 60, 120, 300},
 		},
 		[]string{"handler"},
 	)
+	prometheus.MustRegister(reqDuration)
 
 	http.Handle("/metrics", promhttp.Handler())
 	http.Handle("/query", promhttp.InstrumentHandlerDuration(
