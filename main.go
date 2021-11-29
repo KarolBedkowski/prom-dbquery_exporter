@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
-	"github.com/pkg/errors"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -15,6 +14,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/pkg/errors"
 
 	//_ "github.com/denisenkom/go-mssqldb"
 	//_ "github.com/go-sql-driver/mysql"
@@ -140,7 +141,7 @@ type queryHandler struct {
 	runningQueryLock *sync.Mutex
 }
 
-func NewQueryHandler(c *Configuration) *queryHandler {
+func newQueryHandler(c *Configuration) *queryHandler {
 	return &queryHandler{
 		Configuration:    c,
 		cache:            make(map[string]*cacheItem),
@@ -291,7 +292,7 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !anyProcessed {
 		http.Error(w, "error", 400)
 	}
-	l.Debugf("done in %s", time.Now().Sub(tstart))
+	l.Debugf("done in %s", time.Since(tstart))
 }
 
 type infoHndler struct {
@@ -374,25 +375,22 @@ func main() {
 	if err != nil {
 		log.Fatalf("Error parsing config file: %s", err)
 	}
-	handler := NewQueryHandler(c)
+	handler := newQueryHandler(c)
 	iHandler := infoHndler{Configuration: c}
 
 	// handle hup for reloading configuration
-	hup := make(chan os.Signal)
+	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	go func() {
-		for {
-			select {
-			case <-hup:
-				if newConf, err := loadConfiguration(*configFile); err == nil {
-					handler.Configuration = newConf
-					handler.clearCache()
-					iHandler.Configuration = newConf
-					log.Info("configuration reloaded")
-				} else {
-					log.Errorf("reloading configuration err: %s", err)
-					log.Errorf("using old configuration")
-				}
+		for range hup {
+			if newConf, err := loadConfiguration(*configFile); err == nil {
+				handler.Configuration = newConf
+				handler.clearCache()
+				iHandler.Configuration = newConf
+				log.Info("configuration reloaded")
+			} else {
+				log.Errorf("reloading configuration err: %s", err)
+				log.Errorf("using old configuration")
 			}
 		}
 	}()

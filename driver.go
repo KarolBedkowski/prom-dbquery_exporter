@@ -6,10 +6,11 @@ package main
 
 import (
 	"fmt"
-	"github.com/pkg/errors"
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -41,6 +42,29 @@ type (
 	}
 )
 
+func (g *genericLoader) connect() (err error) {
+	log.With("driver", g.driver).
+		Debugf("genericQuery connect to '%s'", g.connStr)
+
+	g.conn, err = sqlx.Connect(g.driver, g.connStr)
+	if err != nil {
+		return errors.Wrap(err, "connect error")
+	}
+
+	// launch initial sqls if defined
+	if g.initialSQL != nil {
+		for _, sql := range g.initialSQL {
+			log.With("driver", g.driver).
+				Debugf("genericQuery execute initial sql '%s'", sql)
+			_, err = g.conn.Queryx(sql)
+			if err != nil {
+				return errors.Wrap(err, "execute initial sql error")
+			}
+		}
+	}
+	return nil
+}
+
 func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult, error) {
 	var err error
 
@@ -53,32 +77,17 @@ func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult,
 		}
 	}
 
-	// connect to database
+	// connect to database if not connected
 	if g.conn == nil {
-		log.With("driver", g.driver).
-			Debugf("genericQuery connect to '%s'", g.connStr)
-
-		g.conn, err = sqlx.Connect(g.driver, g.connStr)
-		if err != nil {
+		if err := g.connect(); err != nil {
 			return nil, err
-		}
-
-		// launch initial sqls if defined
-		if g.initialSQL != nil {
-			for _, sql := range g.initialSQL {
-				log.With("driver", g.driver).
-					Debugf("genericQuery execute initial sql '%s'", sql)
-				_, err = g.conn.Queryx(sql)
-				if err != nil {
-					return nil, err
-				}
-			}
 		}
 	}
 
 	log.With("driver", g.driver).
 		Debugf("genericQuery execute '%v', '%v'", q.SQL, q.Params)
 
+	// prepare query parameters; combine parameters from query and
 	p := make(map[string]interface{})
 	if q.Params != nil {
 		for k, v := range q.Params {
@@ -105,21 +114,21 @@ func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult,
 	}
 
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "execute query error")
 	}
 
 	if cols, err := rows.Columns(); err == nil {
 		log.With("driver", g.driver).
 			Debugf("genericQuery columns: %v", cols)
 	} else {
-		return nil, err
+		return nil, errors.Wrap(err, "get columns error")
 	}
 
 	// load records
 	for rows.Next() {
 		rec := Record{}
 		if err := rows.MapScan(rec); err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "map scan record error")
 		}
 
 		// convert []byte to string

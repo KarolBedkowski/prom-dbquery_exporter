@@ -9,12 +9,11 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
-	"github.com/sirupsen/logrus"
 	"runtime"
-	"sort"
 	"strings"
+
+	"github.com/sirupsen/logrus"
 )
 
 type logger struct {
@@ -125,41 +124,4 @@ func (l *logger) Fatalf(format string, args ...interface{}) {
 
 func (l *logger) With(key string, value interface{}) *logger {
 	return &logger{l.entry.WithField(key, value)}
-}
-
-type simpleFormatter struct {
-}
-
-func (s *simpleFormatter) Format(entry *logrus.Entry) ([]byte, error) {
-	var b *bytes.Buffer
-	if entry.Buffer != nil {
-		b = entry.Buffer
-	} else {
-		b = &bytes.Buffer{}
-	}
-	b.WriteString(entry.Level.String())
-	for i := 7 - b.Len(); i > 0; i-- {
-		b.WriteByte(' ')
-	}
-
-	if entry.Message != "" {
-		b.WriteByte(' ')
-		b.WriteString(fmt.Sprintf("%q", entry.Message))
-		for i := 80 - b.Len(); i > 0; i-- {
-			b.WriteByte(' ')
-		}
-	}
-	keys := make([]string, 0, len(entry.Data))
-	for k := range entry.Data {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		b.WriteByte(' ')
-		b.WriteString(key)
-		b.WriteByte('=')
-		b.WriteString(fmt.Sprintf("%q", entry.Data[key]))
-	}
-	b.WriteByte('\n')
-	return b.Bytes(), nil
 }

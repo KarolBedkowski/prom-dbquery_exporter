@@ -4,11 +4,12 @@
 package main
 
 import (
-	"github.com/pkg/errors"
-	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"strings"
 	"text/template"
+
+	"github.com/pkg/errors"
+	"gopkg.in/yaml.v2"
 )
 
 type (
