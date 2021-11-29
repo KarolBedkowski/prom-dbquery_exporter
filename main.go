@@ -397,9 +397,22 @@ func main() {
 		}
 	}()
 
+	reqDuration := prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "dbquery_exporter_request_duration_seconds",
+			Help:    "A histogram of latencies for requests.",
+			Buckets: []float64{.5, 1, 10, 30, 60, 90, 300},
+		},
+		[]string{"handler"},
+	)
+
 	http.Handle("/metrics", promhttp.Handler())
-	http.Handle("/query", prometheus.InstrumentHandler("query", handler))
-	http.Handle("/info", prometheus.InstrumentHandler("info", iHandler))
+	http.Handle("/query", promhttp.InstrumentHandlerDuration(
+		reqDuration.MustCurryWith(prometheus.Labels{"handler": "query"}),
+		handler))
+	http.Handle("/info", promhttp.InstrumentHandlerDuration(
+		reqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
+		iHandler))
 	log.Infof("Listening on %s", *listenAddress)
 	log.Fatal(http.ListenAndServe(*listenAddress, nil))
 }
