@@ -137,7 +137,7 @@ type queryHandler struct {
 	cache         map[string]*cacheItem
 	cacheLock     *sync.Mutex
 
-	runningQuery     map[string]bool
+	runningQuery     map[string]time.Time
 	runningQueryLock *sync.Mutex
 }
 
@@ -146,7 +146,7 @@ func newQueryHandler(c *Configuration) *queryHandler {
 		Configuration:    c,
 		cache:            make(map[string]*cacheItem),
 		cacheLock:        &sync.Mutex{},
-		runningQuery:     make(map[string]bool),
+		runningQuery:     make(map[string]time.Time),
 		runningQueryLock: &sync.Mutex{},
 	}
 }
@@ -204,12 +204,12 @@ func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Load
 }
 
 func (q *queryHandler) waitQueryFinish(queryKey string) (ok bool) {
-	// TODO: configure
-	for i := 120; i > 0; i-- { // 10min
+	for i := 0; i < 120; i += 5 { // 2min
 		q.runningQueryLock.Lock()
-		running, ok := q.runningQuery[queryKey]
-		if !ok || !running {
-			q.runningQuery[queryKey] = true
+		startTs, ok := q.runningQuery[queryKey]
+		if !ok || startTs.IsZero() || time.Since(startTs).Minutes() > 15 {
+			// no running previous queue or last query is at least 15 minutes earlier
+			q.runningQuery[queryKey] = time.Now()
 			q.runningQueryLock.Unlock()
 			return true
 		}
@@ -261,6 +261,7 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		for _, queryName := range queryNames {
 			queryKey := queryName + "\t" + dbName
 
+			// check is previous query finished; if yes - lock it
 			if !q.waitQueryFinish(queryKey) {
 				l.With("db", dbName).
 					With("query", queryName).
@@ -271,8 +272,9 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			queryRequest.WithLabelValues(queryName, dbName).Inc()
 			output, err := q.makeQuery(queryName, dbName, queryKey, loader, params, db)
 
+			// mark query finished
 			q.runningQueryLock.Lock()
-			q.runningQuery[queryKey] = false
+			q.runningQuery[queryKey] = time.Time{}
 			q.runningQueryLock.Unlock()
 
 			if err != nil {
