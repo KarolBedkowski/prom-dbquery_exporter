@@ -5,12 +5,11 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/pkg/errors"
 
 	"github.com/jmoiron/sqlx"
 )
@@ -48,7 +47,7 @@ func (g *genericLoader) connect() (err error) {
 
 	g.conn, err = sqlx.Connect(g.driver, g.connStr)
 	if err != nil {
-		return errors.Wrap(err, "connect error")
+		return fmt.Errorf("connect error: %w", err)
 	}
 
 	// launch initial sqls if defined
@@ -58,7 +57,7 @@ func (g *genericLoader) connect() (err error) {
 				Debugf("genericQuery execute initial sql '%s'", sql)
 			_, err = g.conn.Queryx(sql)
 			if err != nil {
-				return errors.Wrap(err, "execute initial sql error")
+				return fmt.Errorf("execute initial sql error: %w", err)
 			}
 		}
 	}
@@ -114,21 +113,21 @@ func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult,
 	}
 
 	if err != nil {
-		return nil, errors.Wrap(err, "execute query error")
+		return nil, fmt.Errorf("execute query error: %w", err)
 	}
 
 	if cols, err := rows.Columns(); err == nil {
 		log.With("driver", g.driver).
 			Debugf("genericQuery columns: %v", cols)
 	} else {
-		return nil, errors.Wrap(err, "get columns error")
+		return nil, fmt.Errorf("get columns error: %w", err)
 	}
 
 	// load records
 	for rows.Next() {
 		rec := Record{}
 		if err := rows.MapScan(rec); err != nil {
-			return nil, errors.Wrap(err, "map scan record error")
+			return nil, fmt.Errorf("map scan record error: %w", err)
 		}
 
 		// convert []byte to string
@@ -196,7 +195,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	}
 
 	if dbname == "" {
-		return nil, errors.Errorf("missing database")
+		return nil, errors.New("missing database")
 	}
 
 	l := &genericLoader{connStr: dbname, driver: "sqlite3", initialSQL: d.InitialQuery}
@@ -236,7 +235,7 @@ func newMysqlLoader(d *Database) (Loader, error) {
 	}
 
 	if dbname == "" {
-		return nil, errors.Errorf("missing database")
+		return nil, errors.New("missing database")
 	}
 
 	var connstr string
@@ -283,7 +282,7 @@ func newOracleLoader(d *Database) (Loader, error) {
 	}
 
 	if dbname == "" {
-		return nil, errors.Errorf("missing database")
+		return nil, errors.New("missing database")
 	}
 
 	var connstr string
@@ -323,7 +322,7 @@ func newMssqlLoader(d *Database) (Loader, error) {
 	}
 
 	if !databaseConfigured {
-		return nil, errors.Errorf("missing database")
+		return nil, errors.New("missing database")
 	}
 
 	connstr := p.Encode()
@@ -354,5 +353,5 @@ func GetLoader(d *Database) (Loader, error) {
 	case "mssql":
 		return newMysqlLoader(d)
 	}
-	return nil, errors.Errorf("unsupported database type '%s'", d.Driver)
+	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
 }

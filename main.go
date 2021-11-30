@@ -15,8 +15,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pkg/errors"
-
 	//_ "github.com/denisenkom/go-mssqldb"
 	//_ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
@@ -122,7 +120,7 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 
 	err := query.MetricTpl.Execute(bw, data)
 	if err != nil {
-		return nil, errors.Wrap(err, "execute template error")
+		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 
 	bw.Flush()
@@ -162,7 +160,7 @@ func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Load
 
 	query, ok := (q.Configuration.Query)[queryName]
 	if !ok {
-		return nil, errors.Errorf("unknown query '%s'", queryName)
+		return nil, fmt.Errorf("unknown query '%s'", queryName)
 	}
 
 	// try to get item from cache
@@ -179,7 +177,7 @@ func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Load
 	// get rows
 	result, err := loader.Query(query, params)
 	if err != nil {
-		return nil, errors.Wrap(err, "query error")
+		return nil, fmt.Errorf("query error: %w", err)
 	}
 
 	queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
@@ -187,7 +185,7 @@ func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Load
 	// format metrics
 	output, err := formatResult(db, query, dbName, queryName, result)
 	if err != nil {
-		return nil, errors.Wrap(err, "format result error")
+		return nil, fmt.Errorf("format result error: %w", err)
 	}
 
 	if query.CachingTime > 0 {
