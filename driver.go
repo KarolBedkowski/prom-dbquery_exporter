@@ -93,10 +93,8 @@ func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult,
 			p[k] = v
 		}
 	}
-	if params != nil {
-		for k, v := range params {
-			p[k] = v
-		}
+	for k, v := range params {
+		p[k] = v
 	}
 
 	result := &queryResult{
@@ -132,9 +130,9 @@ func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult,
 
 		// convert []byte to string
 		for k, v := range rec {
-			switch v.(type) {
+			switch v := v.(type) {
 			case []byte:
-				rec[k] = string(v.([]byte))
+				rec[k] = string(v)
 			}
 		}
 		result.records = append(result.records, rec)
@@ -351,7 +349,7 @@ func GetLoader(d *Database) (Loader, error) {
 	case "oci8":
 		return newOracleLoader(d)
 	case "mssql":
-		return newMysqlLoader(d)
+		return newMssqlLoader(d)
 	}
 	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
 }
