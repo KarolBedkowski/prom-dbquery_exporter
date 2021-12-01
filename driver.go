@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -21,7 +22,7 @@ type (
 	// Loader load data from database
 	Loader interface {
 		// Query execute sql and returns records or error. Open connection when necessary.
-		Query(q *Query, params map[string]string) (*queryResult, error)
+		Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error)
 		// Close db connection.
 		Close()
 	}
@@ -64,13 +65,18 @@ func (g *genericLoader) connect() (err error) {
 	return nil
 }
 
-func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult, error) {
+func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error) {
 	var err error
 
 	if g.conn != nil {
 		// test existing connection
-		err = g.conn.Ping()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err = g.conn.PingContext(ctx)
+		cancel()
 		if err != nil {
+			log.With("driver", g.driver).
+				Debugf("genericQuery execute '%v', '%v' pin failed: %s",
+					q.SQL, q.Params, err.Error())
 			g.conn.Close()
 			g.conn = nil
 		}
@@ -102,12 +108,19 @@ func (g *genericLoader) Query(q *Query, params map[string]string) (*queryResult,
 		params: p,
 	}
 
+	timeout := 5 * time.Minute
+	if q.Timeout > 0 {
+		timeout = time.Duration(q.Timeout) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	var rows *sqlx.Rows
 	// query
 	if len(p) > 0 {
-		rows, err = g.conn.NamedQuery(q.SQL, p)
+		rows, err = g.conn.NamedQueryContext(ctx, q.SQL, p)
 	} else {
-		rows, err = g.conn.Queryx(q.SQL)
+		rows, err = g.conn.QueryxContext(ctx, q.SQL)
 	}
 
 	if err != nil {

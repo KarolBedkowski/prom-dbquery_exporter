@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"net/http"
@@ -155,7 +156,7 @@ func (q *queryHandler) clearCache() {
 	q.cache = make(map[string]*cacheItem)
 }
 
-func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Loader,
+func (q *queryHandler) makeQuery(ctx context.Context, queryName, dbName, queryKey string, loader Loader,
 	params map[string]string, db *Database) ([]byte, error) {
 
 	query, ok := (q.Configuration.Query)[queryName]
@@ -175,7 +176,7 @@ func (q *queryHandler) makeQuery(queryName, dbName, queryKey string, loader Load
 	}
 
 	// get rows
-	result, err := loader.Query(query, params)
+	result, err := loader.Query(ctx, query, params)
 	if err != nil {
 		return nil, fmt.Errorf("query error: %w", err)
 	}
@@ -268,7 +269,17 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 
 			queryRequest.WithLabelValues(queryName, dbName).Inc()
-			output, err := q.makeQuery(queryName, dbName, queryKey, loader, params, db)
+
+			var timeout time.Duration
+			if db.Timeout > 0 {
+				timeout = time.Duration(db.Timeout) * time.Second
+			} else {
+				timeout = time.Duration(5) * time.Minute
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			output, err := q.makeQuery(ctx, queryName, dbName, queryKey, loader, params, db)
+			cancel()
 
 			// mark query finished
 			q.runningQueryLock.Lock()

@@ -26,6 +26,9 @@ type (
 		CachingTime int `yaml:"caching_time"`
 		// Parsed template  (internal)
 		MetricTpl *template.Template `yaml:"-"`
+
+		// Max time for query result
+		Timeout int `yaml:"timeout"`
 	}
 
 	// Database define database connection
@@ -39,6 +42,9 @@ type (
 		// InitialQuery allow run custom query or set some parameters after
 		// connect and before target query
 		InitialQuery []string `yaml:"initial_query"`
+
+		// Default timeout for all queries
+		Timeout int `yaml:"timeout"`
 	}
 
 	// Configuration keep application configuration
