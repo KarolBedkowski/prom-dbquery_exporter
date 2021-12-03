@@ -16,10 +16,26 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-type (
-	// Record is one record (row) loaded from database
-	Record map[string]interface{}
+// Record is one record (row) loaded from database
+type Record map[string]interface{}
 
+func newRecord(rows *sqlx.Rows) (Record, error) {
+	rec := Record{}
+	if err := rows.MapScan(rec); err != nil {
+		return nil, fmt.Errorf("map scan record error: %w", err)
+	}
+
+	// convert []byte to string
+	for k, v := range rec {
+		if v, ok := v.([]byte); ok {
+			rec[k] = string(v)
+		}
+	}
+
+	return rec, nil
+}
+
+type (
 	// Loader load data from database
 	Loader interface {
 		// Query execute sql and returns records or error. Open connection when necessary.
@@ -42,27 +58,27 @@ type (
 		driver     string
 		conn       *sqlx.DB
 		initialSQL []string
+		dbConf     *Database
 	}
 )
 
-func (g *genericLoader) connect(ctx context.Context) (err error) {
+func (g *genericLoader) makeNewConnection(ctx context.Context) (err error) {
 	l := log.Ctx(ctx)
-	l.Debug().Str("connstr", g.connStr).Msg("genericQuery connecting")
+	l.Debug().Str("connstr", g.connStr).Str("driver", g.driver).
+		Msg("genericQuery connecting")
 
-	lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	g.conn, err = sqlx.ConnectContext(lctx, g.driver, g.connStr)
-	cancel()
-	if err != nil {
+	lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
+	defer cancel()
+	if g.conn, err = sqlx.ConnectContext(lctx, g.driver, g.connStr); err != nil {
 		return fmt.Errorf("connect error: %w", err)
 	}
 
 	// launch initial sqls if defined
 	for _, sql := range g.initialSQL {
 		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
-		lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		_, err = g.conn.QueryxContext(lctx, sql)
-		cancel()
-		if err != nil {
+		lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
+		defer cancel()
+		if _, err = g.conn.QueryxContext(lctx, sql); err != nil {
 			return fmt.Errorf("execute initial sql error: %w", err)
 		}
 	}
@@ -71,52 +87,56 @@ func (g *genericLoader) connect(ctx context.Context) (err error) {
 	return nil
 }
 
-func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error) {
-	var err error
-	l := log.Ctx(ctx).With().Str("driver", g.driver).Str("sql", q.SQL).Interface("params", q.Params).Logger()
+func (g *genericLoader) ping(ctx context.Context) {
+	l := log.Ctx(ctx)
+	ctxPing, cancel := context.WithTimeout(context.Background(), g.dbConf.connectTimeout())
+	err := g.conn.PingContext(ctxPing)
+	cancel()
+	if err != nil {
+		l.Err(err).Msg("genericQuery execute ping failed; closing connection")
+		g.conn.Close()
+		g.conn = nil
+	}
+}
+
+func (g *genericLoader) connect(ctx context.Context) error {
+	// test existing connection
 	if g.conn != nil {
-		// test existing connection
-		ctxPing, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err = g.conn.PingContext(ctxPing)
-		cancel()
-		if err != nil {
-			l.Err(err).Msg("genericQuery execute ping failed")
-			g.conn.Close()
-			g.conn = nil
-		}
+		g.ping(ctx)
 	}
 
 	// connect to database if not connected
 	if g.conn == nil {
-		if err := g.connect(ctx); err != nil {
-			return nil, err
+		if err := g.makeNewConnection(ctx); err != nil {
+			return err
 		}
 	}
 
-	// prepare query parameters; combine parameters from query and
-	p := make(map[string]interface{})
-	if q.Params != nil {
-		for k, v := range q.Params {
-			p[k] = v
-		}
-	}
-	for k, v := range params {
-		p[k] = v
+	return nil
+}
+
+func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error) {
+	var err error
+	l := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", q.Name).Logger()
+	ctx = l.WithContext(ctx)
+
+	if err := g.connect(ctx); err != nil {
+		return nil, err
 	}
 
+	// prepare query parameters; combine parameters from query and params
+	p := prepareParams(q, params)
 	result := &queryResult{
 		start:  time.Now(),
 		params: p,
 	}
 
-	timeout := 5 * time.Minute
-	if q.Timeout > 0 {
-		timeout = time.Duration(q.Timeout) * time.Second
-	}
+	timeout := g.queryTimeout(q)
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	l.Debug().Dur("timeout", timeout).Msg("genericQuery start execute")
+	l.Debug().Dur("timeout", timeout).Str("sql", q.SQL).Interface("params", q.Params).
+		Msg("genericQuery start execute")
 
 	var rows *sqlx.Rows
 	// query
@@ -138,16 +158,9 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 
 	// load records
 	for rows.Next() {
-		rec := Record{}
-		if err := rows.MapScan(rec); err != nil {
-			return nil, fmt.Errorf("map scan record error: %w", err)
-		}
-
-		// convert []byte to string
-		for k, v := range rec {
-			if v, ok := v.([]byte); ok {
-				rec[k] = string(v)
-			}
+		rec, err := newRecord(rows)
+		if err != nil {
+			return nil, err
 		}
 		result.records = append(result.records, rec)
 	}
@@ -159,7 +172,7 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 // Close database connection
 func (g *genericLoader) Close(ctx context.Context) {
 	if g.conn != nil {
-		log.Ctx(ctx).Debug().Msg("genericQuery disconnect")
+		log.Ctx(ctx).Debug().Str("db", g.dbConf.Name).Msg("genericQuery disconnect")
 		g.conn.Close()
 		g.conn = nil
 	}
@@ -168,6 +181,18 @@ func (g *genericLoader) Close(ctx context.Context) {
 func (g *genericLoader) String() string {
 	return fmt.Sprintf("genericLoader driver='%s' connstr='%v' connected=%v",
 		g.driver, g.connStr, g.conn != nil)
+}
+
+func (g *genericLoader) queryTimeout(q *Query) time.Duration {
+	if q.Timeout > 0 {
+		return time.Duration(q.Timeout) * time.Second
+	}
+
+	if g.dbConf.Timeout > 0 {
+		return time.Duration(g.dbConf.Timeout) * time.Second
+	}
+
+	return 5 * time.Minute
 }
 
 func newPostgresLoader(d *Database) (Loader, error) {
@@ -184,6 +209,7 @@ func newPostgresLoader(d *Database) (Loader, error) {
 		connStr:    strings.Join(p, " "),
 		driver:     "postgres",
 		initialSQL: d.InitialQuery,
+		dbConf:     d,
 	}
 	return l, nil
 }
@@ -207,7 +233,9 @@ func newSqliteLoader(d *Database) (Loader, error) {
 		return nil, errors.New("missing database")
 	}
 
-	l := &genericLoader{connStr: dbname, driver: "sqlite3", initialSQL: d.InitialQuery}
+	l := &genericLoader{connStr: dbname, driver: "sqlite3", initialSQL: d.InitialQuery,
+		dbConf: d,
+	}
 	if len(p) > 0 {
 		l.connStr += "?" + p.Encode()
 	}
@@ -258,7 +286,9 @@ func newMysqlLoader(d *Database) (Loader, error) {
 		connstr += "?" + p.Encode()
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "mysql", initialSQL: d.InitialQuery}
+	l := &genericLoader{connStr: connstr, driver: "mysql", initialSQL: d.InitialQuery,
+		dbConf: d,
+	}
 	return l, nil
 }
 
@@ -307,7 +337,9 @@ func newOracleLoader(d *Database) (Loader, error) {
 		connstr += "?" + p.Encode()
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "oci8", initialSQL: d.InitialQuery}
+	l := &genericLoader{connStr: connstr, driver: "oci8", initialSQL: d.InitialQuery,
+		dbConf: d,
+	}
 	return l, nil
 }
 
@@ -330,7 +362,9 @@ func newMssqlLoader(d *Database) (Loader, error) {
 
 	connstr := p.Encode()
 
-	l := &genericLoader{connStr: connstr, driver: "mssql", initialSQL: d.InitialQuery}
+	l := &genericLoader{connStr: connstr, driver: "mssql", initialSQL: d.InitialQuery,
+		dbConf: d,
+	}
 	return l, nil
 }
 
@@ -354,4 +388,18 @@ func GetLoader(d *Database) (Loader, error) {
 		return newMssqlLoader(d)
 	}
 	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
+}
+
+func prepareParams(q *Query, params map[string]string) map[string]interface{} {
+	p := make(map[string]interface{})
+	if q.Params != nil {
+		for k, v := range q.Params {
+			p[k] = v
+		}
+	}
+	for k, v := range params {
+		p[k] = v
+	}
+
+	return p
 }

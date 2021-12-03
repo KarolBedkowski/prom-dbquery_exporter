@@ -17,6 +17,6 @@ build:
 	go build -v -o prom-dbquery_exporter  --ldflags $(LDFLAGS) cmd/dbquery_exporter/*.go
 
 run:
-	go run -v *.go -log.level debug
+	go run -v cmd/dbquery_exporter/*.go -log.level debug
 
 # vim:ft=make

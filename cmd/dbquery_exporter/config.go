@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"strings"
 	"text/template"
+	"time"
 
 	"gopkg.in/yaml.v2"
 )
@@ -29,6 +30,9 @@ type (
 
 		// Max time for query result
 		Timeout int `yaml:"timeout"`
+
+		// Query name for internal use
+		Name string `yaml:"-"`
 	}
 
 	// Database define database connection
@@ -45,6 +49,12 @@ type (
 
 		// Default timeout for all queries
 		Timeout int `yaml:"timeout"`
+
+		// Connection and ping timeout
+		ConnectTimeout uint `yaml:"connect_timeout"`
+
+		// Database name for internal use
+		Name string `yaml:"-"`
 	}
 
 	// Configuration keep application configuration
@@ -99,5 +109,21 @@ func loadConfiguration(filename string) (*Configuration, error) {
 		return nil, fmt.Errorf("validate error: %w", err)
 	}
 
+	for name, db := range c.Database {
+		db.Name = name
+	}
+
+	for name, q := range c.Query {
+		q.Name = name
+	}
+
 	return c, nil
+}
+
+func (d *Database) connectTimeout() time.Duration {
+	if d.ConnectTimeout > 0 {
+		return time.Duration(d.ConnectTimeout) * time.Second
+	}
+
+	return 15 * time.Second
 }
