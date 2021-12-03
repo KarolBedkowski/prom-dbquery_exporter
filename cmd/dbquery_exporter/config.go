@@ -85,7 +85,7 @@ func (c *Configuration) validate() error {
 
 func loadConfiguration(filename string) (*Configuration, error) {
 	c := &Configuration{}
-	b, err := ioutil.ReadFile(filename)
+	b, err := ioutil.ReadFile(filename) // #nosec
 
 	if err != nil {
 		return nil, fmt.Errorf("read file error: %w", err)

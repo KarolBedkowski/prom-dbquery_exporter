@@ -26,8 +26,6 @@ func InitializeLogger(level string, format string) {
 	var l zerolog.Logger
 
 	switch format {
-	case "json":
-		l = log.Logger
 	default:
 		fmt.Printf("unknown log format; using logfmt")
 		fallthrough
@@ -36,6 +34,8 @@ func InitializeLogger(level string, format string) {
 			Out:        os.Stderr,
 			TimeFormat: time.RFC3339,
 		})
+	case "json":
+		l = log.Logger
 	}
 
 	switch level {

@@ -130,4 +130,3 @@ query:
       {{- range .R }}
       oracle_v_sysmetric_{{ .NAME | keepAlfaNumUnderlineSpace | trim | replaceSpaces | toLower }} {{ .VALUE }}
       {{- end  }}
-

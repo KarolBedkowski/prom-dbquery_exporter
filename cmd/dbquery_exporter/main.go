@@ -7,7 +7,8 @@ import (
 	"flag"
 	"fmt"
 	"net/http"
-	_ "net/http/pprof"
+
+	//	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -15,10 +16,10 @@ import (
 	"syscall"
 	"time"
 
-	//_ "github.com/denisenkom/go-mssqldb"
-	//_ "github.com/go-sql-driver/mysql"
+	// _ "github.com/denisenkom/go-mssqldb"
+	// _ "github.com/go-sql-driver/mysql"
 	_ "github.com/lib/pq"
-	//_ "github.com/mattn/go-oci8"
+	// _ "github.com/mattn/go-oci8"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/prometheus/client_golang/prometheus"

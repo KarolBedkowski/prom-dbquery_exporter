@@ -145,8 +145,7 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 
 		// convert []byte to string
 		for k, v := range rec {
-			switch v := v.(type) {
-			case []byte:
+			if v, ok := v.([]byte); ok {
 				rec[k] = string(v)
 			}
 		}
