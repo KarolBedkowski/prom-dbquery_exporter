@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -35,6 +35,8 @@ var (
 		"Address to listen on for web interface and telemetry.")
 	loglevel = flag.String("log.level", "info",
 		"Logging level (debug, info, warn, error, fatal)")
+	logformat = flag.String("log.format", "logfmt",
+		"Logging log format (logfmt, json)")
 
 	// Metrics about the exporter itself.
 	queryDuration = prometheus.NewSummaryVec(
@@ -63,8 +65,6 @@ var (
 			Help: "Number of result loaded from cache",
 		},
 	)
-
-	requestID uint64
 )
 
 type (
@@ -100,7 +100,7 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func formatResult(db *Database, query *Query, dbName, queryName string, result *queryResult) ([]byte, error) {
+func formatResult(ctx context.Context, db *Database, query *Query, dbName, queryName string, result *queryResult) ([]byte, error) {
 	data := &Result{
 		Query:          queryName,
 		Database:       dbName,
@@ -112,9 +112,10 @@ func formatResult(db *Database, query *Query, dbName, queryName string, result *
 		Count:          len(result.records),
 	}
 
-	log.With("query", queryName).
-		With("db", dbName).
-		Debugf("query_time=%f rows=%d", data.QueryDuration, data.Count)
+	log.Ctx(ctx).Debug().
+		Float64("query_time", data.QueryDuration).
+		Int("rows", data.Count).
+		Msg("format result")
 
 	var output bytes.Buffer
 	bw := bufio.NewWriter(&output)
@@ -156,7 +157,8 @@ func (q *queryHandler) clearCache() {
 	q.cache = make(map[string]*cacheItem)
 }
 
-func (q *queryHandler) makeQuery(ctx context.Context, queryName, dbName, queryKey string, loader Loader,
+func (q *queryHandler) makeQuery(ctx context.Context,
+	queryName, dbName, queryKey string, loader Loader,
 	params map[string]string, db *Database) ([]byte, error) {
 
 	query, ok := (q.Configuration.Query)[queryName]
@@ -184,7 +186,7 @@ func (q *queryHandler) makeQuery(ctx context.Context, queryName, dbName, queryKe
 	queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
 
 	// format metrics
-	output, err := formatResult(db, query, dbName, queryName, result)
+	output, err := formatResult(ctx, db, query, dbName, queryName, result)
 	if err != nil {
 		return nil, fmt.Errorf("format result error: %w", err)
 	}
@@ -220,11 +222,8 @@ func (q *queryHandler) waitQueryFinish(queryKey string) (ok bool) {
 }
 
 func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-
-	requestID := atomic.AddUint64(&requestID, 1)
-	tstart := time.Now()
-	l := log.With("req_id", requestID)
-	l.Infof("request remote='%s', url='%s'", r.RemoteAddr, r.URL)
+	ctx := r.Context()
+	l := log.Ctx(ctx)
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
@@ -241,30 +240,32 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	for _, dbName := range dbNames {
 		db, ok := q.Configuration.Database[dbName]
 		if !ok {
-			l.Errorf("unknown database='%s'", dbName)
+			l.Warn().Msgf("unknown database '%s'", dbName)
 			queryRequestErrors.Inc()
 			continue
 		}
 
+		lDb := l.With().Str("db", dbName).Logger()
 		loader, err := GetLoader(db)
 		if loader != nil {
-			defer loader.Close()
+			defer loader.Close(lDb.WithContext(ctx))
 		}
-
 		if err != nil {
-			l.With("db", dbName).Errorf("get loader error '%s'", err)
+			lDb.Error().Err(err).Msg("get loader error")
 			queryRequestErrors.Inc()
 			continue
 		}
+
+		lDb.Debug().Str("loader", loader.String()).Msg("loader created")
 
 		for _, queryName := range queryNames {
 			queryKey := queryName + "\t" + dbName
+			lQuery := lDb.With().Str("query", queryName).Logger()
+			ctxQuery := lQuery.WithContext(ctx)
 
 			// check is previous query finished; if yes - lock it
 			if !q.waitQueryFinish(queryKey) {
-				l.With("db", dbName).
-					With("query", queryName).
-					Warn("timeout while waiting for query finish")
+				lQuery.Warn().Msg("timeout while waiting for query finish")
 				continue
 			}
 
@@ -277,7 +278,7 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				timeout = time.Duration(5) * time.Minute
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			ctx, cancel := context.WithTimeout(ctxQuery, timeout)
 			output, err := q.makeQuery(ctx, queryName, dbName, queryKey, loader, params, db)
 			cancel()
 
@@ -288,9 +289,7 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			if err != nil {
 				queryRequestErrors.Inc()
-				l.With("db", dbName).
-					With("query", queryName).
-					Errorf("query error: %s", err)
+				lQuery.Warn().Err(err).Msg("query error")
 				continue
 			}
 
@@ -303,7 +302,6 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !anyProcessed {
 		http.Error(w, "error", 400)
 	}
-	l.Debugf("done in %s", time.Since(tstart))
 }
 
 type infoHndler struct {
@@ -378,14 +376,17 @@ func main() {
 		os.Exit(0)
 	}
 
-	InitializeLogger(*loglevel)
-	log.Infoln("Starting DBQuery exporter", version.Info())
-	log.Infoln("Build context", version.BuildContext())
+	InitializeLogger(*loglevel, *logformat)
+	Logger.Info().
+		Str("version", version.Info()).
+		Str("build_ctx", version.BuildContext()).
+		Msg("Starting DBQuery exporter")
 
 	c, err := loadConfiguration(*configFile)
 	if err != nil {
-		log.Fatalf("Error parsing config file: %s", err)
+		Logger.Fatal().Err(err).Str("file", *configFile).Msg("Error parsing config file")
 	}
+
 	handler := newQueryHandler(c)
 	iHandler := infoHndler{Configuration: c}
 
@@ -398,10 +399,9 @@ func main() {
 				handler.Configuration = newConf
 				handler.clearCache()
 				iHandler.Configuration = newConf
-				log.Info("configuration reloaded")
+				log.Info().Msg("configuration reloaded")
 			} else {
-				log.Errorf("reloading configuration err: %s", err)
-				log.Errorf("using old configuration")
+				Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
 			}
 		}
 	}()
@@ -417,12 +417,18 @@ func main() {
 	prometheus.MustRegister(reqDuration)
 
 	http.Handle("/metrics", promhttp.Handler())
-	http.Handle("/query", promhttp.InstrumentHandlerDuration(
-		reqDuration.MustCurryWith(prometheus.Labels{"handler": "query"}),
-		handler))
-	http.Handle("/info", promhttp.InstrumentHandlerDuration(
-		reqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
-		iHandler))
-	log.Infof("Listening on %s", *listenAddress)
-	log.Fatal(http.ListenAndServe(*listenAddress, nil))
+	http.Handle("/query",
+		newLogMiddleware(
+			promhttp.InstrumentHandlerDuration(
+				reqDuration.MustCurryWith(prometheus.Labels{"handler": "query"}),
+				handler), "query"))
+	http.Handle("/info",
+		newLogMiddleware(
+			promhttp.InstrumentHandlerDuration(
+				reqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
+				iHandler), "info"))
+	Logger.Info().Msgf("Listening on %s", *listenAddress)
+	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
+		Logger.Fatal().Err(err).Msg("Listen and serve failed")
+	}
 }

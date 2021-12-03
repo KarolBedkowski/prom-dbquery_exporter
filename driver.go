@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/rs/zerolog/log"
 )
 
 type (
@@ -24,7 +25,9 @@ type (
 		// Query execute sql and returns records or error. Open connection when necessary.
 		Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error)
 		// Close db connection.
-		Close()
+		Close(ctx context.Context)
+		// Human-friendly info
+		String() string
 	}
 
 	queryResult struct {
@@ -42,41 +45,42 @@ type (
 	}
 )
 
-func (g *genericLoader) connect() (err error) {
-	log.With("driver", g.driver).
-		Debugf("genericQuery connect to '%s'", g.connStr)
+func (g *genericLoader) connect(ctx context.Context) (err error) {
+	l := log.Ctx(ctx)
+	l.Debug().Str("connstr", g.connStr).Msg("genericQuery connecting")
 
-	g.conn, err = sqlx.Connect(g.driver, g.connStr)
+	lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	g.conn, err = sqlx.ConnectContext(lctx, g.driver, g.connStr)
+	cancel()
 	if err != nil {
 		return fmt.Errorf("connect error: %w", err)
 	}
 
 	// launch initial sqls if defined
-	if g.initialSQL != nil {
-		for _, sql := range g.initialSQL {
-			log.With("driver", g.driver).
-				Debugf("genericQuery execute initial sql '%s'", sql)
-			_, err = g.conn.Queryx(sql)
-			if err != nil {
-				return fmt.Errorf("execute initial sql error: %w", err)
-			}
+	for _, sql := range g.initialSQL {
+		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
+		lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		_, err = g.conn.QueryxContext(lctx, sql)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("execute initial sql error: %w", err)
 		}
 	}
+
+	l.Debug().Msg("genericQuery connected")
 	return nil
 }
 
 func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error) {
 	var err error
-
+	l := log.Ctx(ctx).With().Str("driver", g.driver).Str("sql", q.SQL).Interface("params", q.Params).Logger()
 	if g.conn != nil {
 		// test existing connection
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err = g.conn.PingContext(ctx)
+		ctxPing, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		err = g.conn.PingContext(ctxPing)
 		cancel()
 		if err != nil {
-			log.With("driver", g.driver).
-				Debugf("genericQuery execute '%v', '%v' pin failed: %s",
-					q.SQL, q.Params, err.Error())
+			l.Err(err).Msg("genericQuery execute ping failed")
 			g.conn.Close()
 			g.conn = nil
 		}
@@ -84,13 +88,10 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 
 	// connect to database if not connected
 	if g.conn == nil {
-		if err := g.connect(); err != nil {
+		if err := g.connect(ctx); err != nil {
 			return nil, err
 		}
 	}
-
-	log.With("driver", g.driver).
-		Debugf("genericQuery execute '%v', '%v'", q.SQL, q.Params)
 
 	// prepare query parameters; combine parameters from query and
 	p := make(map[string]interface{})
@@ -115,6 +116,8 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	l.Debug().Dur("timeout", timeout).Msg("genericQuery start execute")
+
 	var rows *sqlx.Rows
 	// query
 	if len(p) > 0 {
@@ -128,8 +131,7 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 	}
 
 	if cols, err := rows.Columns(); err == nil {
-		log.With("driver", g.driver).
-			Debugf("genericQuery columns: %v", cols)
+		l.Debug().Interface("cols", cols).Msg("genericQuery columns")
 	} else {
 		return nil, fmt.Errorf("get columns error: %w", err)
 	}
@@ -156,9 +158,9 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 }
 
 // Close database connection
-func (g *genericLoader) Close() {
+func (g *genericLoader) Close(ctx context.Context) {
 	if g.conn != nil {
-		log.With("driver", g.driver).Debugf("genericQuery disconnect from %s'", g.connStr)
+		log.Ctx(ctx).Debug().Msg("genericQuery disconnect")
 		g.conn.Close()
 		g.conn = nil
 	}
@@ -184,9 +186,6 @@ func newPostgresLoader(d *Database) (Loader, error) {
 		driver:     "postgres",
 		initialSQL: d.InitialQuery,
 	}
-
-	log.Debugf("created loader: %s", l.String())
-
 	return l, nil
 }
 
@@ -213,8 +212,6 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	if len(p) > 0 {
 		l.connStr += "?" + p.Encode()
 	}
-	log.Debugf("created loader: %s", l.String())
-
 	return l, nil
 }
 
@@ -263,8 +260,6 @@ func newMysqlLoader(d *Database) (Loader, error) {
 	}
 
 	l := &genericLoader{connStr: connstr, driver: "mysql", initialSQL: d.InitialQuery}
-	log.Debugf("created loader: %s", l.String())
-
 	return l, nil
 }
 
@@ -314,8 +309,6 @@ func newOracleLoader(d *Database) (Loader, error) {
 	}
 
 	l := &genericLoader{connStr: connstr, driver: "oci8", initialSQL: d.InitialQuery}
-	log.Debugf("created loader: %s", l.String())
-
 	return l, nil
 }
 
@@ -338,10 +331,7 @@ func newMssqlLoader(d *Database) (Loader, error) {
 
 	connstr := p.Encode()
 
-	l := &genericLoader{connStr: connstr, driver: "mssql",
-		initialSQL: d.InitialQuery}
-	log.Debugf("created loader: %s", l.String())
-
+	l := &genericLoader{connStr: connstr, driver: "mssql", initialSQL: d.InitialQuery}
 	return l, nil
 }
 
