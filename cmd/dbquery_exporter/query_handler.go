@@ -11,6 +11,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -48,6 +49,11 @@ var (
 			Help: "Number of result loaded from cache",
 		},
 	)
+
+	queryResultCache = resultCache{
+		cache:     make(map[string]*cacheItem),
+		cacheLock: &sync.Mutex{},
+	}
 )
 
 func init() {
@@ -58,8 +64,8 @@ func init() {
 }
 
 type (
-	// Result keep query result and some metadata parsed to template
-	Result struct {
+	// resultTmplData keep query result and some metadata parsed to template
+	resultTmplData struct {
 		// Records (rows)
 		R []Record
 		// Parameters
@@ -75,34 +81,24 @@ type (
 		// Database name
 		Database string
 	}
-
-	cacheItem struct {
-		expireTS time.Time
-		content  []byte
-	}
 )
 
-func formatResult(ctx context.Context, db *Database, query *Query, dbName, queryName string, result *queryResult) ([]byte, error) {
-	data := &Result{
-		Query:          queryName,
-		Database:       dbName,
-		R:              result.records,
-		P:              result.params,
+func formatResult(ctx context.Context, qr *queryResult, query *Query,
+	db *Database) ([]byte, error) {
+	r := &resultTmplData{
+		Query:          query.Name,
+		Database:       db.Name,
+		R:              qr.records,
+		P:              qr.params,
 		L:              db.Labels,
-		QueryStartTime: result.start.Unix(),
-		QueryDuration:  result.duration,
-		Count:          len(result.records),
+		QueryStartTime: qr.start.Unix(),
+		QueryDuration:  qr.duration,
+		Count:          len(qr.records),
 	}
-
-	log.Ctx(ctx).Debug().
-		Float64("query_time", data.QueryDuration).
-		Int("rows", data.Count).
-		Msg("format result")
 
 	var output bytes.Buffer
 	bw := bufio.NewWriter(&output)
-
-	err := query.MetricTpl.Execute(bw, data)
+	err := query.MetricTpl.Execute(bw, r)
 	if err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
@@ -110,83 +106,76 @@ func formatResult(ctx context.Context, db *Database, query *Query, dbName, query
 	bw.Flush()
 
 	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
-
 	return b, nil
 }
 
-type queryHandler struct {
-	Configuration *Configuration
-	cache         map[string]*cacheItem
-	cacheLock     *sync.Mutex
+type (
+	resultCache struct {
+		cache     map[string]*cacheItem
+		cacheLock *sync.Mutex
+	}
 
+	cacheItem struct {
+		expireTS time.Time
+		content  []byte
+	}
+)
+
+func (r *resultCache) get(queryKey string) ([]byte, bool) {
+	r.cacheLock.Lock()
+	defer r.cacheLock.Unlock()
+	ci, ok := r.cache[queryKey]
+	if !ok {
+		return nil, false
+	}
+
+	if ci.expireTS.After(time.Now()) {
+		queryCacheHits.Inc()
+		return ci.content, true
+	}
+
+	delete(r.cache, queryKey)
+	return nil, false
+}
+
+func (r *resultCache) put(queryKey string, ttl uint, data []byte) {
+	r.cacheLock.Lock()
+	r.cache[queryKey] = &cacheItem{
+		expireTS: time.Now().Add(time.Duration(ttl) * time.Second),
+		content:  data,
+	}
+	r.cacheLock.Unlock()
+}
+
+func (r *resultCache) clear() {
+	r.cacheLock.Lock()
+	r.cache = make(map[string]*cacheItem)
+	r.cacheLock.Unlock()
+}
+
+// QueryHandler handle all request for metrics
+type QueryHandler struct {
+	configuration    *Configuration
 	runningQuery     map[string]time.Time
 	runningQueryLock *sync.Mutex
 }
 
-func newQueryHandler(c *Configuration) *queryHandler {
-	return &queryHandler{
-		Configuration:    c,
-		cache:            make(map[string]*cacheItem),
-		cacheLock:        &sync.Mutex{},
+// NewQueryHandler create new QueryHandler from configuration
+func NewQueryHandler(c *Configuration) *QueryHandler {
+	return &QueryHandler{
+		configuration:    c,
 		runningQuery:     make(map[string]time.Time),
 		runningQueryLock: &sync.Mutex{},
 	}
 }
 
-func (q *queryHandler) clearCache() {
-	q.cacheLock.Lock()
-	defer q.cacheLock.Unlock()
-	q.cache = make(map[string]*cacheItem)
+// SetConfiguration update handler configuration
+func (q *QueryHandler) SetConfiguration(c *Configuration) {
+	q.configuration = c
+	queryResultCache.clear()
 }
 
-func (q *queryHandler) makeQuery(ctx context.Context,
-	queryName, dbName, queryKey string, loader Loader,
-	params map[string]string, db *Database) ([]byte, error) {
-
-	query, ok := (q.Configuration.Query)[queryName]
-	if !ok {
-		return nil, fmt.Errorf("unknown query '%s'", queryName)
-	}
-
-	// try to get item from cache
-	if query.CachingTime > 0 {
-		q.cacheLock.Lock()
-		ci, ok := q.cache[queryKey]
-		q.cacheLock.Unlock()
-		if ok && ci.expireTS.After(time.Now()) {
-			queryCacheHits.Inc()
-			return ci.content, nil
-		}
-	}
-
-	// get rows
-	result, err := loader.Query(ctx, query, params)
-	if err != nil {
-		return nil, fmt.Errorf("query error: %w", err)
-	}
-
-	queryDuration.WithLabelValues(queryName, dbName).Observe(result.duration)
-
-	// format metrics
-	output, err := formatResult(ctx, db, query, dbName, queryName, result)
-	if err != nil {
-		return nil, fmt.Errorf("format result error: %w", err)
-	}
-
-	if query.CachingTime > 0 {
-		// update cache
-		q.cacheLock.Lock()
-		q.cache[queryKey] = &cacheItem{
-			expireTS: time.Now().Add(time.Duration(query.CachingTime) * time.Second),
-			content:  output,
-		}
-		q.cacheLock.Unlock()
-	}
-
-	return output, nil
-}
-
-func (q *queryHandler) waitQueryFinish(queryKey string) (ok bool) {
+func (q *QueryHandler) waitQueryFinish(queryKey string) (ok bool) {
 	for i := 0; i < 120; i += 5 { // 2min
 		q.runningQueryLock.Lock()
 		startTs, ok := q.runningQuery[queryKey]
@@ -203,9 +192,109 @@ func (q *queryHandler) waitQueryFinish(queryKey string) (ok bool) {
 	return false
 }
 
-func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, queryName string, params map[string]string) ([]byte, error) {
+	query, ok := (q.configuration.Query)[queryName]
+	if !ok {
+		return nil, fmt.Errorf("unknown query '%s'", queryName)
+	}
+
+	logger := log.Ctx(ctx)
+	queryRequest.WithLabelValues(queryName, db.Name).Inc()
+	queryKey := queryName + "\t" + db.Name
+
+	logger.Debug().Msg("query start")
+
+	// try to get item from cache
+	if query.CachingTime > 0 {
+		if data, ok := queryResultCache.get(queryKey); ok {
+			logger.Debug().Msg("query result from cache")
+			return data, nil
+		}
+	}
+
+	// check is previous query finished; if yes - lock it
+	if !q.waitQueryFinish(queryKey) {
+		return nil, errors.New("timeout while waiting for query finish")
+	}
+
+	result, err := loader.Query(ctx, query, params)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %w", err)
+	}
+
+	logger.Debug().
+		Int("records", len(result.records)).
+		Float64("duration", result.duration).
+		Msg("query finished")
+
+	// format metrics
+	output, err := formatResult(ctx, result, query, db)
+	if err != nil {
+		return nil, fmt.Errorf("format result error: %w", err)
+	}
+
+	if query.CachingTime > 0 {
+		// update cache
+		queryResultCache.put(queryKey, query.CachingTime, output)
+	}
+
+	queryDuration.WithLabelValues(queryName, db.Name).Observe(result.duration)
+
+	// mark query finished
+	q.runningQueryLock.Lock()
+	q.runningQuery[queryKey] = time.Time{}
+	q.runningQueryLock.Unlock()
+
+	return output, nil
+}
+
+func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
+	queryNames []string, params map[string]string, w http.ResponseWriter) error {
+	db, ok := q.configuration.Database[dbName]
+	if !ok {
+		return fmt.Errorf("unknown database '%s'", dbName)
+	}
+
+	logger := log.Ctx(ctx)
+	logger.Debug().Msg("start processing database")
+
+	loader, err := GetLoader(db)
+	if err != nil {
+		return fmt.Errorf("get loader error")
+	}
+
+	if loader != nil {
+		defer loader.Close(logger.WithContext(ctx))
+	}
+
+	logger.Debug().Str("loader", loader.String()).Msg("loader created")
+
+	anyProcessed := false
+	for _, queryName := range queryNames {
+		loggerQ := logger.With().Str("query", queryName).Logger()
+		ctxQuery := loggerQ.WithContext(ctx)
+		output, err := q.query(ctxQuery, loader, db, queryName, params)
+		if err == nil {
+			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
+			w.Write(output)
+			anyProcessed = true
+		} else {
+			loggerQ.Error().Err(err).Msg("make query error")
+		}
+	}
+
+	logger.Debug().Msg("database processing finished")
+
+	if !anyProcessed {
+		return errors.New("no queries successfully processed")
+	}
+
+	return nil
+}
+
+func (q QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	l := log.Ctx(ctx)
+	logger := log.Ctx(ctx)
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
@@ -220,67 +309,18 @@ func (q queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	anyProcessed := false
 	for _, dbName := range dbNames {
-		db, ok := q.Configuration.Database[dbName]
-		if !ok {
-			l.Warn().Msgf("unknown database '%s'", dbName)
+		logger := logger.With().Str("db", dbName).Logger()
+		ctx := logger.WithContext(ctx)
+
+		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
+			logger.Warn().Err(err).Msg("query database error")
 			queryRequestErrors.Inc()
 			continue
 		}
 
-		lDb := l.With().Str("db", dbName).Logger()
-		loader, err := GetLoader(db)
-		if loader != nil {
-			defer loader.Close(lDb.WithContext(ctx))
-		}
-		if err != nil {
-			lDb.Error().Err(err).Msg("get loader error")
-			queryRequestErrors.Inc()
-			continue
-		}
-
-		lDb.Debug().Str("loader", loader.String()).Msg("loader created")
-
-		for _, queryName := range queryNames {
-			queryKey := queryName + "\t" + dbName
-			lQuery := lDb.With().Str("query", queryName).Logger()
-			ctxQuery := lQuery.WithContext(ctx)
-
-			// check is previous query finished; if yes - lock it
-			if !q.waitQueryFinish(queryKey) {
-				lQuery.Warn().Msg("timeout while waiting for query finish")
-				continue
-			}
-
-			queryRequest.WithLabelValues(queryName, dbName).Inc()
-
-			var timeout time.Duration
-			if db.Timeout > 0 {
-				timeout = time.Duration(db.Timeout) * time.Second
-			} else {
-				timeout = time.Duration(5) * time.Minute
-			}
-
-			ctx, cancel := context.WithTimeout(ctxQuery, timeout)
-			output, err := q.makeQuery(ctx, queryName, dbName, queryKey, loader, params, db)
-			cancel()
-
-			// mark query finished
-			q.runningQueryLock.Lock()
-			q.runningQuery[queryKey] = time.Time{}
-			q.runningQueryLock.Unlock()
-
-			if err != nil {
-				queryRequestErrors.Inc()
-				lQuery.Warn().Err(err).Msg("query error")
-				continue
-			}
-
-			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
-			w.Write(output)
-
-			anyProcessed = true
-		}
+		anyProcessed = true
 	}
+
 	if !anyProcessed {
 		http.Error(w, "error", 400)
 	}

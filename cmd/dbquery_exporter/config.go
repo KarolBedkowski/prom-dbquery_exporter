@@ -24,13 +24,12 @@ type (
 		// Query params
 		Params map[string]interface{}
 		// Result caching time
-		CachingTime int `yaml:"caching_time"`
+		CachingTime uint `yaml:"caching_time"`
+		// Max time for query result
+		Timeout uint `yaml:"timeout"`
+
 		// Parsed template  (internal)
 		MetricTpl *template.Template `yaml:"-"`
-
-		// Max time for query result
-		Timeout int `yaml:"timeout"`
-
 		// Query name for internal use
 		Name string `yaml:"-"`
 	}
@@ -48,7 +47,7 @@ type (
 		InitialQuery []string `yaml:"initial_query"`
 
 		// Default timeout for all queries
-		Timeout int `yaml:"timeout"`
+		Timeout uint `yaml:"timeout"`
 
 		// Connection and ping timeout
 		ConnectTimeout uint `yaml:"connect_timeout"`

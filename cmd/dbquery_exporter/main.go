@@ -57,7 +57,7 @@ func main() {
 		Logger.Fatal().Err(err).Str("file", *configFile).Msg("Error parsing config file")
 	}
 
-	handler := newQueryHandler(c)
+	handler := NewQueryHandler(c)
 	iHandler := infoHndler{Configuration: c}
 
 	// handle hup for reloading configuration
@@ -66,8 +66,7 @@ func main() {
 	go func() {
 		for range hup {
 			if newConf, err := loadConfiguration(*configFile); err == nil {
-				handler.Configuration = newConf
-				handler.clearCache()
+				handler.SetConfiguration(newConf)
 				iHandler.Configuration = newConf
 				log.Info().Msg("configuration reloaded")
 			} else {
