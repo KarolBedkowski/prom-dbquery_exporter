@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"text/template"
 )
 
 //
@@ -17,8 +18,53 @@ type infoHndler struct {
 	Configuration *Configuration
 }
 
-func (q infoHndler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+const infoTmpl = `
+DATABASES
+=========
+{{- range .Database}}
+{{ .Name }}
+-----------
+- driver {{ .Driver }}
+- connection:
+  {{- range $key, $val := .Connection }}
+    - {{ $key }}: {{ $val | redact $key }}
+  {{- end }}
+- labels:
+  {{- range $key, $val := .Labels }}
+    - {{ $key }}: {{ $val | printf "%v" }}
+  {{- end }}
 
+{{- end }}
+
+QUERIES
+=======
+
+{{- range .Query}}
+{{ .Name }}
+-----------
+- sql: {{ .SQL }}
+- caching_time: {{ .CachingTime }}
+- metrics: {{ .Metrics }}
+- params:
+  {{- range $key, $val := .Params }}
+  - {{ $key }}: {{ $val | printf "%v"  }}
+  {{- end }}
+
+{{- end }}
+`
+
+func redact(key string, val interface{}) string {
+	if strings.HasPrefix(strings.ToLower(key), "pass") {
+		return "***"
+	}
+	return fmt.Sprintf("%v", val)
+}
+
+var funcMap = template.FuncMap{
+	"redact": redact,
+}
+
+func (q infoHndler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.RemoteAddr, "127.0.0.1:") && !strings.HasPrefix(r.RemoteAddr, "localhost:") {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
@@ -26,53 +72,9 @@ func (q infoHndler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	w.Write([]byte("DATABASES\n========="))
-	for name, db := range q.Configuration.Database {
-		w.Write([]byte{'\n'})
-		w.Write([]byte(name))
-		w.Write([]byte("\n-----"))
-		w.Write([]byte("\n - driver: "))
-		w.Write([]byte(db.Driver))
-		w.Write([]byte("\n - connection:\n"))
-		for k, v := range db.Connection {
-			w.Write([]byte("    - "))
-			w.Write([]byte(k))
-			w.Write([]byte(": "))
-			if strings.HasPrefix(strings.ToLower(k), "pass") {
-				w.Write([]byte("*"))
-			} else {
-				w.Write([]byte(fmt.Sprintf("%v", v)))
-			}
-			w.Write([]byte{'\n'})
-		}
-		w.Write([]byte(" - labels:\n"))
-		for k, v := range db.Labels {
-			w.Write([]byte("    - "))
-			w.Write([]byte(k))
-			w.Write([]byte(": "))
-			w.Write([]byte(fmt.Sprintf("%v", v)))
-			w.Write([]byte{'\n'})
-		}
-	}
-
-	w.Write([]byte("\n\nQueries\n======="))
-	for name, q := range q.Configuration.Query {
-		w.Write([]byte{'\n'})
-		w.Write([]byte(name))
-		w.Write([]byte("\n-----"))
-		w.Write([]byte("\n - sql: "))
-		w.Write([]byte(q.SQL))
-		w.Write([]byte("\n - caching time: "))
-		w.Write([]byte(fmt.Sprintf("%v", q.CachingTime)))
-		w.Write([]byte("\n - metrics:\n"))
-		w.Write([]byte(q.Metrics))
-		w.Write([]byte("\n - params:\n"))
-		for k, v := range q.Params {
-			w.Write([]byte("    - "))
-			w.Write([]byte(k))
-			w.Write([]byte(": "))
-			w.Write([]byte(fmt.Sprintf("%v", v)))
-			w.Write([]byte{'\n'})
-		}
+	t := template.Must(template.New("letter").Funcs(funcMap).Parse(infoTmpl))
+	err := t.Execute(w, q.Configuration)
+	if err != nil {
+		Logger.Error().Err(err).Msg("executing template error")
 	}
 }
