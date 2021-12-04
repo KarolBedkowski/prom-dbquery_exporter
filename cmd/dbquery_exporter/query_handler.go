@@ -103,7 +103,7 @@ func formatResult(ctx context.Context, qr *queryResult, query *Query,
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 
-	bw.Flush()
+	_ = bw.Flush()
 
 	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
 	return b, nil
@@ -260,7 +260,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 
 	loader, err := GetLoader(db)
 	if err != nil {
-		return fmt.Errorf("get loader error")
+		return errors.New("get loader error")
 	}
 
 	if loader != nil {
@@ -275,11 +275,16 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 		ctxQuery := loggerQ.WithContext(ctx)
 		output, err := q.query(ctxQuery, loader, db, queryName, params)
 		if err == nil {
-			w.Write([]byte(fmt.Sprintf("## query %s\n", queryName)))
-			w.Write(output)
+			if _, err := w.Write([]byte(fmt.Sprintf("## query %s\n", queryName))); err != nil {
+				return fmt.Errorf("write result error: %w", err)
+			}
+			if _, err := w.Write(output); err != nil {
+				return fmt.Errorf("write result error: %w", err)
+			}
 			anyProcessed = true
 		} else {
 			loggerQ.Error().Err(err).Msg("make query error")
+			// to not break processing other queries when query fail
 		}
 	}
 

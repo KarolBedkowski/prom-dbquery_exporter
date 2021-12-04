@@ -94,7 +94,7 @@ func (g *genericLoader) ping(ctx context.Context) {
 	cancel()
 	if err != nil {
 		l.Err(err).Msg("genericQuery execute ping failed; closing connection")
-		g.conn.Close()
+		_ = g.conn.Close()
 		g.conn = nil
 	}
 }
@@ -173,7 +173,7 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 func (g *genericLoader) Close(ctx context.Context) {
 	if g.conn != nil {
 		log.Ctx(ctx).Debug().Str("db", g.dbConf.Name).Msg("genericQuery disconnect")
-		g.conn.Close()
+		_ = g.conn.Close()
 		g.conn = nil
 	}
 }

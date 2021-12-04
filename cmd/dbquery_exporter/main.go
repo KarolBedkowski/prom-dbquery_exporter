@@ -42,7 +42,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Fprintln(os.Stdout, version.Print("DBQuery exporter"))
+		_, _ = fmt.Fprintln(os.Stdout, version.Print("DBQuery exporter"))
 		os.Exit(0)
 	}
 
