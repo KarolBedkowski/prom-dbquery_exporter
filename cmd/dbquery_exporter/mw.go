@@ -13,6 +13,8 @@ import (
 	"net/http"
 	"sync/atomic"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 type (
@@ -42,8 +44,11 @@ func (r *logResponseWriter) WriteHeader(statusCode int) {
 
 var requestID uint64
 
-func newLogMiddleware(next http.Handler, name string) http.Handler {
-	mlog := Logger.With().Str("handler", name).Logger()
+// newLogMiddleware create new logging middleware.
+// `name` is handler name added to log.
+// If `asDebug` is true log level for non-error events is DEBUG; if false - is INFO.
+func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler {
+	mlog := Logger
 	logFn := func(rw http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -55,9 +60,16 @@ func newLogMiddleware(next http.Handler, name string) http.Handler {
 		ll := l.With().
 			Str("remote", r.RemoteAddr).
 			Str("uri", r.RequestURI).
-			Str("method", r.Method).Logger()
+			Str("method", r.Method).
+			Str("handler", name).
+			Logger()
 
-		ll.Info().Msg("request start")
+		if asDebug {
+			ll.Debug().Msg("request start")
+		} else {
+			ll.Info().Msg("request start")
+		}
+
 		responseData := &responseData{
 			status: 0,
 			size:   0,
@@ -71,19 +83,20 @@ func newLogMiddleware(next http.Handler, name string) http.Handler {
 		duration := time.Since(start)
 
 		// log request result
+		var e *zerolog.Event
 		if responseData.status < 400 && responseData.status != 404 {
-			ll.Info().
-				Int("status", responseData.status).
-				Int("size", responseData.size).
-				Dur("duration", duration).
-				Msg("request finished")
+			if asDebug {
+				e = ll.Debug()
+			} else {
+				e = ll.Info()
+			}
 		} else {
-			ll.Warn().
-				Int("status", responseData.status).
-				Int("size", responseData.size).
-				Dur("duration", duration).
-				Msg("request finished")
+			e = ll.Warn()
 		}
+		e.Int("status", responseData.status).
+			Int("size", responseData.size).
+			Dur("duration", duration).
+			Msg("request finished")
 	}
 
 	return http.HandlerFunc(logFn)
