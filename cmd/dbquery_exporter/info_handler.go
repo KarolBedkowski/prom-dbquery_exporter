@@ -14,7 +14,7 @@ import (
 // Distributed under terms of the GPLv3 license.
 //
 
-type infoHndler struct {
+type infoHandler struct {
 	Configuration *Configuration
 }
 
@@ -64,7 +64,7 @@ var funcMap = template.FuncMap{
 	"redact": redact,
 }
 
-func (q infoHndler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (q infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.RemoteAddr, "127.0.0.1:") && !strings.HasPrefix(r.RemoteAddr, "localhost:") {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return

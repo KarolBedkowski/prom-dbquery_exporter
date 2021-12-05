@@ -50,7 +50,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	if server.Handler != nil {
 		handler = server.Handler
 	}
-	server.Handler = newWebHandler(c, handler)
+	server.Handler = newSecWebHandler(c, handler)
 
 	config, err := web.ConfigToTLSConfig(&c.TLSConfig)
 	if err == nil {
@@ -98,7 +98,7 @@ func getConfig(configPath string) (*web.Config, error) {
 	return c, err
 }
 
-type webHandler struct {
+type secWebHandler struct {
 	handler http.Handler
 	cache   map[string]bool
 	headers map[string]string
@@ -107,14 +107,14 @@ type webHandler struct {
 	mtx sync.Mutex
 }
 
-func newWebHandler(conf *web.Config, handler http.Handler) *webHandler {
+func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 	if cu := len(conf.Users); cu > 0 {
 		Logger.Info().Int("users", cu).Msg("Authorization enabled")
 	} else {
 		Logger.Info().Msg("Authorization disabled")
 	}
 
-	return &webHandler{
+	return &secWebHandler{
 		handler: handler,
 		cache:   make(map[string]bool),
 		headers: conf.HTTPConfig.Header,
@@ -122,7 +122,7 @@ func newWebHandler(conf *web.Config, handler http.Handler) *webHandler {
 	}
 }
 
-func (wh *webHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Configure http headers.
 	for k, v := range wh.headers {
 		w.Header().Set(k, v)
