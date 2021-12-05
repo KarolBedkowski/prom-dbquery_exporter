@@ -12,7 +12,9 @@ import (
 
 	// _ "github.com/denisenkom/go-mssqldb"
 	// _ "github.com/go-sql-driver/mysql"
+
 	_ "github.com/lib/pq"
+
 	// _ "github.com/mattn/go-oci8"
 	_ "github.com/mattn/go-sqlite3"
 
@@ -22,27 +24,28 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var (
-	showVersion = flag.Bool("version", false, "Print version information.")
-	configFile  = flag.String("config.file", "dbquery.yml",
-		"Path to configuration file.")
-	listenAddress = flag.String("web.listen-address", ":9122",
-		"Address to listen on for web interface and telemetry.")
-	loglevel = flag.String("log.level", "info",
-		"Logging level (debug, info, warn, error, fatal)")
-	logformat = flag.String("log.format", "logfmt",
-		"Logging log format (logfmt, json)")
-)
-
 func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
 func main() {
+	var (
+		showVersion = flag.Bool("version", false, "Print version information.")
+		configFile  = flag.String("config.file", "dbquery.yml",
+			"Path to configuration file.")
+		listenAddress = flag.String("web.listen-address", ":9122",
+			"Address to listen on for web interface and telemetry.")
+		loglevel = flag.String("log.level", "info",
+			"Logging level (debug, info, warn, error, fatal)")
+		logformat = flag.String("log.format", "logfmt",
+			"Logging log format (logfmt, json).")
+		webConfig = flag.String("web.config", "",
+			"Path to config yaml file that can enable TLS or authentication.")
+	)
 	flag.Parse()
 
 	if *showVersion {
-		_, _ = fmt.Fprintln(os.Stdout, version.Print("DBQuery exporter"))
+		_, _ = fmt.Println(version.Print("DBQuery exporter"))
 		os.Exit(0)
 	}
 
@@ -96,8 +99,10 @@ func main() {
 			promhttp.InstrumentHandlerDuration(
 				reqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
 				iHandler), "info", true))
+
 	Logger.Info().Msgf("Listening on %s", *listenAddress)
-	if err := http.ListenAndServe(*listenAddress, nil); err != nil {
+	server := &http.Server{Addr: *listenAddress}
+	if err := listenAndServe(server, *webConfig); err != nil {
 		Logger.Fatal().Err(err).Msg("Listen and serve failed")
 	}
 }
