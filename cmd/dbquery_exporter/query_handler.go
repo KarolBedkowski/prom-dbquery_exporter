@@ -51,8 +51,7 @@ var (
 	)
 
 	queryResultCache = resultCache{
-		cache:     make(map[string]*cacheItem),
-		cacheLock: &sync.Mutex{},
+		cache: make(map[string]*cacheItem),
 	}
 )
 
@@ -112,7 +111,7 @@ func formatResult(ctx context.Context, qr *queryResult, query *Query,
 type (
 	resultCache struct {
 		cache     map[string]*cacheItem
-		cacheLock *sync.Mutex
+		cacheLock sync.Mutex
 	}
 
 	cacheItem struct {
@@ -157,15 +156,14 @@ func (r *resultCache) clear() {
 type QueryHandler struct {
 	configuration    *Configuration
 	runningQuery     map[string]time.Time
-	runningQueryLock *sync.Mutex
+	runningQueryLock sync.Mutex
 }
 
 // NewQueryHandler create new QueryHandler from configuration
 func NewQueryHandler(c *Configuration) *QueryHandler {
 	return &QueryHandler{
-		configuration:    c,
-		runningQuery:     make(map[string]time.Time),
-		runningQueryLock: &sync.Mutex{},
+		configuration: c,
+		runningQuery:  make(map[string]time.Time),
 	}
 }
 
@@ -186,10 +184,20 @@ func (q *QueryHandler) waitQueryFinish(queryKey string) (ok bool) {
 			return true
 		}
 		q.runningQueryLock.Unlock()
+		Logger.Debug().Str("queryKey", queryKey).Time("startTs", startTs).
+			TimeDiff("age", time.Now(), startTs).
+			Msg("wait for unlock")
 		time.Sleep(time.Duration(5) * time.Second)
 	}
 
 	return false
+}
+
+func (q *QueryHandler) unlockQuery(queryKey string) {
+	// mark query finished
+	q.runningQueryLock.Lock()
+	q.runningQuery[queryKey] = time.Time{}
+	q.runningQueryLock.Unlock()
 }
 
 func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, queryName string, params map[string]string) ([]byte, error) {
@@ -216,6 +224,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 	if !q.waitQueryFinish(queryKey) {
 		return nil, errors.New("timeout while waiting for query finish")
 	}
+	defer q.unlockQuery(queryKey)
 
 	result, err := loader.Query(ctx, query, params)
 	if err != nil {
@@ -239,11 +248,6 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 	}
 
 	queryDuration.WithLabelValues(queryName, db.Name).Observe(result.duration)
-
-	// mark query finished
-	q.runningQueryLock.Lock()
-	q.runningQuery[queryKey] = time.Time{}
-	q.runningQueryLock.Unlock()
 
 	return output, nil
 }
@@ -297,7 +301,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 	return nil
 }
 
-func (q QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.Ctx(ctx)
 
