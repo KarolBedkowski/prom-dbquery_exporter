@@ -307,12 +307,21 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
+
+	if len(queryNames) == 0 || len(dbNames) == 0 {
+		http.Error(w, "missing parameters", http.StatusBadRequest)
+		return
+	}
+
 	params := make(map[string]string)
 	for k, v := range r.URL.Query() {
 		if k != "query" && k != "database" {
 			params[k] = v[0]
 		}
 	}
+
+	queryNames = deduplicateStringList(queryNames)
+	dbNames = deduplicateStringList(dbNames)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
@@ -331,6 +340,24 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !anyProcessed {
-		http.Error(w, "error", 400)
+		http.Error(w, "error", http.StatusNotFound)
 	}
+}
+
+func deduplicateStringList(inp []string) []string {
+	if len(inp) == 1 {
+		return inp
+	}
+
+	tmpMap := make(map[string]bool)
+	for _, s := range inp {
+		tmpMap[s] = true
+	}
+
+	res := make([]string, 0, len(tmpMap))
+	for k := range tmpMap {
+		res = append(res, k)
+	}
+
+	return res
 }
