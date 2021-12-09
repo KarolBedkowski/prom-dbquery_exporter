@@ -202,10 +202,11 @@ func (q *QueryHandler) markFinished(queryKey string) {
 	q.runningQueryLock.Unlock()
 }
 
-func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, queryName string, params map[string]string) ([]byte, error) {
+func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, queryName string,
+	params map[string]string, w http.ResponseWriter) error {
 	query, ok := (q.configuration.Query)[queryName]
 	if !ok {
-		return nil, fmt.Errorf("unknown query '%s'", queryName)
+		return fmt.Errorf("unknown query '%s'", queryName)
 	}
 
 	logger := log.Ctx(ctx)
@@ -214,38 +215,39 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 
 	logger.Debug().Msg("query start")
 
+	var output []byte
 	// try to get item from cache
 	if query.CachingTime > 0 {
 		if data, ok := queryResultCache.get(queryKey); ok {
 			logger.Debug().Msg("query result from cache")
-			return data, nil
+			output = data
 		}
 	}
+	if output == nil {
+		result, err := loader.Query(ctx, query, params)
+		if err != nil {
+			return fmt.Errorf("query error: %w", err)
+		}
+		logger.Debug().
+			Int("records", len(result.records)).
+			Float64("duration", result.duration).
+			Msg("query finished")
 
-	result, err := loader.Query(ctx, query, params)
-	if err != nil {
-		return nil, fmt.Errorf("query error: %w", err)
+		// format metrics
+		output, err = formatResult(ctx, result, query, db)
+		if err != nil {
+			return fmt.Errorf("format result error: %w", err)
+		}
+
+		if query.CachingTime > 0 {
+			// update cache
+			queryResultCache.put(queryKey, query.CachingTime, output)
+		}
+
+		queryDuration.WithLabelValues(queryName, db.Name).Observe(result.duration)
 	}
 
-	logger.Debug().
-		Int("records", len(result.records)).
-		Float64("duration", result.duration).
-		Msg("query finished")
-
-	// format metrics
-	output, err := formatResult(ctx, result, query, db)
-	if err != nil {
-		return nil, fmt.Errorf("format result error: %w", err)
-	}
-
-	if query.CachingTime > 0 {
-		// update cache
-		queryResultCache.put(queryKey, query.CachingTime, output)
-	}
-
-	queryDuration.WithLabelValues(queryName, db.Name).Observe(result.duration)
-
-	return output, nil
+	return nil
 }
 
 func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
@@ -273,14 +275,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 	for _, queryName := range queryNames {
 		loggerQ := logger.With().Str("query", queryName).Logger()
 		ctxQuery := loggerQ.WithContext(ctx)
-		output, err := q.query(ctxQuery, loader, db, queryName, params)
-		if err == nil {
-			if _, err := w.Write([]byte(fmt.Sprintf("## query %s\n", queryName))); err != nil {
-				return fmt.Errorf("write result error: %w", err)
-			}
-			if _, err := w.Write(output); err != nil {
-				return fmt.Errorf("write result error: %w", err)
-			}
+		if err := q.query(ctxQuery, loader, db, queryName, params, w); err == nil {
 			anyProcessed = true
 		} else {
 			loggerQ.Error().Err(err).Msg("make query error")
