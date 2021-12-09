@@ -154,7 +154,9 @@ func (r *resultCache) clear() {
 
 // QueryHandler handle all request for metrics
 type QueryHandler struct {
-	configuration    *Configuration
+	configuration *Configuration
+
+	// runningQuery lock the same request for running twice
 	runningQuery     map[string]time.Time
 	runningQueryLock sync.Mutex
 }
@@ -173,7 +175,7 @@ func (q *QueryHandler) SetConfiguration(c *Configuration) {
 	queryResultCache.clear()
 }
 
-func (q *QueryHandler) waitQueryFinish(queryKey string) (ok bool) {
+func (q *QueryHandler) waitForFinish(queryKey string) (ok bool) {
 	for i := 0; i < 120; i += 5 { // 2min
 		q.runningQueryLock.Lock()
 		startTs, ok := q.runningQuery[queryKey]
@@ -193,7 +195,7 @@ func (q *QueryHandler) waitQueryFinish(queryKey string) (ok bool) {
 	return false
 }
 
-func (q *QueryHandler) unlockQuery(queryKey string) {
+func (q *QueryHandler) markFinished(queryKey string) {
 	// mark query finished
 	q.runningQueryLock.Lock()
 	q.runningQuery[queryKey] = time.Time{}
@@ -208,7 +210,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 
 	logger := log.Ctx(ctx)
 	queryRequest.WithLabelValues(queryName, db.Name).Inc()
-	queryKey := queryName + "\t" + db.Name
+	queryKey := queryName + "@" + db.Name
 
 	logger.Debug().Msg("query start")
 
@@ -219,12 +221,6 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 			return data, nil
 		}
 	}
-
-	// check is previous query finished; if yes - lock it
-	if !q.waitQueryFinish(queryKey) {
-		return nil, errors.New("timeout while waiting for query finish")
-	}
-	defer q.unlockQuery(queryKey)
 
 	result, err := loader.Query(ctx, query, params)
 	if err != nil {
@@ -312,6 +308,14 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing parameters", http.StatusBadRequest)
 		return
 	}
+
+	// prevent to run the same request twice
+	if !q.waitForFinish(r.URL.RawQuery) {
+		logger.Warn().Msg("timeout on wait for previous request finished")
+		http.Error(w, "previous request still running", http.StatusInternalServerError)
+		return
+	}
+	defer q.markFinished(r.URL.RawQuery)
 
 	params := make(map[string]string)
 	for k, v := range r.URL.Query() {
