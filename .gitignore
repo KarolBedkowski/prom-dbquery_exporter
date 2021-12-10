@@ -2,3 +2,7 @@ prom-dbquery_exporter
 tags
 .*
 *~
+*.db
+*.key
+*.crt
+tmp/
