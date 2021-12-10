@@ -9,7 +9,6 @@ package main
 // Inspired by: https://arunvelsriram.dev/simple-golang-http-logging-middleware
 
 import (
-	"context"
 	"net/http"
 	"sync/atomic"
 	"time"
@@ -54,7 +53,8 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 
 		requestID := atomic.AddUint64(&requestID, 1)
 		l := mlog.With().Uint64("req_id", requestID).Logger()
-		ctx := l.WithContext(context.Background())
+		// replace context
+		ctx := l.WithContext(r.Context())
 		r = r.WithContext(ctx)
 
 		ll := l.With().

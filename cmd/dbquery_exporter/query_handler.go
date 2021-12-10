@@ -175,8 +175,11 @@ func (q *QueryHandler) SetConfiguration(c *Configuration) {
 	queryResultCache.clear()
 }
 
-func (q *QueryHandler) waitForFinish(queryKey string) (ok bool) {
-	for i := 0; i < 120; i += 5 { // 2min
+func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) (ok bool) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for i := 0; i < 60; i += 5 { // 1min
 		q.runningQueryLock.Lock()
 		startTs, ok := q.runningQuery[queryKey]
 		if !ok || startTs.IsZero() || time.Since(startTs).Minutes() > 15 {
@@ -186,10 +189,21 @@ func (q *QueryHandler) waitForFinish(queryKey string) (ok bool) {
 			return true
 		}
 		q.runningQueryLock.Unlock()
-		Logger.Debug().Str("queryKey", queryKey).Time("startTs", startTs).
+		log.Ctx(ctx).Debug().
+			Str("queryKey", queryKey).Time("startTs", startTs).
 			TimeDiff("age", time.Now(), startTs).
 			Msg("wait for unlock")
-		time.Sleep(time.Duration(5) * time.Second)
+
+		select {
+		case <-ticker.C:
+			{
+			}
+		case <-ctx.Done():
+			{
+				// context cancelled, ie. client disconnected
+				return false
+			}
+		}
 	}
 
 	return false
@@ -269,6 +283,12 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 		loggerQ := logger.With().Str("query", queryName).Logger()
 		ctxQuery := loggerQ.WithContext(ctx)
 		if output, err := q.query(ctxQuery, loader, db, queryName, params); err == nil {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("client disconnected: %w", ctx.Err())
+			default:
+			}
+
 			anyProcessed = true
 			if _, err := w.Write(output); err != nil {
 				return fmt.Errorf("write result error: %w", err)
@@ -301,7 +321,7 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// prevent to run the same request twice
-	if !q.waitForFinish(r.URL.RawQuery) {
+	if !q.waitForFinish(ctx, r.URL.RawQuery) {
 		logger.Warn().Msg("timeout on wait for previous request finished")
 		http.Error(w, "previous request still running", http.StatusInternalServerError)
 		return
@@ -328,10 +348,16 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 			logger.Warn().Err(err).Msg("query database error")
 			queryRequestErrors.Inc()
-			continue
+		} else {
+			anyProcessed = true
 		}
 
-		anyProcessed = true
+		select {
+		case <-ctx.Done():
+			// client disconnected
+			return
+		default:
+		}
 	}
 
 	if !anyProcessed {
