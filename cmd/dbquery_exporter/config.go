@@ -54,6 +54,9 @@ type (
 
 		// Database name for internal use
 		Name string `yaml:"-"`
+
+		// Timestamp is configuration load time
+		Timestamp time.Time `yaml:"-"`
 	}
 
 	// Configuration keep application configuration
@@ -110,6 +113,7 @@ func loadConfiguration(filename string) (*Configuration, error) {
 
 	for name, db := range c.Database {
 		db.Name = name
+		db.Timestamp = time.Now()
 	}
 
 	for name, q := range c.Query {

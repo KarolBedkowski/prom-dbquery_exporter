@@ -45,6 +45,8 @@ type (
 		Close(ctx context.Context)
 		// Human-friendly info
 		String() string
+		// UpdateConfiguration for existing Loader
+		UpdateConfiguration(db *Database) error
 	}
 
 	queryResult struct {
@@ -202,6 +204,23 @@ func (g *genericLoader) Close(ctx context.Context) {
 		log.Ctx(ctx).Debug().Str("db", g.dbConf.Name).Msg("genericQuery disconnect")
 		_ = g.conn.Close()
 	}
+}
+
+func (g *genericLoader) UpdateConfiguration(db *Database) error {
+	if g.dbConf.Timestamp == db.Timestamp {
+		return nil
+	}
+
+	Logger.Debug().Str("db", g.dbConf.Name).Msg("reload configuration")
+
+	if g.conn != nil {
+		Logger.Debug().Str("db", g.dbConf.Name).Msg("closing connection")
+		_ = g.conn.Close()
+		g.conn = nil
+	}
+
+	g.dbConf = db
+	return nil
 }
 
 func (g *genericLoader) String() string {
@@ -464,6 +483,8 @@ func GetLoader(d *Database) (Loader, error) {
 	defer lp.lock.Unlock()
 
 	if loader, ok := lp.loaders[d.Name]; ok {
+		// check is configuration changed
+		_ = loader.UpdateConfiguration(d)
 		return loader, nil
 	}
 
