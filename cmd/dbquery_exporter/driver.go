@@ -42,7 +42,7 @@ type (
 		// Query execute sql and returns records or error. Open connection when necessary.
 		Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error)
 		// Close db connection.
-		Close(ctx context.Context)
+		Close(ctx context.Context) error
 		// Human-friendly info
 		String() string
 		// UpdateConfiguration for existing Loader
@@ -65,7 +65,7 @@ type (
 	}
 )
 
-func (g *genericLoader) makeNewConnection(ctx context.Context) (err error) {
+func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 	l := log.Ctx(ctx)
 	l.Debug().Str("connstr", g.connStr).Str("driver", g.driver).
 		Msg("genericQuery connecting")
@@ -103,32 +103,26 @@ func (g *genericLoader) makeNewConnection(ctx context.Context) (err error) {
 	return nil
 }
 
-func (g *genericLoader) ping(ctx context.Context) {
-	l := log.Ctx(ctx)
-	ctxPing, cancel := context.WithTimeout(context.Background(), g.dbConf.connectTimeout())
-	err := g.conn.PingContext(ctxPing)
-	cancel()
-	if err != nil {
-		l.Err(err).Msg("genericQuery execute ping failed; closing connection")
-		_ = g.conn.Close()
-		g.conn = nil
-	}
-}
-
 func (g *genericLoader) connect(ctx context.Context) error {
 	l := log.Ctx(ctx)
 	l.Debug().Interface("conn", g.conn).Msg("conn")
 
-	// test existing connection
 	if g.conn != nil {
-		g.ping(ctx)
-	}
-
-	// connect to database if not connected
-	if g.conn == nil {
-		if err := g.makeNewConnection(ctx); err != nil {
-			return err
+		// check existing connection
+		ctxPing, cancel := context.WithTimeout(context.Background(), g.dbConf.connectTimeout())
+		err := g.conn.PingContext(ctxPing)
+		cancel()
+		if err == nil {
+			return nil
 		}
+
+		l.Err(err).Msg("genericQuery execute ping failed; closing connection")
+		_ = g.conn.Close()
+		g.conn = nil
+	}
+	// connect to database if not connected
+	if err := g.openConnection(ctx); err != nil {
+		return err
 	}
 
 	// launch initial sqls if defined
@@ -199,11 +193,14 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 }
 
 // Close database connection
-func (g *genericLoader) Close(ctx context.Context) {
-	if g.conn != nil {
-		log.Ctx(ctx).Debug().Str("db", g.dbConf.Name).Msg("genericQuery disconnect")
-		_ = g.conn.Close()
+func (g *genericLoader) Close(ctx context.Context) error {
+	if g.conn == nil {
+		return nil
 	}
+
+	log.Ctx(ctx).Debug().Interface("conn", g.conn).
+		Str("db", g.dbConf.Name).Msg("genericQuery close conn")
+	return g.conn.Close()
 }
 
 func (g *genericLoader) UpdateConfiguration(db *Database) error {
@@ -214,6 +211,7 @@ func (g *genericLoader) UpdateConfiguration(db *Database) error {
 	Logger.Debug().Str("db", g.dbConf.Name).Msg("reload configuration")
 
 	if g.conn != nil {
+		// close open connection
 		Logger.Debug().Str("db", g.dbConf.Name).Msg("closing connection")
 		_ = g.conn.Close()
 		g.conn = nil
@@ -495,4 +493,22 @@ func GetLoader(d *Database) (Loader, error) {
 	}
 
 	return loader, err
+}
+
+// CloseLoaders close all active loaders in pool
+func CloseLoaders() {
+	lp.lock.Lock()
+	defer lp.lock.Unlock()
+
+	Logger.Debug().Interface("loaders", lp.loaders).Msg("")
+
+	ctx := Logger.WithContext(context.Background())
+
+	for _, l := range lp.loaders {
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := l.Close(cctx); err != nil {
+			Logger.Error().Err(err).Msg("close loader error")
+		}
+		cancel()
+	}
 }

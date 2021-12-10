@@ -72,6 +72,7 @@ func main() {
 			func() error {
 				<-term
 				Logger.Warn().Msg("Received SIGTERM, exiting...")
+				CloseLoaders()
 				return nil
 			},
 			func(err error) {
