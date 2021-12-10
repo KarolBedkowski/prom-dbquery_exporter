@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -67,20 +68,33 @@ func (g *genericLoader) makeNewConnection(ctx context.Context) (err error) {
 	l.Debug().Str("connstr", g.connStr).Str("driver", g.driver).
 		Msg("genericQuery connecting")
 
-	lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
-	defer cancel()
-	if g.conn, err = sqlx.ConnectContext(lctx, g.driver, g.connStr); err != nil {
-		return fmt.Errorf("connect error: %w", err)
+	if g.conn, err = sqlx.Open(g.driver, g.connStr); err != nil {
+		return fmt.Errorf("create connection error: %w", err)
 	}
 
-	// launch initial sqls if defined
-	for _, sql := range g.initialSQL {
-		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
-		lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
-		defer cancel()
-		if _, err = g.conn.QueryxContext(lctx, sql); err != nil {
-			return fmt.Errorf("execute initial sql error: %w", err)
+	if maxConn, ok := g.dbConf.Connection["max_connections"]; ok {
+		if c, ok := maxConn.(int); ok && c > 0 {
+			l.Debug().Int("max-conn", c).Msg("max connection set")
+			g.conn.SetMaxOpenConns(c)
+		} else {
+			l.Warn().Interface("max_connections", maxConn).Msg("invalid value for max_connections")
 		}
+	}
+	if maxIdle, ok := g.dbConf.Connection["max_idle_connections"]; ok {
+		if c, ok := maxIdle.(int); ok && c >= 0 {
+			l.Debug().Int("max-idle", c).Msg("max idle connection set")
+			g.conn.SetMaxIdleConns(c)
+		} else {
+			l.Warn().Interface("max_idle_connections", maxIdle).Msg("invalid value for max_idle_connections")
+		}
+	}
+
+	g.conn.DB.SetConnMaxLifetime(60 * time.Second)
+
+	lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
+	defer cancel()
+	if err := g.conn.PingContext(lctx); err != nil {
+		return fmt.Errorf("ping error: %w", err)
 	}
 
 	l.Debug().Msg("genericQuery connected")
@@ -100,6 +114,9 @@ func (g *genericLoader) ping(ctx context.Context) {
 }
 
 func (g *genericLoader) connect(ctx context.Context) error {
+	l := log.Ctx(ctx)
+	l.Debug().Interface("conn", g.conn).Msg("conn")
+
 	// test existing connection
 	if g.conn != nil {
 		g.ping(ctx)
@@ -109,6 +126,16 @@ func (g *genericLoader) connect(ctx context.Context) error {
 	if g.conn == nil {
 		if err := g.makeNewConnection(ctx); err != nil {
 			return err
+		}
+	}
+
+	// launch initial sqls if defined
+	for _, sql := range g.initialSQL {
+		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
+		lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
+		defer cancel()
+		if _, err := g.conn.QueryxContext(lctx, sql); err != nil {
+			return fmt.Errorf("execute initial sql error: %w", err)
 		}
 	}
 
@@ -174,7 +201,6 @@ func (g *genericLoader) Close(ctx context.Context) {
 	if g.conn != nil {
 		log.Ctx(ctx).Debug().Str("db", g.dbConf.Name).Msg("genericQuery disconnect")
 		_ = g.conn.Close()
-		g.conn = nil
 	}
 }
 
@@ -198,6 +224,9 @@ func (g *genericLoader) queryTimeout(q *Query) time.Duration {
 func newPostgresLoader(d *Database) (Loader, error) {
 	p := make([]string, 0, len(d.Connection))
 	for k, v := range d.Connection {
+		if k == "max_connections" || k == "max_idle_connections" {
+			continue
+		}
 		vstr := ""
 		if v != nil {
 			vstr = fmt.Sprintf("'%v'", v)
@@ -218,6 +247,9 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	p := url.Values{}
 	var dbname string
 	for k, v := range d.Connection {
+		if k == "max_connections" || k == "max_idle_connections" {
+			continue
+		}
 		vstr := ""
 		if v != nil {
 			vstr = fmt.Sprintf("%v", v)
@@ -264,6 +296,10 @@ func newMysqlLoader(d *Database) (Loader, error) {
 			user = vstr
 		case "password":
 			pass = vstr
+		case "max_connections":
+			continue
+		case "max_idle_connections":
+			continue
 		default:
 			p.Add(k, vstr)
 		}
@@ -311,6 +347,10 @@ func newOracleLoader(d *Database) (Loader, error) {
 			user = vstr
 		case "password":
 			pass = vstr
+		case "max_connections":
+			continue
+		case "max_idle_connections":
+			continue
 		default:
 			p.Add(k, vstr)
 		}
@@ -347,6 +387,9 @@ func newMssqlLoader(d *Database) (Loader, error) {
 	p := url.Values{}
 	databaseConfigured := false
 	for k, v := range d.Connection {
+		if k == "max_connections" || k == "max_idle_connections" {
+			continue
+		}
 		if v != nil {
 			vstr := fmt.Sprintf("%v", v)
 			p.Add(k, vstr)
@@ -368,8 +411,8 @@ func newMssqlLoader(d *Database) (Loader, error) {
 	return l, nil
 }
 
-// GetLoader returns configured Loader for given configuration.
-func GetLoader(d *Database) (Loader, error) {
+// newLoader returns configured Loader for given configuration.
+func newLoader(d *Database) (Loader, error) {
 	switch d.Driver {
 	case "postgresql":
 	case "postgres":
@@ -402,4 +445,33 @@ func prepareParams(q *Query, params map[string]string) map[string]interface{} {
 	}
 
 	return p
+}
+
+// loadersPool keep database loaders
+type loadersPool struct {
+	// map of loader instances
+	loaders map[string]Loader
+	lock    sync.Mutex
+}
+
+var lp loadersPool = loadersPool{
+	loaders: make(map[string]Loader),
+}
+
+// GetLoader create or return existing loader according to configuration
+func GetLoader(d *Database) (Loader, error) {
+	lp.lock.Lock()
+	defer lp.lock.Unlock()
+
+	if loader, ok := lp.loaders[d.Name]; ok {
+		return loader, nil
+	}
+
+	Logger.Debug().Str("name", d.Name).Msg("creating new loader")
+	loader, err := newLoader(d)
+	if err == nil {
+		lp.loaders[d.Name] = loader
+	}
+
+	return loader, err
 }

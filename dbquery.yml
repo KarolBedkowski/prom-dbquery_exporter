@@ -3,6 +3,8 @@ database:
     driver: sqlite
     connection:
       database: rwr3.db
+      max_connections: 2
+      max_idle_connections: 1
     labels:
       env: test
     initial_query:
@@ -16,6 +18,8 @@ database:
       user: dbquery_exporter
       password: dbquery_exporter
       port: 5432
+      max_connections: 2
+      max_idle_connections: 2
   testtib:
     driver: tidb
     connection:

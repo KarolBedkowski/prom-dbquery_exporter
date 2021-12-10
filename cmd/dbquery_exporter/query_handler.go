@@ -262,8 +262,6 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 		return errors.New("get loader error")
 	}
 
-	defer loader.Close(logger.WithContext(ctx))
-
 	logger.Debug().Str("loader", loader.String()).Msg("loader created")
 
 	anyProcessed := false
