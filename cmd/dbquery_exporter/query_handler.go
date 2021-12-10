@@ -82,17 +82,17 @@ type (
 	}
 )
 
-func formatResult(ctx context.Context, qr *queryResult, query *Query,
+func formatResult(ctx context.Context, qr *QueryResult, query *Query,
 	db *Database) ([]byte, error) {
 	r := &resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,
-		R:              qr.records,
-		P:              qr.params,
+		R:              qr.Records,
+		P:              qr.Params,
 		L:              db.Labels,
-		QueryStartTime: qr.start.Unix(),
-		QueryDuration:  qr.duration,
-		Count:          len(qr.records),
+		QueryStartTime: qr.Start.Unix(),
+		QueryDuration:  qr.Duration,
+		Count:          len(qr.Records),
 	}
 
 	var output bytes.Buffer
@@ -241,8 +241,8 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 		return nil, fmt.Errorf("query error: %w", err)
 	}
 	logger.Debug().
-		Int("records", len(result.records)).
-		Float64("duration", result.duration).
+		Int("records", len(result.Records)).
+		Float64("duration", result.Duration).
 		Msg("query finished")
 
 	// format metrics
@@ -256,7 +256,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 		queryResultCache.put(queryKey, query.CachingTime, output)
 	}
 
-	queryDuration.WithLabelValues(queryName, db.Name).Observe(result.duration)
+	queryDuration.WithLabelValues(queryName, db.Name).Observe(result.Duration)
 
 	return output, nil
 }

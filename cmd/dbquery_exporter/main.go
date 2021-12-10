@@ -56,9 +56,9 @@ func main() {
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
 
-	c, err := loadConfiguration(*configFile)
+	c, err := loadValidateConf(*configFile)
 	if err != nil {
-		Logger.Fatal().Err(err).Str("file", *configFile).Msg("Error parsing config file")
+		Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
 	}
 
 	webHandler := newWebHandler(c, *listenAddress, *webConfig)
@@ -87,7 +87,7 @@ func main() {
 		g.Add(
 			func() error {
 				for range hup {
-					if newConf, err := loadConfiguration(*configFile); err == nil {
+					if newConf, err := loadValidateConf(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
 						log.Info().Msg("configuration reloaded")
 					} else {
@@ -171,4 +171,17 @@ func (w *webHandler) Close(err error) {
 func (w *webHandler) ReloadConf(newConf *Configuration) {
 	w.handler.SetConfiguration(newConf)
 	w.infoHandler.Configuration = newConf
+}
+
+func loadValidateConf(configFile string) (*Configuration, error) {
+	c, err := loadConfiguration(configFile)
+	if err != nil {
+		return nil, err
+	}
+	for dbname, d := range c.Database {
+		if err := ValidateConf(d); err != nil {
+			return nil, fmt.Errorf("validate database '%s' error: %w", dbname, err)
+		}
+	}
+	return c, nil
 }

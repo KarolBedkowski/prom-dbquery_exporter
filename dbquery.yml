@@ -20,6 +20,12 @@ database:
       port: 5432
       max_connections: 2
       max_idle_connections: 2
+  testdbpgsql2:
+    driver: postgres
+    connection:
+      connstr: postgres://dbquery_exporter:dbquery_exporter@localhost/postgres
+      max_connections: 2
+      max_idle_connections: 2
   testtib:
     driver: tidb
     connection:

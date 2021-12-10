@@ -21,6 +21,7 @@ type infoHandler struct {
 const infoTmpl = `
 DATABASES
 =========
+
 {{- range .Database}}
 {{ .Name }}
 -----------
@@ -33,6 +34,8 @@ DATABASES
   {{- range $key, $val := .Labels }}
     - {{ $key }}: {{ $val | printf "%v" }}
   {{- end }}
+- reload: {{ .Timestamp }}
+
 
 {{- end }}
 

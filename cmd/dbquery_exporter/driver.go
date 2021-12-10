@@ -40,7 +40,7 @@ type (
 	// Loader load data from database
 	Loader interface {
 		// Query execute sql and returns records or error. Open connection when necessary.
-		Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error)
+		Query(ctx context.Context, q *Query, params map[string]string) (*QueryResult, error)
 		// Close db connection.
 		Close(ctx context.Context) error
 		// Human-friendly info
@@ -49,11 +49,16 @@ type (
 		UpdateConfiguration(db *Database) error
 	}
 
-	queryResult struct {
-		records  []Record
-		duration float64
-		start    time.Time
-		params   map[string]interface{}
+	// QueryResult is result of Loader.Query
+	QueryResult struct {
+		// rows
+		Records []Record
+		// query duration
+		Duration float64
+		// query start time
+		Start time.Time
+		// all query parameters
+		Params map[string]interface{}
 	}
 
 	genericLoader struct {
@@ -138,7 +143,8 @@ func (g *genericLoader) connect(ctx context.Context) error {
 	return nil
 }
 
-func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]string) (*queryResult, error) {
+// Query get data from database
+func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]string) (*QueryResult, error) {
 	var err error
 	l := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", q.Name).Logger()
 	ctx = l.WithContext(ctx)
@@ -149,9 +155,9 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 
 	// prepare query parameters; combine parameters from query and params
 	p := prepareParams(q, params)
-	result := &queryResult{
-		start:  time.Now(),
-		params: p,
+	result := &QueryResult{
+		Start:  time.Now(),
+		Params: p,
 	}
 
 	timeout := g.queryTimeout(q)
@@ -185,10 +191,10 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 		if err != nil {
 			return nil, err
 		}
-		result.records = append(result.records, rec)
+		result.Records = append(result.Records, rec)
 	}
 
-	result.duration = float64(time.Since(result.start).Seconds())
+	result.Duration = float64(time.Since(result.Start).Seconds())
 	return result, nil
 }
 
@@ -203,17 +209,23 @@ func (g *genericLoader) Close(ctx context.Context) error {
 	return g.conn.Close()
 }
 
+// UpdateConfiguration update configuration if changed and close
+// current database connection.
 func (g *genericLoader) UpdateConfiguration(db *Database) error {
 	if g.dbConf.Timestamp == db.Timestamp {
 		return nil
 	}
 
-	Logger.Debug().Str("db", g.dbConf.Name).Msg("reload configuration")
+	l := Logger.With().Str("db", g.dbConf.Name).Logger()
+	l.Info().Msg("reload configuration")
 
 	if g.conn != nil {
 		// close open connection
-		Logger.Debug().Str("db", g.dbConf.Name).Msg("closing connection")
-		_ = g.conn.Close()
+		l.Info().Msg("closing connection")
+		if err := g.conn.Close(); err != nil {
+			l.Warn().Err(err).Msg("close connection error")
+		}
+
 		g.conn = nil
 	}
 
@@ -239,20 +251,26 @@ func (g *genericLoader) queryTimeout(q *Query) time.Duration {
 }
 
 func newPostgresLoader(d *Database) (Loader, error) {
-	p := make([]string, 0, len(d.Connection))
-	for k, v := range d.Connection {
-		if k == "max_connections" || k == "max_idle_connections" {
-			continue
+	var connStr string
+	if val, ok := d.Connection["connstr"]; ok && val != "" {
+		connStr = val.(string)
+	} else {
+		p := make([]string, 0, len(d.Connection))
+		for k, v := range d.Connection {
+			if k == "max_connections" || k == "max_idle_connections" {
+				continue
+			}
+			vstr := ""
+			if v != nil {
+				vstr = fmt.Sprintf("'%v'", v)
+			}
+			p = append(p, k+"="+vstr)
 		}
-		vstr := ""
-		if v != nil {
-			vstr = fmt.Sprintf("'%v'", v)
-		}
-		p = append(p, k+"="+vstr)
+		connStr = strings.Join(p, " ")
 	}
 
 	l := &genericLoader{
-		connStr:    strings.Join(p, " "),
+		connStr:    connStr,
 		driver:     "postgres",
 		initialSQL: d.InitialQuery,
 		dbConf:     d,
@@ -481,8 +499,11 @@ func GetLoader(d *Database) (Loader, error) {
 	defer lp.lock.Unlock()
 
 	if loader, ok := lp.loaders[d.Name]; ok {
-		// check is configuration changed
-		_ = loader.UpdateConfiguration(d)
+		// check & apply configuration changes
+		if err := loader.UpdateConfiguration(d); err != nil {
+			return nil, fmt.Errorf("update configuration error: %w", err)
+		}
+
 		return loader, nil
 	}
 
@@ -511,4 +532,45 @@ func CloseLoaders() {
 		}
 		cancel()
 	}
+}
+
+// ValidateConf validate given configuration against database
+func ValidateConf(d *Database) error {
+	switch d.Driver {
+	case "postgresql":
+	case "postgres":
+		if !d.CheckConnectionParam("connstr") {
+			if !d.CheckConnectionParam("database") && !d.CheckConnectionParam("dbname") {
+				return fmt.Errorf("missing 'database' or 'dbname' parameter")
+			}
+			if !d.CheckConnectionParam("user") {
+				return fmt.Errorf("missing 'user' parameter")
+			}
+		}
+		return nil
+	case "sqlite3":
+	case "sqlite":
+	case "mysql":
+	case "mariadb":
+	case "tidb":
+	case "oracle":
+	case "oci8":
+		for _, k := range []string{"database", "host", "port", "user", "password"} {
+			if !d.CheckConnectionParam(k) {
+				return fmt.Errorf("missing '%s' parameter", k)
+			}
+		}
+	case "mssql":
+		if !d.CheckConnectionParam("database") {
+			return errors.New("missing 'database' parameter")
+		}
+	}
+
+	if port, ok := d.Connection["port"]; ok {
+		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
+			return errors.New("invalid 'port'")
+		}
+	}
+
+	return nil
 }

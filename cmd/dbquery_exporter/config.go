@@ -55,7 +55,7 @@ type (
 		// Database name for internal use
 		Name string `yaml:"-"`
 
-		// Timestamp is configuration load time
+		// Timestamp is configuration load time; internal
 		Timestamp time.Time `yaml:"-"`
 	}
 
@@ -68,6 +68,40 @@ type (
 	}
 )
 
+func (d *Database) validate() error {
+	if d.Driver == "" {
+		return errors.New("missing driver")
+	}
+
+	return nil
+}
+
+// CheckConnectionParam return true when parameter with key exists
+// and is not empty
+func (d *Database) CheckConnectionParam(key string) bool {
+	val, ok := d.Connection[key]
+	return ok && val != ""
+}
+
+func (q *Query) validate() error {
+	if q.SQL == "" {
+		return errors.New("missing SQL")
+	}
+
+	m := strings.TrimSpace(q.Metrics) + "\n"
+	if m == "" {
+		return errors.New("missing or empty metrics template")
+	}
+
+	tmpl, err := template.New("main").Funcs(templateFuncsMap).Parse(m)
+	if err != nil {
+		return fmt.Errorf("parsing metrics template error: %w", err)
+	}
+	q.MetricTpl = tmpl
+
+	return nil
+}
+
 func (c *Configuration) validate() error {
 	if len(c.Database) == 0 {
 		return errors.New("no database configured")
@@ -78,19 +112,16 @@ func (c *Configuration) validate() error {
 	}
 
 	for name, query := range c.Query {
-		if query.SQL == "" {
-			return fmt.Errorf("missing SQL for query '%s'", name)
+		if err := query.validate(); err != nil {
+			return fmt.Errorf("validate query '%s' error: %w", name, err)
 		}
-		m := strings.TrimSpace(query.Metrics) + "\n"
-		if m == "" {
-			return fmt.Errorf("missing metrics for query '%s'", name)
+	}
+
+	for name, db := range c.Database {
+		if err := db.validate(); err != nil {
+			return fmt.Errorf("validate database '%s' error: %w", name, err)
 		}
-		tmpl, err := template.New("main").Funcs(templateFuncsMap).Parse(m)
-		if err != nil {
-			return fmt.Errorf("parsing metrics template for query '%s' error: %w",
-				name, err)
-		}
-		query.MetricTpl = tmpl
+
 	}
 	return nil
 }
