@@ -103,6 +103,7 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 
 	g.conn.DB.SetConnMaxLifetime(60 * time.Second)
 
+	// check is database is working
 	lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
 	defer cancel()
 	if err := g.conn.PingContext(lctx); err != nil {
@@ -113,39 +114,33 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 	return nil
 }
 
-func (g *genericLoader) connect(ctx context.Context) error {
+func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	l := log.Ctx(ctx)
 	l.Debug().Interface("conn", g.conn).Msg("conn")
 
-	if g.conn != nil {
-		// check existing connection
-		ctxPing, cancel := context.WithTimeout(context.Background(), g.dbConf.connectTimeout())
-		err := g.conn.PingContext(ctxPing)
-		cancel()
-		if err == nil {
-			return nil
+	if g.conn == nil {
+		// connect to database if not connected
+		if err := g.openConnection(ctx); err != nil {
+			return nil, fmt.Errorf("open connection error: %w", err)
 		}
-
-		l.Err(err).Msg("genericQuery execute ping failed; closing connection")
-		_ = g.conn.Close()
-		g.conn = nil
-	}
-	// connect to database if not connected
-	if err := g.openConnection(ctx); err != nil {
-		return err
 	}
 
+	conn, err := g.conn.Connx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open connection error: %w", err)
+	}
 	// launch initial sqls if defined
 	for _, sql := range g.initialSQL {
 		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
 		lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
 		defer cancel()
-		if _, err := g.conn.QueryxContext(lctx, sql); err != nil {
-			return fmt.Errorf("execute initial sql error: %w", err)
+		if _, err := conn.QueryxContext(lctx, sql); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("execute initial sql error: %w", err)
 		}
 	}
 
-	return nil
+	return conn, nil
 }
 
 // Query get data from database
@@ -154,9 +149,11 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 	l := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", q.Name).Logger()
 	ctx = l.WithContext(ctx)
 
-	if err := g.connect(ctx); err != nil {
+	conn, err := g.getConnection(ctx)
+	if err != nil {
 		return nil, err
 	}
+	defer conn.Close()
 
 	g.lock.RLock()
 	defer g.lock.RUnlock()
@@ -178,9 +175,15 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 	var rows *sqlx.Rows
 	// query
 	if len(p) > 0 {
-		rows, err = g.conn.NamedQueryContext(ctx, q.SQL, p)
+		// sqlx.Conn not support NamedQuery...
+		sql, params, err2 := sqlx.Named(q.SQL, p)
+		if err2 != nil {
+			return nil, fmt.Errorf("prepare sql error: %w", err2)
+		}
+		l.Debug().Str("sql", sql).Interface("params", params).Msg("named query")
+		rows, err = conn.QueryxContext(ctx, sql, params...)
 	} else {
-		rows, err = g.conn.QueryxContext(ctx, q.SQL)
+		rows, err = conn.QueryxContext(ctx, q.SQL)
 	}
 
 	if err != nil {
