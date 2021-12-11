@@ -157,15 +157,20 @@ type QueryHandler struct {
 	configuration *Configuration
 
 	// runningQuery lock the same request for running twice
-	runningQuery     map[string]time.Time
+	runningQuery     map[string]runningQueryInfo
 	runningQueryLock sync.Mutex
+}
+
+type runningQueryInfo struct {
+	ts    time.Time
+	reqID interface{}
 }
 
 // NewQueryHandler create new QueryHandler from configuration
 func NewQueryHandler(c *Configuration) *QueryHandler {
 	return &QueryHandler{
 		configuration: c,
-		runningQuery:  make(map[string]time.Time),
+		runningQuery:  make(map[string]runningQueryInfo),
 	}
 }
 
@@ -175,23 +180,30 @@ func (q *QueryHandler) SetConfiguration(c *Configuration) {
 	queryResultCache.clear()
 }
 
-func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) (ok bool) {
+// ErrQueryLocked is error when given query is locked more than 5 minutes
+var ErrQueryLocked = errors.New("query locked")
+
+func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	for i := 0; i < 60; i += 5 { // 1min
+	var rqi runningQueryInfo
+
+	for i := 0; i < 60; i++ { // 5min
 		q.runningQueryLock.Lock()
-		startTs, ok := q.runningQuery[queryKey]
-		if !ok || startTs.IsZero() || time.Since(startTs).Minutes() > 15 {
+		var ok bool
+		rqi, ok = q.runningQuery[queryKey]
+		if !ok || time.Since(rqi.ts).Minutes() > 15 {
 			// no running previous queue or last query is at least 15 minutes earlier
-			q.runningQuery[queryKey] = time.Now()
+			q.runningQuery[queryKey] = runningQueryInfo{ts: time.Now(), reqID: ctx.Value(CtxRequestID)}
 			q.runningQueryLock.Unlock()
-			return true
+			return nil
 		}
 		q.runningQueryLock.Unlock()
 		log.Ctx(ctx).Debug().
-			Str("queryKey", queryKey).Time("startTs", startTs).
-			TimeDiff("age", time.Now(), startTs).
+			Str("queryKey", queryKey).Time("startTs", rqi.ts).
+			TimeDiff("age", time.Now(), rqi.ts).
+			Interface("block_by", rqi.reqID).
 			Msg("wait for unlock")
 
 		select {
@@ -201,18 +213,24 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) (ok b
 		case <-ctx.Done():
 			{
 				// context cancelled, ie. client disconnected
-				return false
+				return ctx.Err()
 			}
 		}
 	}
 
-	return false
+	log.Ctx(ctx).Warn().
+		Str("queryKey", queryKey).Time("startTs", rqi.ts).
+		Interface("block_by", rqi.reqID).
+		TimeDiff("age", time.Now(), rqi.ts).
+		Msg("timeout on waiting to unlock; previous query is still executing or stalled")
+
+	return ErrQueryLocked
 }
 
 func (q *QueryHandler) markFinished(queryKey string) {
 	// mark query finished
 	q.runningQueryLock.Lock()
-	q.runningQuery[queryKey] = time.Time{}
+	delete(q.runningQuery, queryKey)
 	q.runningQueryLock.Unlock()
 }
 
@@ -321,9 +339,8 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// prevent to run the same request twice
-	if !q.waitForFinish(ctx, r.URL.RawQuery) {
-		logger.Warn().Msg("timeout on wait for previous request finished")
-		http.Error(w, "previous request still running", http.StatusInternalServerError)
+	if err := q.waitForFinish(ctx, r.URL.RawQuery); err == ErrQueryLocked {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 	defer q.markFinished(r.URL.RawQuery)
@@ -342,6 +359,14 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	anyProcessed := false
 	for _, dbName := range dbNames {
+		// check is client is still connected
+		select {
+		case <-ctx.Done():
+			logger.Info().Err(ctx.Err()).Msg("context closed")
+			return
+		default:
+		}
+
 		logger := logger.With().Str("db", dbName).Logger()
 		ctx := logger.WithContext(ctx)
 
@@ -351,17 +376,10 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		} else {
 			anyProcessed = true
 		}
-
-		select {
-		case <-ctx.Done():
-			// client disconnected
-			return
-		default:
-		}
 	}
 
 	if !anyProcessed {
-		http.Error(w, "error", http.StatusNotFound)
+		http.Error(w, "error", http.StatusBadRequest)
 	}
 }
 
