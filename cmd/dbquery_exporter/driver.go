@@ -67,10 +67,15 @@ type (
 		conn       *sqlx.DB
 		initialSQL []string
 		dbConf     *Database
+		lock       sync.RWMutex
 	}
 )
 
 func (g *genericLoader) openConnection(ctx context.Context) (err error) {
+	// lock loader for write
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
 	l := log.Ctx(ctx)
 	l.Debug().Str("connstr", g.connStr).Str("driver", g.driver).
 		Msg("genericQuery connecting")
@@ -153,6 +158,9 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 		return nil, err
 	}
 
+	g.lock.RLock()
+	defer g.lock.RUnlock()
+
 	// prepare query parameters; combine parameters from query and params
 	p := prepareParams(q, params)
 	result := &QueryResult{
@@ -204,6 +212,10 @@ func (g *genericLoader) Close(ctx context.Context) error {
 		return nil
 	}
 
+	// lock loader for write
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
 	log.Ctx(ctx).Debug().Interface("conn", g.conn).
 		Str("db", g.dbConf.Name).Msg("genericQuery close conn")
 	return g.conn.Close()
@@ -215,6 +227,10 @@ func (g *genericLoader) UpdateConfiguration(db *Database) error {
 	if g.dbConf.Timestamp == db.Timestamp {
 		return nil
 	}
+
+	// lock loader for write
+	g.lock.Lock()
+	defer g.lock.Unlock()
 
 	l := Logger.With().Str("db", g.dbConf.Name).Logger()
 	l.Info().Msg("reload configuration")
