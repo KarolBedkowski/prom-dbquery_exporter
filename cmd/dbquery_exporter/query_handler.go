@@ -8,8 +8,6 @@ package main
 //
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -50,9 +48,7 @@ var (
 		},
 	)
 
-	queryResultCache = resultCache{
-		cache: make(map[string]*cacheItem),
-	}
+	queryResultCache = NewCache()
 )
 
 func init() {
@@ -60,96 +56,6 @@ func init() {
 	prometheus.MustRegister(queryRequest)
 	prometheus.MustRegister(queryRequestErrors)
 	prometheus.MustRegister(queryCacheHits)
-}
-
-type (
-	// resultTmplData keep query result and some metadata parsed to template
-	resultTmplData struct {
-		// Records (rows)
-		R []Record
-		// Parameters
-		P map[string]interface{}
-		// Labels
-		L map[string]interface{}
-
-		QueryStartTime int64
-		QueryDuration  float64
-		Count          int
-		// Query name
-		Query string
-		// Database name
-		Database string
-	}
-)
-
-func formatResult(ctx context.Context, qr *QueryResult, query *Query,
-	db *Database) ([]byte, error) {
-	r := &resultTmplData{
-		Query:          query.Name,
-		Database:       db.Name,
-		R:              qr.Records,
-		P:              qr.Params,
-		L:              db.Labels,
-		QueryStartTime: qr.Start.Unix(),
-		QueryDuration:  qr.Duration,
-		Count:          len(qr.Records),
-	}
-
-	var output bytes.Buffer
-	bw := bufio.NewWriter(&output)
-	err := query.MetricTpl.Execute(bw, r)
-	if err != nil {
-		return nil, fmt.Errorf("execute template error: %w", err)
-	}
-
-	_ = bw.Flush()
-
-	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
-	return b, nil
-}
-
-type (
-	resultCache struct {
-		cache     map[string]*cacheItem
-		cacheLock sync.Mutex
-	}
-
-	cacheItem struct {
-		expireTS time.Time
-		content  []byte
-	}
-)
-
-func (r *resultCache) get(queryKey string) ([]byte, bool) {
-	r.cacheLock.Lock()
-	defer r.cacheLock.Unlock()
-	ci, ok := r.cache[queryKey]
-	if !ok {
-		return nil, false
-	}
-
-	if ci.expireTS.After(time.Now()) {
-		queryCacheHits.Inc()
-		return ci.content, true
-	}
-
-	delete(r.cache, queryKey)
-	return nil, false
-}
-
-func (r *resultCache) put(queryKey string, ttl uint, data []byte) {
-	r.cacheLock.Lock()
-	r.cache[queryKey] = &cacheItem{
-		expireTS: time.Now().Add(time.Duration(ttl) * time.Second),
-		content:  data,
-	}
-	r.cacheLock.Unlock()
-}
-
-func (r *resultCache) clear() {
-	r.cacheLock.Lock()
-	r.cache = make(map[string]*cacheItem)
-	r.cacheLock.Unlock()
 }
 
 // QueryHandler handle all request for metrics
@@ -177,7 +83,7 @@ func NewQueryHandler(c *Configuration) *QueryHandler {
 // SetConfiguration update handler configuration
 func (q *QueryHandler) SetConfiguration(c *Configuration) {
 	q.configuration = c
-	queryResultCache.clear()
+	queryResultCache.Clear()
 }
 
 // ErrQueryLocked is error when given query is locked more than 5 minutes
@@ -249,9 +155,10 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 
 	// try to get item from cache
 	if query.CachingTime > 0 {
-		if data, ok := queryResultCache.get(queryKey); ok {
+		if data, ok := queryResultCache.Get(queryKey); ok {
+			queryCacheHits.Inc()
 			logger.Debug().Msg("query result from cache")
-			return data, nil
+			return data.([]byte), nil
 		}
 	}
 	result, err := loader.Query(ctx, query, params)
@@ -264,14 +171,14 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 		Msg("query finished")
 
 	// format metrics
-	output, err := formatResult(ctx, result, query, db)
+	output, err := FormatResult(ctx, result, query, db)
 	if err != nil {
 		return nil, fmt.Errorf("format result error: %w", err)
 	}
 
 	if query.CachingTime > 0 {
 		// update cache
-		queryResultCache.put(queryKey, query.CachingTime, output)
+		queryResultCache.Put(queryKey, query.CachingTime, output)
 	}
 
 	queryDuration.WithLabelValues(queryName, db.Name).Observe(result.Duration)
