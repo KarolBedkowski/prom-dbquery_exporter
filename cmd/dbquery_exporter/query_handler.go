@@ -31,7 +31,7 @@ var (
 	queryRequest = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "dbquery_request_total",
-			Help: "Total numbers requests given query",
+			Help: "Total numbers requests per database and query",
 		},
 		[]string{"query", "database"},
 	)
@@ -48,6 +48,14 @@ var (
 		},
 	)
 
+	processErrors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "dbquery_process_errors_total",
+			Help: "Number of internal processing errors",
+		},
+		[]string{"error"},
+	)
+
 	queryResultCache = NewCache()
 )
 
@@ -56,6 +64,7 @@ func init() {
 	prometheus.MustRegister(queryRequest)
 	prometheus.MustRegister(queryRequestErrors)
 	prometheus.MustRegister(queryCacheHits)
+	prometheus.MustRegister(processErrors)
 }
 
 // QueryHandler handle all request for metrics
@@ -129,6 +138,7 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 		Interface("block_by", rqi.reqID).
 		TimeDiff("age", time.Now(), rqi.ts).
 		Msg("timeout on waiting to unlock; previous query is still executing or stalled")
+	processErrors.WithLabelValues("lock").Inc()
 
 	return ErrQueryLocked
 }
@@ -163,6 +173,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 	}
 	result, err := loader.Query(ctx, query, params)
 	if err != nil {
+		processErrors.WithLabelValues("query").Inc()
 		return nil, fmt.Errorf("query error: %w", err)
 	}
 	logger.Debug().
@@ -173,6 +184,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 	// format metrics
 	output, err := FormatResult(ctx, result, query, db)
 	if err != nil {
+		processErrors.WithLabelValues("format").Inc()
 		return nil, fmt.Errorf("format result error: %w", err)
 	}
 
@@ -216,6 +228,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 
 			anyProcessed = true
 			if _, err := w.Write(output); err != nil {
+				processErrors.WithLabelValues("write").Inc()
 				return fmt.Errorf("write result error: %w", err)
 			}
 		} else {
@@ -286,6 +299,7 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !anyProcessed {
+		processErrors.WithLabelValues("bad_requests").Inc()
 		http.Error(w, "error", http.StatusBadRequest)
 	}
 }

@@ -101,7 +101,7 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 		}
 	}
 
-	g.conn.DB.SetConnMaxLifetime(60 * time.Second)
+	g.conn.DB.SetConnMaxLifetime(600 * time.Second)
 
 	// check is database is working
 	lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())

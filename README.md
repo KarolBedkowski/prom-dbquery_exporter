@@ -11,10 +11,8 @@ Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, Oracle, MSSQL (not tested)
 
 ### Dependency
 
-* github.com/prometheus/client_golang/
-* github.com/prometheus/common
-* gopkg.in/yaml.v2
-* github.com/jmoiron/sqlx
+* golang 1.17
+* see: go.mod
 
 #### Database drivers
 * MySQL/MariaDB/TiB: github.com/go-sql-driver/mysql

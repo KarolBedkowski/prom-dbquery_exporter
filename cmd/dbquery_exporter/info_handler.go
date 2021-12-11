@@ -39,6 +39,8 @@ DATABASES
 
 {{- end }}
 
+
+
 QUERIES
 =======
 
@@ -52,6 +54,7 @@ QUERIES
   {{- range $key, $val := .Params }}
   - {{ $key }}: {{ $val | printf "%v"  }}
   {{- end }}
+
 
 {{- end }}
 `
