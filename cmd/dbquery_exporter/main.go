@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 
 	//	_ "net/http/pprof"
@@ -47,6 +48,8 @@ func main() {
 		_, _ = fmt.Println(version.Print("DBQuery exporter"))
 		os.Exit(0)
 	}
+
+	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	InitializeLogger(*loglevel, *logformat)
 	Logger.Info().

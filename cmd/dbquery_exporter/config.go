@@ -14,59 +14,30 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
-type (
-	// Query is definition of single query
-	Query struct {
-		// SQL script to launch
-		SQL string
-		// Template to generate from query result
-		Metrics string
-		// Query params
-		Params map[string]interface{}
-		// Result caching time
-		CachingTime uint `yaml:"caching_time"`
-		// Max time for query result
-		Timeout uint `yaml:"timeout"`
+// Database define database connection
+type Database struct {
+	// Driver name - see sql-agent
+	Driver string
+	// Connection params - see sql-agent
+	Connection map[string]interface{}
+	// Labels configured per database; may be used in templates
+	Labels map[string]interface{}
+	// InitialQuery allow run custom query or set some parameters after
+	// connect and before target query
+	InitialQuery []string `yaml:"initial_query"`
 
-		// Parsed template  (internal)
-		MetricTpl *template.Template `yaml:"-"`
-		// Query name for internal use
-		Name string `yaml:"-"`
-	}
+	// Default timeout for all queries
+	Timeout uint `yaml:"timeout"`
 
-	// Database define database connection
-	Database struct {
-		// Driver name - see sql-agent
-		Driver string
-		// Connection params - see sql-agent
-		Connection map[string]interface{}
-		// Labels configured per database; may be used in templates
-		Labels map[string]interface{}
-		// InitialQuery allow run custom query or set some parameters after
-		// connect and before target query
-		InitialQuery []string `yaml:"initial_query"`
+	// Connection and ping timeout
+	ConnectTimeout uint `yaml:"connect_timeout"`
 
-		// Default timeout for all queries
-		Timeout uint `yaml:"timeout"`
+	// Database name for internal use
+	Name string `yaml:"-"`
 
-		// Connection and ping timeout
-		ConnectTimeout uint `yaml:"connect_timeout"`
-
-		// Database name for internal use
-		Name string `yaml:"-"`
-
-		// Timestamp is configuration load time; internal
-		Timestamp time.Time `yaml:"-"`
-	}
-
-	// Configuration keep application configuration
-	Configuration struct {
-		// Databases
-		Database map[string]*Database
-		// Queries
-		Query map[string]*Query
-	}
-)
+	// Timestamp is configuration load time; internal
+	Timestamp time.Time `yaml:"-"`
+}
 
 func (d *Database) validate() error {
 	if d.Driver == "" {
@@ -130,6 +101,25 @@ func (d *Database) CheckConnectionParam(key string) bool {
 	return true
 }
 
+// Query is definition of single query
+type Query struct {
+	// SQL script to launch
+	SQL string
+	// Template to generate from query result
+	Metrics string
+	// Query params
+	Params map[string]interface{}
+	// Result caching time
+	CachingTime uint `yaml:"caching_time"`
+	// Max time for query result
+	Timeout uint `yaml:"timeout"`
+
+	// Parsed template  (internal)
+	MetricTpl *template.Template `yaml:"-"`
+	// Query name for internal use
+	Name string `yaml:"-"`
+}
+
 func (q *Query) validate() error {
 	if q.SQL == "" {
 		return errors.New("missing SQL")
@@ -147,6 +137,14 @@ func (q *Query) validate() error {
 	q.MetricTpl = tmpl
 
 	return nil
+}
+
+// Configuration keep application configuration
+type Configuration struct {
+	// Databases
+	Database map[string]*Database
+	// Queries
+	Query map[string]*Query
 }
 
 func (c *Configuration) validate() error {

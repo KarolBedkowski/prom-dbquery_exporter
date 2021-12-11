@@ -14,25 +14,23 @@ import (
 	"fmt"
 )
 
-type (
-	// resultTmplData keep query result and some metadata parsed to template
-	resultTmplData struct {
-		// Records (rows)
-		R []Record
-		// Parameters
-		P map[string]interface{}
-		// Labels
-		L map[string]interface{}
+// resultTmplData keep query result and some metadata parsed to template
+type resultTmplData struct {
+	// Records (rows)
+	R []Record
+	// Parameters
+	P map[string]interface{}
+	// Labels
+	L map[string]interface{}
 
-		QueryStartTime int64
-		QueryDuration  float64
-		Count          int
-		// Query name
-		Query string
-		// Database name
-		Database string
-	}
-)
+	QueryStartTime int64
+	QueryDuration  float64
+	Count          int
+	// Query name
+	Query string
+	// Database name
+	Database string
+}
 
 // FormatResult format query result using template from query configuration
 func FormatResult(ctx context.Context, qr *QueryResult, query *Query,

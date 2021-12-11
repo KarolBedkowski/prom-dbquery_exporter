@@ -1,12 +1,5 @@
 package main
 
-import (
-	"fmt"
-	"net/http"
-	"strings"
-	"text/template"
-)
-
 //
 // info_handler.go
 // Copyright (C) 2021 Karol Będkowski <Karol Będkowski@kkomp>
@@ -14,9 +7,12 @@ import (
 // Distributed under terms of the GPLv3 license.
 //
 
-type infoHandler struct {
-	Configuration *Configuration
-}
+import (
+	"fmt"
+	"net/http"
+	"strings"
+	"text/template"
+)
 
 const infoTmpl = `
 DATABASES
@@ -70,17 +66,20 @@ var funcMap = template.FuncMap{
 	"redact": redact,
 }
 
+type infoHandler struct {
+	Configuration *Configuration
+}
+
 func (q infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(r.RemoteAddr, "127.0.0.1:") && !strings.HasPrefix(r.RemoteAddr, "localhost:") {
+	if !strings.HasPrefix(r.RemoteAddr, "127.") && !strings.HasPrefix(r.RemoteAddr, "localhost:") {
 		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	t := template.Must(template.New("letter").Funcs(funcMap).Parse(infoTmpl))
-	err := t.Execute(w, q.Configuration)
-	if err != nil {
+	t := template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl))
+	if err := t.Execute(w, q.Configuration); err != nil {
 		Logger.Error().Err(err).Msg("executing template error")
 	}
 }

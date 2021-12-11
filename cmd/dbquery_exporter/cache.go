@@ -13,7 +13,7 @@ import (
 )
 
 type (
-	// Cache cache
+	// Cache with per item expire time
 	Cache struct {
 		cache     map[string]*cacheItem
 		cacheLock sync.Mutex

@@ -68,18 +68,20 @@ func init() {
 }
 
 // QueryHandler handle all request for metrics
-type QueryHandler struct {
-	configuration *Configuration
+type (
+	QueryHandler struct {
+		configuration *Configuration
 
-	// runningQuery lock the same request for running twice
-	runningQuery     map[string]runningQueryInfo
-	runningQueryLock sync.Mutex
-}
+		// runningQuery lock the same request for running twice
+		runningQuery     map[string]runningQueryInfo
+		runningQueryLock sync.Mutex
+	}
 
-type runningQueryInfo struct {
-	ts    time.Time
-	reqID interface{}
-}
+	runningQueryInfo struct {
+		ts    time.Time
+		reqID interface{}
+	}
+)
 
 // NewQueryHandler create new QueryHandler from configuration
 func NewQueryHandler(c *Configuration) *QueryHandler {
@@ -117,8 +119,7 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 		q.runningQueryLock.Unlock()
 		log.Ctx(ctx).Debug().
 			Str("queryKey", queryKey).Time("startTs", rqi.ts).
-			TimeDiff("age", time.Now(), rqi.ts).
-			Interface("block_by", rqi.reqID).
+			TimeDiff("age", time.Now(), rqi.ts).Interface("block_by", rqi.reqID).
 			Msg("wait for unlock")
 
 		select {
@@ -135,8 +136,7 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 
 	log.Ctx(ctx).Warn().
 		Str("queryKey", queryKey).Time("startTs", rqi.ts).
-		Interface("block_by", rqi.reqID).
-		TimeDiff("age", time.Now(), rqi.ts).
+		Interface("block_by", rqi.reqID).TimeDiff("age", time.Now(), rqi.ts).
 		Msg("timeout on waiting to unlock; previous query is still executing or stalled")
 	processErrors.WithLabelValues("lock").Inc()
 
@@ -171,6 +171,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 			return data.([]byte), nil
 		}
 	}
+
 	result, err := loader.Query(ctx, query, params)
 	if err != nil {
 		processErrors.WithLabelValues("query").Inc()
