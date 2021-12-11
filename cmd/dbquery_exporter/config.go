@@ -73,6 +73,44 @@ func (d *Database) validate() error {
 		return errors.New("missing driver")
 	}
 
+	switch d.Driver {
+	case "postgresql":
+	case "postgres":
+		if d.CheckConnectionParam("connstr") {
+			return nil
+		}
+		if !d.CheckConnectionParam("database") && !d.CheckConnectionParam("dbname") {
+			return fmt.Errorf("missing 'database' or 'dbname' parameter")
+		}
+		if !d.CheckConnectionParam("user") {
+			return fmt.Errorf("missing 'user' parameter")
+		}
+	case "sqlite3":
+	case "sqlite":
+	case "mysql":
+	case "mariadb":
+	case "tidb":
+	case "oracle":
+	case "oci8":
+		for _, k := range []string{"database", "host", "port", "user", "password"} {
+			if !d.CheckConnectionParam(k) {
+				return fmt.Errorf("missing '%s' parameter", k)
+			}
+		}
+	case "mssql":
+		if !d.CheckConnectionParam("database") {
+			return errors.New("missing 'database' parameter")
+		}
+	default:
+		return fmt.Errorf("unknown database '%s'", d.Driver)
+	}
+
+	if port, ok := d.Connection["port"]; ok {
+		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
+			return errors.New("invalid 'port'")
+		}
+	}
+
 	return nil
 }
 
@@ -80,7 +118,16 @@ func (d *Database) validate() error {
 // and is not empty
 func (d *Database) CheckConnectionParam(key string) bool {
 	val, ok := d.Connection[key]
-	return ok && val != ""
+	if !ok {
+		return false
+	}
+	switch val := val.(type) {
+	case string:
+		return strings.TrimSpace(val) != ""
+	default:
+	}
+
+	return true
 }
 
 func (q *Query) validate() error {

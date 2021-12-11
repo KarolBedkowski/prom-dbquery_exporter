@@ -12,10 +12,8 @@ import (
 
 	// _ "github.com/denisenkom/go-mssqldb"
 	// _ "github.com/go-sql-driver/mysql"
-
-	_ "github.com/lib/pq"
-
 	// _ "github.com/mattn/go-oci8"
+	_ "github.com/lib/pq"
 	_ "github.com/mattn/go-sqlite3"
 
 	"github.com/oklog/run"
@@ -56,7 +54,7 @@ func main() {
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
 
-	c, err := loadValidateConf(*configFile)
+	c, err := loadConfiguration(*configFile)
 	if err != nil {
 		Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
 	}
@@ -87,7 +85,7 @@ func main() {
 		g.Add(
 			func() error {
 				for range hup {
-					if newConf, err := loadValidateConf(*configFile); err == nil {
+					if newConf, err := loadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
 						log.Info().Msg("configuration reloaded")
 					} else {
@@ -171,17 +169,4 @@ func (w *webHandler) Close(err error) {
 func (w *webHandler) ReloadConf(newConf *Configuration) {
 	w.handler.SetConfiguration(newConf)
 	w.infoHandler.Configuration = newConf
-}
-
-func loadValidateConf(configFile string) (*Configuration, error) {
-	c, err := loadConfiguration(configFile)
-	if err != nil {
-		return nil, err
-	}
-	for dbname, d := range c.Database {
-		if err := ValidateConf(d); err != nil {
-			return nil, fmt.Errorf("validate database '%s' error: %w", dbname, err)
-		}
-	}
-	return c, nil
 }

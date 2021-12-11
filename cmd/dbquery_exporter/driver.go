@@ -180,7 +180,6 @@ func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]s
 		if err2 != nil {
 			return nil, fmt.Errorf("prepare sql error: %w", err2)
 		}
-		l.Debug().Str("sql", sql).Interface("params", params).Msg("named query")
 		rows, err = conn.QueryxContext(ctx, sql, params...)
 	} else {
 		rows, err = conn.QueryxContext(ctx, q.SQL)
@@ -253,8 +252,8 @@ func (g *genericLoader) UpdateConfiguration(db *Database) error {
 }
 
 func (g *genericLoader) String() string {
-	return fmt.Sprintf("genericLoader driver='%s' connstr='%v' connected=%v",
-		g.driver, g.connStr, g.conn != nil)
+	return fmt.Sprintf("genericLoader name='%s' driver='%s' connstr='%v' connected=%v",
+		g.dbConf.Name, g.driver, g.connStr, g.conn != nil)
 }
 
 func (g *genericLoader) queryTimeout(q *Query) time.Duration {
@@ -551,45 +550,4 @@ func CloseLoaders() {
 		}
 		cancel()
 	}
-}
-
-// ValidateConf validate given configuration against database
-func ValidateConf(d *Database) error {
-	switch d.Driver {
-	case "postgresql":
-	case "postgres":
-		if !d.CheckConnectionParam("connstr") {
-			if !d.CheckConnectionParam("database") && !d.CheckConnectionParam("dbname") {
-				return fmt.Errorf("missing 'database' or 'dbname' parameter")
-			}
-			if !d.CheckConnectionParam("user") {
-				return fmt.Errorf("missing 'user' parameter")
-			}
-		}
-		return nil
-	case "sqlite3":
-	case "sqlite":
-	case "mysql":
-	case "mariadb":
-	case "tidb":
-	case "oracle":
-	case "oci8":
-		for _, k := range []string{"database", "host", "port", "user", "password"} {
-			if !d.CheckConnectionParam(k) {
-				return fmt.Errorf("missing '%s' parameter", k)
-			}
-		}
-	case "mssql":
-		if !d.CheckConnectionParam("database") {
-			return errors.New("missing 'database' parameter")
-		}
-	}
-
-	if port, ok := d.Connection["port"]; ok {
-		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
-			return errors.New("invalid 'port'")
-		}
-	}
-
-	return nil
 }
