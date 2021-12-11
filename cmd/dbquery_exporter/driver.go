@@ -84,24 +84,24 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 		return fmt.Errorf("create connection error: %w", err)
 	}
 
-	if maxConn, ok := g.dbConf.Connection["max_connections"]; ok {
-		if c, ok := maxConn.(int); ok && c > 0 {
-			l.Debug().Int("max-conn", c).Msg("max connection set")
-			g.conn.SetMaxOpenConns(c)
-		} else {
-			l.Warn().Interface("max_connections", maxConn).Msg("invalid value for max_connections")
-		}
-	}
-	if maxIdle, ok := g.dbConf.Connection["max_idle_connections"]; ok {
-		if c, ok := maxIdle.(int); ok && c >= 0 {
-			l.Debug().Int("max-idle", c).Msg("max idle connection set")
-			g.conn.SetMaxIdleConns(c)
-		} else {
-			l.Warn().Interface("max_idle_connections", maxIdle).Msg("invalid value for max_idle_connections")
-		}
-	}
+	g.conn.SetConnMaxLifetime(600 * time.Second)
+	g.conn.SetMaxOpenConns(10)
+	g.conn.SetMaxIdleConns(1)
 
-	g.conn.DB.SetConnMaxLifetime(600 * time.Second)
+	if p := g.dbConf.Pool; p != nil {
+		if p.MaxConnections > 0 {
+			l.Debug().Int("max-conn", p.MaxConnections).Msg("max connection set")
+			g.conn.SetMaxOpenConns(p.MaxConnections)
+		}
+		if p.MaxIdleConnections > 0 {
+			l.Debug().Int("max-idle", p.MaxIdleConnections).Msg("max idle connection set")
+			g.conn.SetMaxIdleConns(p.MaxIdleConnections)
+		}
+		if p.ConnMaxLifeTime > 0 {
+			l.Debug().Int("conn-max-life-time", p.ConnMaxLifeTime).Msg("connection max life time set")
+			g.conn.SetConnMaxLifetime(time.Duration(p.ConnMaxLifeTime) * time.Second)
+		}
+	}
 
 	// check is database is working
 	lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
@@ -275,9 +275,6 @@ func newPostgresLoader(d *Database) (Loader, error) {
 	} else {
 		p := make([]string, 0, len(d.Connection))
 		for k, v := range d.Connection {
-			if k == "max_connections" || k == "max_idle_connections" {
-				continue
-			}
 			vstr := ""
 			if v != nil {
 				vstr = fmt.Sprintf("'%v'", v)
@@ -300,9 +297,6 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	p := url.Values{}
 	var dbname string
 	for k, v := range d.Connection {
-		if k == "max_connections" || k == "max_idle_connections" {
-			continue
-		}
 		vstr := ""
 		if v != nil {
 			vstr = fmt.Sprintf("%v", v)
@@ -349,10 +343,6 @@ func newMysqlLoader(d *Database) (Loader, error) {
 			user = vstr
 		case "password":
 			pass = vstr
-		case "max_connections":
-			continue
-		case "max_idle_connections":
-			continue
 		default:
 			p.Add(k, vstr)
 		}
@@ -400,10 +390,6 @@ func newOracleLoader(d *Database) (Loader, error) {
 			user = vstr
 		case "password":
 			pass = vstr
-		case "max_connections":
-			continue
-		case "max_idle_connections":
-			continue
 		default:
 			p.Add(k, vstr)
 		}
@@ -440,9 +426,6 @@ func newMssqlLoader(d *Database) (Loader, error) {
 	p := url.Values{}
 	databaseConfigured := false
 	for k, v := range d.Connection {
-		if k == "max_connections" || k == "max_idle_connections" {
-			continue
-		}
 		if v != nil {
 			vstr := fmt.Sprintf("%v", v)
 			p.Add(k, vstr)

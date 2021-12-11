@@ -14,6 +14,26 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+// PoolConfiguration configure database connection pool
+type PoolConfiguration struct {
+	MaxConnections     int `yaml:"max_connections"`
+	MaxIdleConnections int `yaml:"max_idle_connections"`
+	ConnMaxLifeTime    int `yaml:"conn_max_life_time"`
+}
+
+func (p *PoolConfiguration) validate() error {
+	if p.MaxConnections < 0 {
+		return errors.New("invalid max_connections")
+	}
+	if p.MaxIdleConnections < 0 {
+		return errors.New("invalid max_idle_connections")
+	}
+	if p.ConnMaxLifeTime < 0 {
+		return errors.New("invalid conn_max_life_time")
+	}
+	return nil
+}
+
 // Database define database connection
 type Database struct {
 	// Driver name - see sql-agent
@@ -32,6 +52,8 @@ type Database struct {
 	// Connection and ping timeout
 	ConnectTimeout uint `yaml:"connect_timeout"`
 
+	Pool *PoolConfiguration `yaml:"pool"`
+
 	// Database name for internal use
 	Name string `yaml:"-"`
 
@@ -42,6 +64,12 @@ type Database struct {
 func (d *Database) validate() error {
 	if d.Driver == "" {
 		return errors.New("missing driver")
+	}
+
+	if d.Pool != nil {
+		if err := d.Pool.validate(); err != nil {
+			return err
+		}
 	}
 
 	switch d.Driver {

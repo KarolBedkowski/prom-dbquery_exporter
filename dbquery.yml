@@ -5,10 +5,14 @@ database:
     # conenction parameters
     connection:
       database: rwr3.db
-      # pool configuration: max number of active connection
+    # pool configuration
+    pool:
+      # max number of active connection; default 10
       max_connections: 2
-      # pool configuration: max number of idle connection
+      # xax number of idle connection; default 1
       max_idle_connections: 1
+      # connection max life time
+      conn_max_life_time: 600
     # additional labels that can be used in templates
     labels:
       env: test
@@ -26,6 +30,7 @@ database:
       user: dbquery_exporter
       password: dbquery_exporter
       port: 5432
+    pool:
       max_connections: 2
       max_idle_connections: 2
   testdbpgsql2:
@@ -34,6 +39,7 @@ database:
       # postgresql connection may use connect string; other parameters
       # are ignored
       connstr: postgres://dbquery_exporter:dbquery_exporter@localhost/postgres
+    pool:
       max_connections: 2
       max_idle_connections: 2
   testtib:
