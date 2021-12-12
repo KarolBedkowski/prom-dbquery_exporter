@@ -14,7 +14,12 @@ LDFLAGS="\
 	-X github.com/prometheus/common/version.Branch='$(BRANCH)'"
 
 build:
-	go build -v -o prom-dbquery_exporter  --ldflags $(LDFLAGS) cmd/dbquery_exporter/*.go
+	go build -v -o dbquery_exporter  --ldflags $(LDFLAGS) cmd/dbquery_exporter/*.go
+
+build_arm64:
+	GOARCH=arm64 \
+	GOOS=linux \
+	go build -v -o dbquery_exporter_arm64  --ldflags $(LDFLAGS) cmd/dbquery_exporter/*.go
 
 run:
 	go run -v cmd/dbquery_exporter/*.go -log.level debug
