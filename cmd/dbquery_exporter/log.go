@@ -32,6 +32,7 @@ func InitializeLogger(level string, format string) {
 	case "logfmt":
 		l = log.Output(zerolog.ConsoleWriter{
 			Out:        os.Stderr,
+			NoColor:    !outputIsConsole(),
 			TimeFormat: time.RFC3339,
 		})
 	case "json":
@@ -58,4 +59,9 @@ func InitializeLogger(level string, format string) {
 	Logger = log.Logger
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(log.Logger)
+}
+
+func outputIsConsole() bool {
+	fileInfo, _ := os.Stdout.Stat()
+	return (fileInfo.Mode() & os.ModeCharDevice) != 0
 }
