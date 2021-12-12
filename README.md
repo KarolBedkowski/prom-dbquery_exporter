@@ -24,10 +24,10 @@ Support: SQLite, PostgrSQL, MySQL/MariaDB/TiDB, Oracle, MSSQL (not tested)
 
 ### Local Build & Run
 
-    go build
-    ./prom-dbquery_exporter
+    make build
+    ./dbquery_exporter
 
-    ./prom-dbquery_exporter -help
+    ./dbquery_exporter -help
 
 Configure `dbquery.yml` file, and visit `http://localhost:9122/query?query=<query_name>&database=<database_name>`
 See dbquery.yml for configuration examples.
@@ -38,22 +38,24 @@ See dbquery.yml for configuration examples.
 
         [...]
 
+     # query one query on many databases
      - job_name: dbquery_scrape
-         static_configs:
-         - targets:
-             - testq1  # query name
-         params:
-           database: [testdb]  # databases list
-           other_query_param: [100]  # additional query params
-         metrics_path: /query
-         relabel_configs:
-         - source_labels: [__address__]
-             target_label: __param_query
-         - source_labels: [__param_query]
-             target_label: query
-         - target_label: __address__
-             replacement: 127.0.0.1:9122       # dbquery_exporter address
+       static_configs:
+       - targets:
+           - testq1  # query name
+       params:
+         database: [testdb]  # databases list
+         other_query_param: [100]  # additional query params
+       metrics_path: /query
+       relabel_configs:
+       - source_labels: [__address__]
+           target_label: __param_query
+       - source_labels: [__param_query]
+           target_label: query
+       - target_label: __address__
+           replacement: 127.0.0.1:9122       # dbquery_exporter address
 
+     # query many queries on one database
      - job_name: dbquery_scrape_db
        static_configs:
          - targets:
@@ -69,7 +71,7 @@ See dbquery.yml for configuration examples.
          - target_label: __address__
            replacement: 127.0.0.1:9122
 
-     - job_name: dbquery
+     - job_name: dbquery_exporter
          static_configs:
          - targets:
                 - 127.0.0.1:9122       # dbquery_exporter address
