@@ -1,16 +1,47 @@
+# sample database databases configuration
 database:
   testdb:
     driver: sqlite
+    # conenction parameters
     connection:
       database: rwr3.db
+    # pool configuration
+    pool:
+      # max number of active connection; default 10
+      max_connections: 2
+      # xax number of idle connection; default 1
+      max_idle_connections: 1
+      # connection max life time
+      conn_max_life_time: 600
+    # additional labels that can be used in templates
+    labels:
+      env: test
+    # initials query to run before any other queries
+    initial_query:
+      - select 1
+    # default timeout for queries in second
+    timeout: 1
   testdbpgsql:
     driver: postgres
     connection:
+      # postgresql may be configured with separate parameters
       database: postgres
       host: localhost
       user: dbquery_exporter
       password: dbquery_exporter
       port: 5432
+    pool:
+      max_connections: 2
+      max_idle_connections: 2
+  testdbpgsql2:
+    driver: postgres
+    connection:
+      # postgresql connection may use connect string; other parameters
+      # are ignored
+      connstr: postgres://dbquery_exporter:dbquery_exporter@localhost/postgres
+    pool:
+      max_connections: 2
+      max_idle_connections: 2
   testtib:
     driver: tidb
     connection:
@@ -27,16 +58,32 @@ database:
       user: testuser
       password: testpass
       port: 1521
+    initial_query:
+      - alter session set default_schema=test
 
+# queries configuration.
+# query is not bind direct to any database
 query:
   testq1:
     sql: >
-       select s.name, count(t.id) as cnt from sports s left join trips t on s.id = t.sport_id group by s.name
+       select s.name, count(t.id) as cnt
+       from sports s left join trips t on s.id = t.sport_id
+       group by s.name
+    # result of query is cached by 20 second
     caching_time: 20
-
+    # timeout define query timeout in second
+    timeout: 1
+    # Rows from query are accessible via `conext.R` variable and should be
+    # always iterate.
+    # Labels defined on database level are available via `context.L map`.
+    # Some other variables are available:
+    # `.Count` - total number of query result
+    # `.QueryDuration` - query duration in sec
+    # `.QueryStartTime` - start query as unix time (time of execution, even cached)
     metrics: |
+      {{ $top := . }}
       {{- range .R }}
-      rwr3_sport_trip_count{sport="{{ .name }}"} {{ .cnt }}
+      rwr3_sport_trip_count{sport="{{ .name }}", dbname="{{ $top.L.env }}"} {{ .cnt }}
       {{- end  }}
       rwr3_sport_trip_count_rows {{ .Count }}
       rwr3_sport_trip_query_secounds {{ .QueryDuration }}
@@ -55,9 +102,11 @@ query:
       rwr3_trips_last_query_unix {{ .QueryStartTime }}
 
   testparam1:
+    # Queries may use parameters delivered by request->query (ie ...&id=12)
     sql: >
       select count(t.id) as cnt from trips t where id > :id
 
+    # Parameters are accessible via `context.P` map
     metrics: |
       {{ $top := . }}
       {{- range .R }}
@@ -77,9 +126,10 @@ query:
 
   pg_stat_database:
     sql: >
-      select  datname, numbackends, xact_commit, xact_rollback, blks_read, blks_hit,
-        tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted, conflicts,
-        temp_files, temp_bytes, deadlocks, blk_read_time, blk_write_time
+      select  datname, numbackends, xact_commit, xact_rollback, blks_read,
+        blks_hit, tup_returned, tup_fetched, tup_inserted, tup_updated,
+        tup_deleted, conflicts, temp_files, temp_bytes, deadlocks,
+        blk_read_time, blk_write_time
       from pg_stat_database
 
     caching_time: 30
@@ -114,9 +164,12 @@ query:
 
   oracle_v_sysmetric:
     sql: >
-       select metric_name as name, to_char(value) as value from V$SYSMETRIC where GROUP_ID=2
+       select metric_name as name, to_char(value) as value
+       from V$SYSMETRIC
+       where GROUP_ID=2
     caching_time: 10
 
+    # some additional functions may be used for preparing result
     metrics: |
       {{- range .R }}
       oracle_v_sysmetric_{{ .NAME | keepAlfaNumUnderlineSpace | trim | replaceSpaces | toLower }} {{ .VALUE }}

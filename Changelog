@@ -1,4 +1,21 @@
-v0.5 2016-03-25
+v0.7 2021-12-12
+* feat: allow set query timeouts
+* feat: prevent running the same query twice
+* feat: add per database connection pool; don't create new connection on every
+  request
+* feat: support tls/authorization via web-config.yaml
+* feat: add more configuration validators
+* feat: allow live reload configuration
+* feat: stop processing queries when client gone
+* refactor: change logging lib to zerolog
+* refactor: clean & simplify code
+* refactor: update deps
+* bugfix: fix various minor problems
+
+v0.6 2019-03-17
+* add initial sqls for connection
+
+v0.5 2017-03-25
 * fix concurrency problems with cache
 
 v0.4 2017-03-18
