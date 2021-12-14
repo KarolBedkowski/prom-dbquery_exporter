@@ -82,7 +82,7 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 		Msg("genericQuery connecting")
 
 	if g.conn, err = sqlx.Open(g.driver, g.connStr); err != nil {
-		return fmt.Errorf("create connection error: %w", err)
+		return fmt.Errorf("open error: %w", err)
 	}
 
 	g.conn.SetConnMaxLifetime(600 * time.Second)
@@ -128,7 +128,7 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 
 	conn, err := g.conn.Connx(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("open connection error: %w", err)
+		return nil, fmt.Errorf("get connection error: %w", err)
 	}
 	// launch initial sqls if defined
 	for _, sql := range g.initialSQL {
