@@ -221,7 +221,9 @@ func (g *genericLoader) Close(ctx context.Context) error {
 
 	log.Ctx(ctx).Debug().Interface("conn", g.conn).
 		Str("db", g.dbConf.Name).Msg("genericQuery close conn")
-	return g.conn.Close()
+	err := g.conn.Close()
+	g.conn = nil
+	return err
 }
 
 func (g *genericLoader) ConfChanged(db *Database) bool {
