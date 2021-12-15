@@ -30,8 +30,6 @@ DATABASES
   {{- range $key, $val := .Labels }}
     - {{ $key }}: {{ $val | printf "%v" }}
   {{- end }}
-- reload: {{ .Timestamp }}
-
 
 {{- end }}
 

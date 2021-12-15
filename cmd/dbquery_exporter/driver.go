@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -45,8 +46,8 @@ type (
 		Close(ctx context.Context) error
 		// Human-friendly info
 		String() string
-		// UpdateConfiguration for existing Loader
-		UpdateConfiguration(db *Database) error
+		// ConfChanged return true when given configuration is differ than used
+		ConfChanged(db *Database) bool
 	}
 
 	// QueryResult is result of Loader.Query
@@ -81,7 +82,7 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 		Msg("genericQuery connecting")
 
 	if g.conn, err = sqlx.Open(g.driver, g.connStr); err != nil {
-		return fmt.Errorf("create connection error: %w", err)
+		return fmt.Errorf("open error: %w", err)
 	}
 
 	g.conn.SetConnMaxLifetime(600 * time.Second)
@@ -127,7 +128,7 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 
 	conn, err := g.conn.Connx(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("open connection error: %w", err)
+		return nil, fmt.Errorf("get connection error: %w", err)
 	}
 	// launch initial sqls if defined
 	for _, sql := range g.initialSQL {
@@ -220,35 +221,13 @@ func (g *genericLoader) Close(ctx context.Context) error {
 
 	log.Ctx(ctx).Debug().Interface("conn", g.conn).
 		Str("db", g.dbConf.Name).Msg("genericQuery close conn")
-	return g.conn.Close()
+	err := g.conn.Close()
+	g.conn = nil
+	return err
 }
 
-// UpdateConfiguration update configuration if changed and close
-// current database connection.
-func (g *genericLoader) UpdateConfiguration(db *Database) error {
-	if g.dbConf.Timestamp == db.Timestamp {
-		return nil
-	}
-
-	// lock loader for write
-	g.lock.Lock()
-	defer g.lock.Unlock()
-
-	l := Logger.With().Str("db", g.dbConf.Name).Logger()
-	l.Info().Msg("reload configuration")
-
-	if g.conn != nil {
-		// close open connection
-		l.Info().Msg("closing connection")
-		if err := g.conn.Close(); err != nil {
-			l.Warn().Err(err).Msg("close connection error")
-		}
-
-		g.conn = nil
-	}
-
-	g.dbConf = db
-	return nil
+func (g *genericLoader) ConfChanged(db *Database) bool {
+	return !reflect.DeepEqual(g.dbConf, db)
 }
 
 func (g *genericLoader) String() string {
@@ -500,11 +479,6 @@ func GetLoader(d *Database) (Loader, error) {
 	defer lp.lock.Unlock()
 
 	if loader, ok := lp.loaders[d.Name]; ok {
-		// check & apply configuration changes
-		if err := loader.UpdateConfiguration(d); err != nil {
-			return nil, fmt.Errorf("update configuration error: %w", err)
-		}
-
 		return loader, nil
 	}
 
@@ -515,6 +489,37 @@ func GetLoader(d *Database) (Loader, error) {
 	}
 
 	return loader, err
+}
+
+// UpdateConfiguration update configuration for existing loaders:
+// close not existing any more loaders and close loaders with changed
+// configuration so they can be create with new conf on next use.
+func UpdateConfiguration(c *Configuration) {
+	lp.lock.Lock()
+	defer lp.lock.Unlock()
+
+	logger := Logger
+	ctx := logger.WithContext(context.Background())
+
+	var dbToClose []string
+	for k, l := range lp.loaders {
+		if newConf, ok := c.Database[k]; !ok {
+			dbToClose = append(dbToClose, k)
+		} else if l.ConfChanged(newConf) {
+			logger.Info().Str("db", k).Msg("configuration changed")
+			dbToClose = append(dbToClose, k)
+		}
+	}
+
+	for _, name := range dbToClose {
+		l := lp.loaders[name]
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		if err := l.Close(cctx); err != nil {
+			logger.Error().Err(err).Msg("close loader error")
+		}
+		cancel()
+		delete(lp.loaders, name)
+	}
 }
 
 // CloseLoaders close all active loaders in pool

@@ -88,8 +88,10 @@ func main() {
 		g.Add(
 			func() error {
 				for range hup {
+					log.Info().Msg("reloading configuration")
 					if newConf, err := loadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
+						UpdateConfiguration(newConf)
 						log.Info().Msg("configuration reloaded")
 					} else {
 						Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
