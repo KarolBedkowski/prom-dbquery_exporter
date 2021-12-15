@@ -1,3 +1,7 @@
+v0.7.1 2021-12-15
+* bugfix: fix reloading configuration (include closing not existing any more
+  database connections)
+
 v0.7 2021-12-12
 * feat: allow set query timeouts
 * feat: prevent running the same query twice
