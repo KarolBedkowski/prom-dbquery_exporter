@@ -133,16 +133,23 @@ func newWebHandler(c *Configuration, listenAddress string, webConfig string) *we
 
 	reqDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "dbquery_exporter_request_duration_seconds",
-			Help:    "A histogram of latencies for requests.",
-			Buckets: []float64{.5, 1, 10, 30, 60, 120, 300},
+			Namespace: "dbquery_exporter",
+			Name:      "request_duration_seconds",
+			Help:      "A histogram of latencies for requests.",
+			Buckets:   []float64{.5, 1, 10, 30, 60, 120, 300},
 		},
 		[]string{"handler"},
 	)
 
 	prometheus.MustRegister(reqDuration)
 
-	http.Handle("/metrics", promhttp.Handler())
+	http.Handle("/metrics", promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{
+			// Opt into OpenMetrics to support exemplars.
+			EnableOpenMetrics: true,
+		},
+	))
 	http.Handle("/query",
 		newLogMiddleware(
 			promhttp.InstrumentHandlerDuration(

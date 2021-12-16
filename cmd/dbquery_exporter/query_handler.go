@@ -23,35 +23,40 @@ var (
 	// Metrics about the exporter itself.
 	queryDuration = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
-			Name: "dbquery_query_duration_seconds",
-			Help: "Duration of query by the DBQuery exporter",
+			Namespace: "dbquery_exporter",
+			Name:      "duration_seconds",
+			Help:      "Duration of query by the DBQuery exporter",
 		},
 		[]string{"query", "database"},
 	)
 	queryRequest = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "dbquery_request_total",
-			Help: "Total numbers requests per database and query",
+			Namespace: "dbquery_exporter",
+			Name:      "request_total",
+			Help:      "Total numbers requests per database and query",
 		},
 		[]string{"query", "database"},
 	)
 	queryRequestErrors = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Name: "dbquery_request_errors_total",
-			Help: "Errors in requests to the DBQuery exporter",
+			Namespace: "dbquery_exporter",
+			Name:      "request_errors_total",
+			Help:      "Errors in requests to the DBQuery exporter",
 		},
 	)
 	queryCacheHits = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Name: "dbquery_cache_hit",
-			Help: "Number of result loaded from cache",
+			Namespace: "dbquery_exporter",
+			Name:      "cache_hit",
+			Help:      "Number of result loaded from cache",
 		},
 	)
 
 	processErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "dbquery_process_errors_total",
-			Help: "Number of internal processing errors",
+			Namespace: "dbquery_exporter",
+			Name:      "process_errors_total",
+			Help:      "Number of internal processing errors",
 		},
 		[]string{"error"},
 	)

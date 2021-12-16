@@ -15,8 +15,21 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )
+
+func init() {
+	prometheus.MustRegister(
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: "dbquery_exporter",
+				Name:      "loaders_in_pool",
+				Help:      "Number of loaders in pool",
+			},
+			lp.loadersInPool,
+		))
+}
 
 // Record is one record (row) loaded from database
 type Record map[string]interface{}
@@ -471,6 +484,13 @@ type loadersPool struct {
 
 var lp loadersPool = loadersPool{
 	loaders: make(map[string]Loader),
+}
+
+func (l *loadersPool) loadersInPool() float64 {
+	lp.lock.Lock()
+	defer lp.lock.Unlock()
+
+	return float64(len(l.loaders))
 }
 
 // GetLoader create or return existing loader according to configuration
