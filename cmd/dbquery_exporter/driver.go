@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
@@ -29,6 +30,8 @@ func init() {
 			},
 			lp.loadersInPool,
 		))
+
+	prometheus.MustRegister(loggersPoolCollector{})
 }
 
 // Record is one record (row) loaded from database
@@ -61,6 +64,9 @@ type (
 		String() string
 		// ConfChanged return true when given configuration is differ than used
 		ConfChanged(db *Database) bool
+
+		// Stats return database stats if available
+		Stats() *sql.DBStats
 	}
 
 	// QueryResult is result of Loader.Query
@@ -84,6 +90,15 @@ type (
 		lock       sync.RWMutex
 	}
 )
+
+func (g *genericLoader) Stats() *sql.DBStats {
+	if g.conn != nil {
+		stats := g.conn.Stats()
+		return &stats
+	}
+
+	return nil
+}
 
 func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 	// lock loader for write
@@ -482,6 +497,11 @@ type loadersPool struct {
 	lock    sync.Mutex
 }
 
+type loaderStat struct {
+	name  string
+	stats *sql.DBStats
+}
+
 var lp loadersPool = loadersPool{
 	loaders: make(map[string]Loader),
 }
@@ -491,6 +511,19 @@ func (l *loadersPool) loadersInPool() float64 {
 	defer lp.lock.Unlock()
 
 	return float64(len(l.loaders))
+}
+
+func (l *loadersPool) loadersStats() (stats []*loaderStat) {
+	lp.lock.Lock()
+	defer lp.lock.Unlock()
+
+	for name, l := range l.loaders {
+		if s := l.Stats(); s != nil {
+			stats = append(stats, &loaderStat{name: name, stats: s})
+		}
+	}
+
+	return stats
 }
 
 // GetLoader create or return existing loader according to configuration
@@ -557,5 +590,92 @@ func CloseLoaders() {
 			Logger.Error().Err(err).Msg("close loader error")
 		}
 		cancel()
+	}
+}
+
+// loggersPoolCollector collect metric from active loggers in loggersPool.
+type loggersPoolCollector struct {
+}
+
+var (
+	dbpoolConnectionsDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_connections",
+		"Number of connection by status",
+		[]string{"loader", "state"}, nil,
+	)
+	dbpoolCountersDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_counters",
+		"Total number of connections in various state",
+		[]string{"loader", "state"}, nil,
+	)
+	dbpoolTotalWaitDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_wait_sec",
+		"Total time waited for new connection",
+		[]string{"loader"}, nil,
+	)
+)
+
+func (l loggersPoolCollector) Describe(ch chan<- *prometheus.Desc) {
+	prometheus.DescribeByCollect(l, ch)
+}
+
+func (l loggersPoolCollector) Collect(ch chan<- prometheus.Metric) {
+	stats := lp.loadersStats()
+
+	for _, s := range stats {
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolConnectionsDesc,
+			prometheus.GaugeValue,
+			float64(s.stats.OpenConnections),
+			s.name, "open",
+		)
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolConnectionsDesc,
+			prometheus.GaugeValue,
+			float64(s.stats.InUse),
+			s.name, "inuse",
+		)
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolConnectionsDesc,
+			prometheus.GaugeValue,
+			float64(s.stats.Idle),
+			s.name, "idle",
+		)
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolConnectionsDesc,
+			prometheus.GaugeValue,
+			float64(s.stats.MaxOpenConnections),
+			s.name, "max",
+		)
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolCountersDesc,
+			prometheus.CounterValue,
+			float64(s.stats.WaitCount),
+			s.name, "wait",
+		)
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolCountersDesc,
+			prometheus.CounterValue,
+			float64(s.stats.MaxIdleClosed),
+			s.name, "max_idle_closed",
+		)
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolCountersDesc,
+			prometheus.CounterValue,
+			float64(s.stats.MaxIdleTimeClosed),
+			s.name, "max_idle_time_closed",
+		)
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolCountersDesc,
+			prometheus.CounterValue,
+			float64(s.stats.MaxLifetimeClosed),
+			s.name, "max_lifetime_closed",
+		)
+		ch <- prometheus.MustNewConstMetric(
+			dbpoolTotalWaitDesc,
+			prometheus.CounterValue,
+			float64(s.stats.WaitDuration.Seconds()),
+			s.name,
+		)
 	}
 }
