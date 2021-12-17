@@ -161,6 +161,10 @@ func newWebHandler(c *Configuration, listenAddress string, webConfig string) *we
 				reqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
 				wh.infoHandler), "info", true))
 
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
+
 	return wh
 }
 
