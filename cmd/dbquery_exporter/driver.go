@@ -598,19 +598,49 @@ type loggersPoolCollector struct {
 }
 
 var (
-	dbpoolConnectionsDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_connections",
-		"Number of connection by status",
-		[]string{"loader", "state"}, nil,
+	dbpoolActConnsDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_activeconnections",
+		"Number of active connections by loader",
+		[]string{"loader"}, nil,
 	)
-	dbpoolCountersDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_counters",
-		"Total number of connections in various state",
-		[]string{"loader", "state"}, nil,
+	dbpoolIdleConnsDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_idleconnections",
+		"Number of idle connections by loader",
+		[]string{"loader"}, nil,
 	)
-	dbpoolTotalWaitDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_wait_sec",
-		"Total time waited for new connection",
+	dbpoolOpenConnsDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_openconnections",
+		"Number of idle connections by loader",
+		[]string{"loader"}, nil,
+	)
+	dbpoolconfMaxConnsDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_conf_maxopenconnections",
+		"Maximal number of open connections by loader",
+		[]string{"loader"}, nil,
+	)
+	dbpoolConnWaitCntDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_connections_waitcount",
+		"Total number of connections waited for per loader",
+		[]string{"loader"}, nil,
+	)
+	dbpoolConnWaitTimeDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_connections_wait_second",
+		"The total time blocked waiting for a new connection per loader",
+		[]string{"loader"}, nil,
+	)
+	dbpoolConnIdleClosedDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_connections_idleclosed",
+		"The total number of connections closed due to idle connection limit.",
+		[]string{"loader"}, nil,
+	)
+	dbpoolConnIdleTimeClosedDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_connections_idletimeclosed",
+		"The total number of connections closed due to max idle time limit.",
+		[]string{"loader"}, nil,
+	)
+	dbpoolConnLifeTimeClosedDesc = prometheus.NewDesc(
+		"dbquery_exporter_dbpool_connections_lifetimeclosed",
+		"The total number of connections closed due to max life time limit.",
 		[]string{"loader"}, nil,
 	)
 )
@@ -624,55 +654,55 @@ func (l loggersPoolCollector) Collect(ch chan<- prometheus.Metric) {
 
 	for _, s := range stats {
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolConnectionsDesc,
+			dbpoolOpenConnsDesc,
 			prometheus.GaugeValue,
 			float64(s.stats.OpenConnections),
-			s.name, "open",
+			s.name,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolConnectionsDesc,
+			dbpoolActConnsDesc,
 			prometheus.GaugeValue,
 			float64(s.stats.InUse),
-			s.name, "inuse",
+			s.name,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolConnectionsDesc,
+			dbpoolIdleConnsDesc,
 			prometheus.GaugeValue,
 			float64(s.stats.Idle),
-			s.name, "idle",
+			s.name,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolConnectionsDesc,
+			dbpoolconfMaxConnsDesc,
 			prometheus.GaugeValue,
 			float64(s.stats.MaxOpenConnections),
-			s.name, "max",
+			s.name,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolCountersDesc,
+			dbpoolConnWaitCntDesc,
 			prometheus.CounterValue,
 			float64(s.stats.WaitCount),
-			s.name, "wait",
+			s.name,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolCountersDesc,
+			dbpoolConnIdleClosedDesc,
 			prometheus.CounterValue,
 			float64(s.stats.MaxIdleClosed),
-			s.name, "max_idle_closed",
+			s.name,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolCountersDesc,
+			dbpoolConnIdleTimeClosedDesc,
 			prometheus.CounterValue,
 			float64(s.stats.MaxIdleTimeClosed),
-			s.name, "max_idle_time_closed",
+			s.name,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolCountersDesc,
+			dbpoolConnLifeTimeClosedDesc,
 			prometheus.CounterValue,
 			float64(s.stats.MaxLifetimeClosed),
-			s.name, "max_lifetime_closed",
+			s.name,
 		)
 		ch <- prometheus.MustNewConstMetric(
-			dbpoolTotalWaitDesc,
+			dbpoolConnWaitTimeDesc,
 			prometheus.CounterValue,
 			float64(s.stats.WaitDuration.Seconds()),
 			s.name,
