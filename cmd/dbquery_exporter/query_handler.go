@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -24,7 +25,8 @@ var queryResultCache = NewCache()
 // QueryHandler handle all request for metrics
 type (
 	QueryHandler struct {
-		configuration *Configuration
+		configuration   *Configuration
+		disableParallel bool
 
 		// runningQuery lock the same request for running twice
 		runningQuery     map[string]runningQueryInfo
@@ -38,10 +40,11 @@ type (
 )
 
 // NewQueryHandler create new QueryHandler from configuration
-func NewQueryHandler(c *Configuration) *QueryHandler {
+func NewQueryHandler(c *Configuration, disableParallel bool) *QueryHandler {
 	return &QueryHandler{
-		configuration: c,
-		runningQuery:  make(map[string]runningQueryInfo),
+		configuration:   c,
+		runningQuery:    make(map[string]runningQueryInfo),
+		disableParallel: disableParallel,
 	}
 }
 
@@ -206,6 +209,75 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 	return nil
 }
 
+// queryDatabasesSeq query all given databases sequentially
+func (q *QueryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
+	queryNames []string, params map[string]string, w http.ResponseWriter) uint32 {
+	logger := zerolog.Ctx(ctx)
+	logger.Debug().Msg("database sequential processing start")
+
+	writeMutex := sync.Mutex{}
+	var successProcessed uint32 = 0
+
+	for _, dbName := range dbNames {
+		// check is client is still connected
+		select {
+		case <-ctx.Done():
+			logger.Info().Err(ctx.Err()).Msg("context closed")
+			return successProcessed
+		default:
+		}
+
+		logger := logger.With().Str("db", dbName).Logger()
+		ctx := logger.WithContext(ctx)
+		ctx = context.WithValue(ctx, CtxWriteMutexID, &writeMutex)
+
+		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
+			logger.Warn().Err(err).Msg("query database error")
+			queryErrorCnt.WithLabelValues(dbName).Inc()
+		} else {
+			successProcessed++
+		}
+	}
+
+	return successProcessed
+}
+
+// queryDatabasesPar query all databases in parallel
+func (q *QueryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
+	queryNames []string, params map[string]string, w http.ResponseWriter) uint32 {
+	logger := zerolog.Ctx(ctx)
+
+	logger.Debug().Msg("database parallel processing start")
+
+	// writeMutex block parallel writes to Writer
+	writeMutex := sync.Mutex{}
+	// number of successful processes databases
+	var successProcessed uint32 = 0
+	var wg sync.WaitGroup
+	// query databases parallel
+	for _, dbName := range dbNames {
+		wg.Add(1)
+
+		logger := logger.With().Str("db", dbName).Logger()
+		ctx := logger.WithContext(ctx)
+		ctx = context.WithValue(ctx, CtxWriteMutexID, &writeMutex)
+
+		go func(ctx context.Context, dbName string, successProcessed *uint32) {
+			defer wg.Done()
+
+			if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
+				zerolog.Ctx(ctx).Warn().Err(err).Msg("query database error")
+				queryErrorCnt.WithLabelValues(dbName).Inc()
+			} else {
+				atomic.AddUint32(successProcessed, 1)
+			}
+		}(ctx, dbName, &successProcessed)
+	}
+
+	wg.Wait()
+	return successProcessed
+}
+
 func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.Ctx(ctx)
@@ -237,33 +309,12 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	var wg sync.WaitGroup
-	// writeMutex block parallel writes to Writer
-	writeMutex := sync.Mutex{}
-	// number of successful processes databases
-	var successProcessed uint32 = 0
-
-	// query databases parallel
-	for _, dbName := range dbNames {
-		wg.Add(1)
-
-		logger := logger.With().Str("db", dbName).Logger()
-		ctx := logger.WithContext(ctx)
-		ctx = context.WithValue(ctx, CtxWriteMutexID, &writeMutex)
-
-		go func(ctx context.Context, dbName string, successProcessed *uint32) {
-			defer wg.Done()
-
-			if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
-				logger.Warn().Err(err).Msg("query database error")
-				queryErrorCnt.WithLabelValues(dbName).Inc()
-			} else {
-				atomic.AddUint32(successProcessed, 1)
-			}
-		}(ctx, dbName, &successProcessed)
+	var successProcessed uint32
+	if q.disableParallel || len(dbNames) == 1 {
+		successProcessed = q.queryDatabasesSeq(ctx, dbNames, queryNames, params, w)
+	} else {
+		successProcessed = q.queryDatabasesPar(ctx, dbNames, queryNames, params, w)
 	}
-
-	wg.Wait()
 
 	logger.Debug().Uint32("successProcessed", successProcessed).
 		Msg("all database queries finished")
