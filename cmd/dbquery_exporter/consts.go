@@ -14,3 +14,6 @@ const (
 	// CtxRequestID is key for request id in context
 	CtxRequestID CtxKey = iota
 )
+
+// MetricsNamespace is namespace for prometheus metrics
+const MetricsNamespace = "dbquery_exporter"

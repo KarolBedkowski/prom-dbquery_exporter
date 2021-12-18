@@ -15,62 +15,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog/log"
 )
 
-var (
-	// Metrics about the exporter itself.
-	queryDuration = prometheus.NewSummaryVec(
-		prometheus.SummaryOpts{
-			Namespace: "dbquery_exporter",
-			Name:      "query_duration_seconds",
-			Help:      "Duration of query by the DBQuery exporter",
-		},
-		[]string{"query", "database"},
-	)
-	queryRequest = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "dbquery_exporter",
-			Name:      "request_total",
-			Help:      "Total numbers requests per database and query",
-		},
-		[]string{"query", "database"},
-	)
-	queryRequestErrors = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Namespace: "dbquery_exporter",
-			Name:      "request_errors_total",
-			Help:      "Errors in requests to the DBQuery exporter",
-		},
-	)
-	queryCacheHits = prometheus.NewCounter(
-		prometheus.CounterOpts{
-			Namespace: "dbquery_exporter",
-			Name:      "cache_hit",
-			Help:      "Number of result loaded from cache",
-		},
-	)
-
-	processErrors = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: "dbquery_exporter",
-			Name:      "process_errors_total",
-			Help:      "Number of internal processing errors",
-		},
-		[]string{"error"},
-	)
-
-	queryResultCache = NewCache()
-)
-
-func init() {
-	prometheus.MustRegister(queryDuration)
-	prometheus.MustRegister(queryRequest)
-	prometheus.MustRegister(queryRequestErrors)
-	prometheus.MustRegister(queryCacheHits)
-	prometheus.MustRegister(processErrors)
-}
+var queryResultCache = NewCache()
 
 // QueryHandler handle all request for metrics
 type (
@@ -143,7 +91,7 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 		Str("queryKey", queryKey).Time("startTs", rqi.ts).
 		Interface("block_by", rqi.reqID).TimeDiff("age", time.Now(), rqi.ts).
 		Msg("timeout on waiting to unlock; previous query is still executing or stalled")
-	processErrors.WithLabelValues("lock").Inc()
+	processErrorsCnt.WithLabelValues("lock").Inc()
 
 	return ErrQueryLocked
 }
@@ -163,7 +111,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 	}
 
 	logger := log.Ctx(ctx)
-	queryRequest.WithLabelValues(queryName, db.Name).Inc()
+	queryTotalCnt.WithLabelValues(queryName, db.Name).Inc()
 	queryKey := queryName + "@" + db.Name
 
 	logger.Debug().Msg("query start")
@@ -179,7 +127,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 
 	result, err := loader.Query(ctx, query, params)
 	if err != nil {
-		processErrors.WithLabelValues("query").Inc()
+		processErrorsCnt.WithLabelValues("query").Inc()
 		return nil, fmt.Errorf("query error: %w", err)
 	}
 	logger.Debug().
@@ -190,7 +138,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 	// format metrics
 	output, err := FormatResult(ctx, result, query, db)
 	if err != nil {
-		processErrors.WithLabelValues("format").Inc()
+		processErrorsCnt.WithLabelValues("format").Inc()
 		return nil, fmt.Errorf("format result error: %w", err)
 	}
 
@@ -234,7 +182,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 
 			anyProcessed = true
 			if _, err := w.Write(output); err != nil {
-				processErrors.WithLabelValues("write").Inc()
+				processErrorsCnt.WithLabelValues("write").Inc()
 				return fmt.Errorf("write result error: %w", err)
 			}
 		} else {
@@ -298,14 +246,14 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 			logger.Warn().Err(err).Msg("query database error")
-			queryRequestErrors.Inc()
+			queryErrorCnt.WithLabelValues(dbName).Inc()
 		} else {
 			anyProcessed = true
 		}
 	}
 
 	if !anyProcessed {
-		processErrors.WithLabelValues("bad_requests").Inc()
+		processErrorsCnt.WithLabelValues("bad_requests").Inc()
 		http.Error(w, "error", http.StatusBadRequest)
 	}
 }

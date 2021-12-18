@@ -19,9 +19,9 @@ func init() {
 	prometheus.MustRegister(
 		prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
-				Namespace: "dbquery_exporter",
+				Namespace: MetricsNamespace,
 				Name:      "loaders_in_pool",
-				Help:      "Number of loaders in pool",
+				Help:      "Number of active loaders in pool",
 			},
 			lp.loadersInPool,
 		))

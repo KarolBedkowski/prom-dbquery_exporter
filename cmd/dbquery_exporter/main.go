@@ -133,10 +133,10 @@ func newWebHandler(c *Configuration, listenAddress string, webConfig string) *we
 
 	reqDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: "dbquery_exporter",
+			Namespace: MetricsNamespace,
 			Name:      "request_duration_seconds",
 			Help:      "A histogram of latencies for requests.",
-			Buckets:   []float64{.5, 1, 10, 30, 60, 120, 300},
+			Buckets:   []float64{0.5, 1, 5, 10, 60, 120},
 		},
 		[]string{"handler"},
 	)
