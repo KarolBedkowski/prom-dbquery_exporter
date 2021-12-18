@@ -24,7 +24,7 @@ var (
 	queryDuration = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: "dbquery_exporter",
-			Name:      "duration_seconds",
+			Name:      "query_duration_seconds",
 			Help:      "Duration of query by the DBQuery exporter",
 		},
 		[]string{"query", "database"},
