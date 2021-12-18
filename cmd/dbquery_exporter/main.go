@@ -31,7 +31,7 @@ func init() {
 func main() {
 	var (
 		showVersion = flag.Bool("version", false, "Print version information.")
-		configFile  = flag.String("config.file", "dbquery.yml",
+		configFile  = flag.String("config.file", "dbquery.yaml",
 			"Path to configuration file.")
 		listenAddress = flag.String("web.listen-address", ":9122",
 			"Address to listen on for web interface and telemetry.")
