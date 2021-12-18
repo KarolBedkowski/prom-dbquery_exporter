@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -169,6 +170,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 
 	logger.Debug().Str("loader", loader.String()).Msg("loader created")
 
+	writeMutex := ctx.Value(CtxWriteMutexID).(*sync.Mutex)
 	anyProcessed := false
 	for _, queryName := range queryNames {
 		loggerQ := logger.With().Str("query", queryName).Logger()
@@ -181,7 +183,11 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 			}
 
 			anyProcessed = true
-			if _, err := w.Write(output); err != nil {
+
+			writeMutex.Lock()
+			_, err := w.Write(output)
+			writeMutex.Unlock()
+			if err != nil {
 				processErrorsCnt.WithLabelValues("write").Inc()
 				return fmt.Errorf("write result error: %w", err)
 			}
@@ -231,28 +237,38 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	anyProcessed := false
+	var wg sync.WaitGroup
+	// writeMutex block parallel writes to Writer
+	writeMutex := sync.Mutex{}
+	// number of successful processes databases
+	var successProcessed uint32 = 0
+
+	// query databases parallel
 	for _, dbName := range dbNames {
-		// check is client is still connected
-		select {
-		case <-ctx.Done():
-			logger.Info().Err(ctx.Err()).Msg("context closed")
-			return
-		default:
-		}
+		wg.Add(1)
 
 		logger := logger.With().Str("db", dbName).Logger()
 		ctx := logger.WithContext(ctx)
+		ctx = context.WithValue(ctx, CtxWriteMutexID, &writeMutex)
 
-		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
-			logger.Warn().Err(err).Msg("query database error")
-			queryErrorCnt.WithLabelValues(dbName).Inc()
-		} else {
-			anyProcessed = true
-		}
+		go func(ctx context.Context, dbName string, successProcessed *uint32) {
+			defer wg.Done()
+
+			if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
+				logger.Warn().Err(err).Msg("query database error")
+				queryErrorCnt.WithLabelValues(dbName).Inc()
+			} else {
+				atomic.AddUint32(successProcessed, 1)
+			}
+		}(ctx, dbName, &successProcessed)
 	}
 
-	if !anyProcessed {
+	wg.Wait()
+
+	logger.Debug().Uint32("successProcessed", successProcessed).
+		Msg("all database queries finished")
+
+	if successProcessed == 0 {
 		processErrorsCnt.WithLabelValues("bad_requests").Inc()
 		http.Error(w, "error", http.StatusBadRequest)
 	}
