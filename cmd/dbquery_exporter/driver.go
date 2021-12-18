@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -51,7 +52,7 @@ type (
 		ConfChanged(db *Database) bool
 
 		// Stats return database stats if available
-		Stats() *sql.DBStats
+		Stats() *LoaderStats
 	}
 
 	// QueryResult is result of Loader.Query
@@ -67,19 +68,33 @@ type (
 	}
 
 	genericLoader struct {
-		connStr    string
-		driver     string
-		conn       *sqlx.DB
-		initialSQL []string
-		dbConf     *Database
-		lock       sync.RWMutex
+		connStr                string
+		driver                 string
+		conn                   *sqlx.DB
+		initialSQL             []string
+		dbConf                 *Database
+		lock                   sync.RWMutex
+		totalOpenedConnections uint32
+		totalFailedConnections uint32
+	}
+
+	// LoaderStats transfer stats from database driver
+	LoaderStats struct {
+		Name                   string
+		DBStats                sql.DBStats
+		TotalOpenedConnections uint32
+		TotalFailedConnections uint32
 	}
 )
 
-func (g *genericLoader) Stats() *sql.DBStats {
+func (g *genericLoader) Stats() *LoaderStats {
 	if g.conn != nil {
-		stats := g.conn.Stats()
-		return &stats
+		return &LoaderStats{
+			Name:                   g.dbConf.Name,
+			DBStats:                g.conn.Stats(),
+			TotalOpenedConnections: atomic.LoadUint32(&g.totalOpenedConnections),
+			TotalFailedConnections: atomic.LoadUint32(&g.totalFailedConnections),
+		}
 	}
 
 	return nil
@@ -135,14 +150,19 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	if g.conn == nil {
 		// connect to database if not connected
 		if err := g.openConnection(ctx); err != nil {
+			atomic.AddUint32(&g.totalFailedConnections, 1)
 			return nil, fmt.Errorf("open connection error: %w", err)
 		}
 	}
 
 	conn, err := g.conn.Connx(ctx)
 	if err != nil {
+		atomic.AddUint32(&g.totalFailedConnections, 1)
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
+
+	atomic.AddUint32(&g.totalOpenedConnections, 1)
+
 	// launch initial sqls if defined
 	for _, sql := range g.initialSQL {
 		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
