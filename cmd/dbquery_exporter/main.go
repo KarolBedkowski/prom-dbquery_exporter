@@ -31,7 +31,7 @@ func init() {
 func main() {
 	var (
 		showVersion = flag.Bool("version", false, "Print version information.")
-		configFile  = flag.String("config.file", "dbquery.yml",
+		configFile  = flag.String("config.file", "dbquery.yaml",
 			"Path to configuration file.")
 		listenAddress = flag.String("web.listen-address", ":9122",
 			"Address to listen on for web interface and telemetry.")
@@ -41,6 +41,7 @@ func main() {
 			"Logging log format (logfmt, json).")
 		webConfig = flag.String("web.config", "",
 			"Path to config yaml file that can enable TLS or authentication.")
+		disableParallel = flag.Bool("no-parallel-query", false, "Disable parallel queries")
 	)
 	flag.Parse()
 
@@ -62,7 +63,7 @@ func main() {
 		Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
 	}
 
-	webHandler := newWebHandler(c, *listenAddress, *webConfig)
+	webHandler := newWebHandler(c, *listenAddress, *webConfig, *disableParallel)
 
 	var g run.Group
 	{
@@ -123,9 +124,10 @@ type webHandler struct {
 	webConfig     string
 }
 
-func newWebHandler(c *Configuration, listenAddress string, webConfig string) *webHandler {
+func newWebHandler(c *Configuration, listenAddress string, webConfig string,
+	disableParallel bool) *webHandler {
 	wh := &webHandler{
-		handler:       NewQueryHandler(c),
+		handler:       NewQueryHandler(c, disableParallel),
 		infoHandler:   &infoHandler{Configuration: c},
 		listenAddress: listenAddress,
 		webConfig:     webConfig,
@@ -133,16 +135,23 @@ func newWebHandler(c *Configuration, listenAddress string, webConfig string) *we
 
 	reqDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "dbquery_exporter_request_duration_seconds",
-			Help:    "A histogram of latencies for requests.",
-			Buckets: []float64{.5, 1, 10, 30, 60, 120, 300},
+			Namespace: MetricsNamespace,
+			Name:      "request_duration_seconds",
+			Help:      "A histogram of latencies for requests.",
+			Buckets:   []float64{0.5, 1, 5, 10, 60, 120},
 		},
 		[]string{"handler"},
 	)
 
 	prometheus.MustRegister(reqDuration)
 
-	http.Handle("/metrics", promhttp.Handler())
+	http.Handle("/metrics", promhttp.HandlerFor(
+		prometheus.DefaultGatherer,
+		promhttp.HandlerOpts{
+			// Opt into OpenMetrics to support exemplars.
+			EnableOpenMetrics: true,
+		},
+	))
 	http.Handle("/query",
 		newLogMiddleware(
 			promhttp.InstrumentHandlerDuration(
@@ -153,6 +162,10 @@ func newWebHandler(c *Configuration, listenAddress string, webConfig string) *we
 			promhttp.InstrumentHandlerDuration(
 				reqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
 				wh.infoHandler), "info", true))
+
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
 
 	return wh
 }

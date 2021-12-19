@@ -163,7 +163,7 @@ func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	processErrors.WithLabelValues("unauthorized").Inc()
+	processErrorsCnt.WithLabelValues("unauthorized").Inc()
 	w.Header().Set("WWW-Authenticate", "Basic")
 	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }

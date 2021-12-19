@@ -10,7 +10,7 @@ Support: SQLite, PostgrSQL, Oracle, MySQL/MariaDB/TiDB, MSSQL (not tested).
 
 ### Dependency
 
-* golang 1.17
+* golang 1.13
 * see: go.mod
 
 #### Database drivers
@@ -30,8 +30,8 @@ For help:
 
     ./dbquery_exporter -help
 
-Edit `dbquery.yml` file, run and visit `http://localhost:9122/query?query=<query_name>&database=<database_name>`.
-See dbquery.yml for configuration examples.
+Edit `dbquery.yaml` file, run and visit `http://localhost:9122/query?query=<query_name>&database=<database_name>`.
+See dbquery.yaml for configuration examples.
 
 ## Prometheus config
 

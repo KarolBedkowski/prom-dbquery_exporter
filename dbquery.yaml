@@ -64,6 +64,11 @@ database:
 # queries configuration.
 # query is not bind direct to any database
 query:
+  ping:
+    sql: select 1
+    metrics: |
+      ping{database="{{ .Database }}"} 1
+
   testq1:
     sql: >
        select s.name, count(t.id) as cnt

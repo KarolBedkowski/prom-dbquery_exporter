@@ -6,12 +6,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"net/url"
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jmoiron/sqlx"
@@ -48,6 +50,9 @@ type (
 		String() string
 		// ConfChanged return true when given configuration is differ than used
 		ConfChanged(db *Database) bool
+
+		// Stats return database stats if available
+		Stats() *LoaderStats
 	}
 
 	// QueryResult is result of Loader.Query
@@ -63,14 +68,37 @@ type (
 	}
 
 	genericLoader struct {
-		connStr    string
-		driver     string
-		conn       *sqlx.DB
-		initialSQL []string
-		dbConf     *Database
-		lock       sync.RWMutex
+		connStr                string
+		driver                 string
+		conn                   *sqlx.DB
+		initialSQL             []string
+		dbConf                 *Database
+		lock                   sync.RWMutex
+		totalOpenedConnections uint32
+		totalFailedConnections uint32
+	}
+
+	// LoaderStats transfer stats from database driver
+	LoaderStats struct {
+		Name                   string
+		DBStats                sql.DBStats
+		TotalOpenedConnections uint32
+		TotalFailedConnections uint32
 	}
 )
+
+func (g *genericLoader) Stats() *LoaderStats {
+	if g.conn != nil {
+		return &LoaderStats{
+			Name:                   g.dbConf.Name,
+			DBStats:                g.conn.Stats(),
+			TotalOpenedConnections: atomic.LoadUint32(&g.totalOpenedConnections),
+			TotalFailedConnections: atomic.LoadUint32(&g.totalFailedConnections),
+		}
+	}
+
+	return nil
+}
 
 func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 	// lock loader for write
@@ -122,14 +150,19 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	if g.conn == nil {
 		// connect to database if not connected
 		if err := g.openConnection(ctx); err != nil {
+			atomic.AddUint32(&g.totalFailedConnections, 1)
 			return nil, fmt.Errorf("open connection error: %w", err)
 		}
 	}
 
 	conn, err := g.conn.Connx(ctx)
 	if err != nil {
+		atomic.AddUint32(&g.totalFailedConnections, 1)
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
+
+	atomic.AddUint32(&g.totalOpenedConnections, 1)
+
 	// launch initial sqls if defined
 	for _, sql := range g.initialSQL {
 		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
@@ -460,82 +493,4 @@ func prepareParams(q *Query, params map[string]string) map[string]interface{} {
 	}
 
 	return p
-}
-
-// loadersPool keep database loaders
-type loadersPool struct {
-	// map of loader instances
-	loaders map[string]Loader
-	lock    sync.Mutex
-}
-
-var lp loadersPool = loadersPool{
-	loaders: make(map[string]Loader),
-}
-
-// GetLoader create or return existing loader according to configuration
-func GetLoader(d *Database) (Loader, error) {
-	lp.lock.Lock()
-	defer lp.lock.Unlock()
-
-	if loader, ok := lp.loaders[d.Name]; ok {
-		return loader, nil
-	}
-
-	Logger.Debug().Str("name", d.Name).Msg("creating new loader")
-	loader, err := newLoader(d)
-	if err == nil {
-		lp.loaders[d.Name] = loader
-	}
-
-	return loader, err
-}
-
-// UpdateConfiguration update configuration for existing loaders:
-// close not existing any more loaders and close loaders with changed
-// configuration so they can be create with new conf on next use.
-func UpdateConfiguration(c *Configuration) {
-	lp.lock.Lock()
-	defer lp.lock.Unlock()
-
-	logger := Logger
-	ctx := logger.WithContext(context.Background())
-
-	var dbToClose []string
-	for k, l := range lp.loaders {
-		if newConf, ok := c.Database[k]; !ok {
-			dbToClose = append(dbToClose, k)
-		} else if l.ConfChanged(newConf) {
-			logger.Info().Str("db", k).Msg("configuration changed")
-			dbToClose = append(dbToClose, k)
-		}
-	}
-
-	for _, name := range dbToClose {
-		l := lp.loaders[name]
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		if err := l.Close(cctx); err != nil {
-			logger.Error().Err(err).Msg("close loader error")
-		}
-		cancel()
-		delete(lp.loaders, name)
-	}
-}
-
-// CloseLoaders close all active loaders in pool
-func CloseLoaders() {
-	lp.lock.Lock()
-	defer lp.lock.Unlock()
-
-	Logger.Debug().Interface("loaders", lp.loaders).Msg("")
-
-	ctx := Logger.WithContext(context.Background())
-
-	for _, l := range lp.loaders {
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		if err := l.Close(cctx); err != nil {
-			Logger.Error().Err(err).Msg("close loader error")
-		}
-		cancel()
-	}
 }
