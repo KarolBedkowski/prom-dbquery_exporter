@@ -10,7 +10,7 @@ Support: SQLite, PostgrSQL, Oracle, MySQL/MariaDB/TiDB, MSSQL (not tested).
 
 ### Dependency
 
-* golang 1.17
+* golang 1.13
 * see: go.mod
 
 #### Database drivers
