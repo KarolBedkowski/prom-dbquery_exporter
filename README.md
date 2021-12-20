@@ -117,9 +117,19 @@ Data available in tempaltes:
 * keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
 * clean - keep only A-Za-z0-9 and "_", replace spaces to "_", trim, convert to lower case
 
-### Note
+# Note
 
 Oracle return column in upper case. Probably NLS_LANG environment variable should be also used in most cases (i.e. `NLS_LANG=American_America.UTF8`).
+
+All queries should be reasonable fast - long queries should be avoided. As a rule of thumb - each request should take no more 1 minute.
+
+There is a simple protection preventing to run exactly the same queries (request) parallel.
+When next query arrive it may wait up to 5 minutes to previous request finished. After 15 minutes from start
+query is considered as death and next request will be processes.
+
+There is also simple caching mechanism - for each query there can be defined timeout in which previous result
+of query will be returned. This helpful when metrics are gathered i.e. every minute but there is no need to
+get data from database that often.
 
 
 
