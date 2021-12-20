@@ -35,7 +35,7 @@ type (
 
 	runningQueryInfo struct {
 		ts    time.Time
-		reqID interface{}
+		reqID uint64
 	}
 )
 
@@ -69,7 +69,10 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 		rqi, ok = q.runningQuery[queryKey]
 		if !ok || time.Since(rqi.ts).Minutes() > 15 {
 			// no running previous queue or last query is at least 15 minutes earlier
-			q.runningQuery[queryKey] = runningQueryInfo{ts: time.Now(), reqID: ctx.Value(CtxRequestID)}
+			q.runningQuery[queryKey] = runningQueryInfo{
+				ts:    time.Now(),
+				reqID: ctx.Value(CtxRequestID).(uint64),
+			}
 			q.runningQueryLock.Unlock()
 			return nil
 		}
@@ -100,11 +103,17 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 	return ErrQueryLocked
 }
 
-func (q *QueryHandler) markFinished(queryKey string) {
+func (q *QueryHandler) markFinished(ctx context.Context, queryKey string) {
+	reqID := ctx.Value(CtxRequestID).(uint64)
+
 	// mark query finished
 	q.runningQueryLock.Lock()
-	delete(q.runningQuery, queryKey)
-	q.runningQueryLock.Unlock()
+	defer q.runningQueryLock.Unlock()
+
+	// unlock only own locks;
+	if l, ok := q.runningQuery[queryKey]; ok && l.reqID == reqID {
+		delete(q.runningQuery, queryKey)
+	}
 }
 
 func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, queryName string,
@@ -295,7 +304,7 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer q.markFinished(r.URL.RawQuery)
+	defer q.markFinished(ctx, r.URL.RawQuery)
 
 	params := make(map[string]string)
 	for k, v := range r.URL.Query() {
