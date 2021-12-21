@@ -27,6 +27,7 @@ type (
 	QueryHandler struct {
 		configuration   *Configuration
 		disableParallel bool
+		disableCache    bool
 
 		// runningQuery lock the same request for running twice
 		runningQuery     map[string]runningQueryInfo
@@ -40,11 +41,13 @@ type (
 )
 
 // NewQueryHandler create new QueryHandler from configuration
-func NewQueryHandler(c *Configuration, disableParallel bool) *QueryHandler {
+func NewQueryHandler(c *Configuration, disableParallel bool,
+	disableCache bool) *QueryHandler {
 	return &QueryHandler{
 		configuration:   c,
 		runningQuery:    make(map[string]runningQueryInfo),
 		disableParallel: disableParallel,
+		disableCache:    disableCache,
 	}
 }
 
@@ -130,7 +133,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 	logger.Debug().Msg("query start")
 
 	// try to get item from cache
-	if query.CachingTime > 0 {
+	if query.CachingTime > 0 && !q.disableCache {
 		if data, ok := queryResultCache.Get(queryKey); ok {
 			queryCacheHits.Inc()
 			logger.Debug().Msg("query result from cache")
@@ -155,7 +158,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 		return nil, fmt.Errorf("format result error: %w", err)
 	}
 
-	if query.CachingTime > 0 {
+	if query.CachingTime > 0 && !q.disableCache {
 		// update cache
 		queryResultCache.Put(queryKey, query.CachingTime, output)
 	}

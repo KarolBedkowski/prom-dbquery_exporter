@@ -42,6 +42,7 @@ func main() {
 		webConfig = flag.String("web.config", "",
 			"Path to config yaml file that can enable TLS or authentication.")
 		disableParallel = flag.Bool("no-parallel-query", false, "Disable parallel queries")
+		disableCache    = flag.Bool("no-cache", false, "Disable query result caching")
 	)
 	flag.Parse()
 
@@ -63,7 +64,8 @@ func main() {
 		Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
 	}
 
-	webHandler := newWebHandler(c, *listenAddress, *webConfig, *disableParallel)
+	webHandler := newWebHandler(c, *listenAddress, *webConfig, *disableParallel,
+		*disableCache)
 
 	var g run.Group
 	{
@@ -125,9 +127,9 @@ type webHandler struct {
 }
 
 func newWebHandler(c *Configuration, listenAddress string, webConfig string,
-	disableParallel bool) *webHandler {
+	disableParallel bool, disableCache bool) *webHandler {
 	wh := &webHandler{
-		handler:       NewQueryHandler(c, disableParallel),
+		handler:       NewQueryHandler(c, disableParallel, disableCache),
 		infoHandler:   &infoHandler{Configuration: c},
 		listenAddress: listenAddress,
 		webConfig:     webConfig,
