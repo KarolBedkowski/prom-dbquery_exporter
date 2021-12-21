@@ -128,7 +128,9 @@ query:
       id: 0
 
   pg_stats_activity_state:
-    sql: select state as state, count(*) as cnt from pg_stat_activity group by state
+    sql: >
+      select COALESCE(state, '') as state, count(*) as cnt
+      from pg_stat_activity group by state
     caching_time: 30
     metrics: |
       {{- range .R }}
@@ -140,12 +142,22 @@ query:
       - pgstats
       - pg
     sql: >
-      select  datname, numbackends, xact_commit, xact_rollback, blks_read,
-        blks_hit, tup_returned, tup_fetched, tup_inserted, tup_updated,
-        tup_deleted, conflicts, temp_files, temp_bytes, deadlocks,
-        blk_read_time, blk_write_time
-      from pg_stat_database
-
+      select COALESCE(psd.datname, '') AS datname, numbackends, xact_commit,
+        xact_rollback, blks_read, blks_hit, tup_returned, tup_fetched,
+        tup_inserted, tup_updated, tup_deleted, conflicts, temp_files,
+        temp_bytes, deadlocks, blk_read_time, blk_write_time,
+        CASE WHEN (psd.blks_hit + blks_read) > 0
+          THEN (cast(psd.blks_hit AS float) / (psd.blks_hit + psd.blks_read))
+          ELSE 1.0
+        END as cache_hit_ratio,
+        CASE WHEN (xact_commit + xact_rollback) > 0
+          THEN (CAST(xact_commit AS float) / (xact_commit + xact_rollback))
+          ELSE 1.0
+        END as commit_ratio,
+        pg_database_size(psd.datname) AS size
+      from pg_stat_database psd
+      JOIN pg_database pd ON pd.oid =  psd.datid
+      WHERE not pd.datistemplate
     caching_time: 30
     metrics: |
       {{- range .R }}
@@ -165,6 +177,28 @@ query:
       pg_stat_database_deadlocks{name="{{.datname}}"} {{.deadlocks}}
       pg_stat_database_blk_read_time{name="{{.datname}}"} {{.blk_read_time}}
       pg_stat_database_blk_write_time{name="{{.datname}}"} {{.blk_write_time}}
+      pg_stat_database_cache_hit_ratio{name="{{.datname}}"} {{.cache_hit_ratio}}
+      pg_stat_database_commit_ratio{name="{{.datname}}"} {{.commit_ratio}}
+      pg_database_size{name="{{.datname}}"} {{.size}}
+      {{- end }}
+
+  pg_stat_database_conflicts:
+    groups:
+      - pgstats
+    sql: >
+      SELECT psdc.datname, confl_tablespace, confl_lock, confl_snapshot,
+        confl_bufferpin, confl_deadlock
+      from pg_stat_database_conflicts psdc
+      JOIN pg_database pd ON pd.oid =  psdc.datid
+      WHERE not pd.datistemplate
+    caching_time: 60
+    metrics: |
+      {{- range .R }}
+      pg_stat_database_conflicts{name="{{.datname}}", conf="tablespace"} {{.confl_tablespace}}
+      pg_stat_database_conflicts{name="{{.datname}}", conf="lock"} {{.confl_lock}}
+      pg_stat_database_conflicts{name="{{.datname}}", conf="snapshot"} {{.confl_snapshot}}
+      pg_stat_database_conflicts{name="{{.datname}}", conf="bufferpin"} {{.confl_bufferpin}}
+      pg_stat_database_conflicts{name="{{.datname}}", conf="deadlock"} {{.confl_deadlock}}
       {{- end }}
 
   tidb_test:
