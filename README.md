@@ -116,6 +116,22 @@ Data available in tempaltes:
 * keepAlfaNumUnderlineU - keep only unicode letter, digits and "_"
 * keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
 * clean - keep only A-Za-z0-9 and "_", replace spaces to "_", trim, convert to lower case
+# Queries
+
+One on more `database` argument is required.
+At least on query (defined by `query` or `group` arguments) is required.
+
+Simple query:
+`http://localhost:9122/query?query=<query_name>&database=<database_name>`.
+
+By group:
+`http://localhost:9122/query?group=<group_name>&database=<database_name>`.
+
+Multiple queries:
+`http://localhost:9122/query?query=<query_name>&query=<query_name2>&database=<database_name>`.
+
+
+
 
 # Note
 

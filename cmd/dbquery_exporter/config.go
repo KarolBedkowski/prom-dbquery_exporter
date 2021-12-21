@@ -139,6 +139,9 @@ type Query struct {
 	// Max time for query result
 	Timeout uint `yaml:"timeout"`
 
+	// Groups define group names that query belong to
+	Groups []string `yaml:"groups"`
+
 	// Parsed template  (internal)
 	MetricTpl *template.Template `yaml:"-"`
 	// Query name for internal use
@@ -170,6 +173,21 @@ type Configuration struct {
 	Database map[string]*Database
 	// Queries
 	Query map[string]*Query
+}
+
+// GroupQueries return queries that belong to given group
+func (c *Configuration) GroupQueries(group string) []string {
+	var queries []string
+outerloop:
+	for name, q := range c.Query {
+		for _, gr := range q.Groups {
+			if gr == group {
+				queries = append(queries, name)
+				continue outerloop
+			}
+		}
+	}
+	return queries
 }
 
 func (c *Configuration) validate() error {

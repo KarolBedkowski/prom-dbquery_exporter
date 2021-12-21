@@ -294,8 +294,16 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
 
+	for _, g := range r.URL.Query()["group"] {
+		q := q.configuration.GroupQueries(g)
+		if len(q) > 0 {
+			logger.Debug().Str("group", g).Interface("queries", q).Msg("add queries from group")
+			queryNames = append(queryNames, q...)
+		}
+	}
+
 	if len(queryNames) == 0 || len(dbNames) == 0 {
-		http.Error(w, "missing parameters", http.StatusBadRequest)
+		http.Error(w, "missing required parameters", http.StatusBadRequest)
 		return
 	}
 

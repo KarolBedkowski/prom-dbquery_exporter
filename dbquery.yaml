@@ -65,7 +65,13 @@ database:
 # query is not bind direct to any database
 query:
   ping:
+    # query can belong to some group and all queries in group can be executed
+    # on request
+    groups:
+      - pg
+      - oracle
     sql: select 1
+    # use current database name
     metrics: |
       ping{database="{{ .Database }}"} 1
 
@@ -130,6 +136,9 @@ query:
       {{- end }}
 
   pg_stat_database:
+    groups:
+      - pgstats
+      - pg
     sql: >
       select  datname, numbackends, xact_commit, xact_rollback, blks_read,
         blks_hit, tup_returned, tup_fetched, tup_inserted, tup_updated,
@@ -168,6 +177,8 @@ query:
       {{- end }}
 
   oracle_v_sysmetric:
+    groups:
+      - oracle
     sql: >
        select metric_name as name, to_char(value) as value
        from V$SYSMETRIC
