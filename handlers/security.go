@@ -147,7 +147,8 @@ func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			hashedPassword = "$2y$10$QOauhQNbBCuQDKes6eFzPeMqBSjb7Mr5DUmpZ/VcEd00UAV/LDeSi" // #nosec
 		}
 
-		cacheKey := hex.EncodeToString(append(append([]byte(user), []byte(hashedPassword)...), []byte(pass)...))
+		cacheKey := hex.EncodeToString(append(append([]byte(user), []byte(hashedPassword)...),
+			[]byte(pass)...))
 
 		wh.mtx.Lock()
 		authOk, ok := wh.cache[cacheKey]

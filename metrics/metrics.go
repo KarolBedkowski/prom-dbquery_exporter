@@ -67,6 +67,17 @@ var (
 			Help:      "Current configuration load time",
 		},
 	)
+
+	// ReqDuration measure http request duration
+	ReqDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: support.MetricsNamespace,
+			Name:      "request_duration_seconds",
+			Help:      "A histogram of latencies for requests.",
+			Buckets:   []float64{0.5, 1, 5, 10, 60, 120},
+		},
+		[]string{"handler"},
+	)
 )
 
 func init() {
@@ -76,6 +87,7 @@ func init() {
 	prometheus.MustRegister(QueryCacheHits)
 	prometheus.MustRegister(ProcessErrorsCnt)
 	prometheus.MustRegister(configReloadTime)
+	prometheus.MustRegister(ReqDuration)
 }
 
 // UpdateConfLoadTime set current time for configuration_load_time metric

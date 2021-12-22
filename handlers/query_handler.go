@@ -44,17 +44,6 @@ type (
 	}
 )
 
-// NewQueryHandler create new QueryHandler from configuration
-func NewQueryHandler(c *conf.Configuration, disableParallel bool,
-	disableCache bool) *QueryHandler {
-	return &QueryHandler{
-		configuration:   c,
-		runningQuery:    make(map[string]runningQueryInfo),
-		disableParallel: disableParallel,
-		disableCache:    disableCache,
-	}
-}
-
 // SetConfiguration update handler configuration
 func (q *QueryHandler) SetConfiguration(c *conf.Configuration) {
 	q.configuration = c

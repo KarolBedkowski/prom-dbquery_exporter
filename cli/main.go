@@ -3,7 +3,6 @@ package cli
 import (
 	"flag"
 	"fmt"
-	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/version"
 	"github.com/rs/zerolog/log"
 )
@@ -60,11 +58,12 @@ func Main() {
 
 	c, err := conf.LoadConfiguration(*configFile)
 	if err != nil {
-		support.Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
+		support.Logger.Fatal().Err(err).Str("file", *configFile).
+			Msg("load config file error")
 	}
 	metrics.UpdateConfLoadTime()
 
-	webHandler := newWebHandler(c, *listenAddress, *webConfig, *disableParallel,
+	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableParallel,
 		*disableCache)
 
 	var g run.Group
@@ -98,7 +97,8 @@ func Main() {
 						metrics.UpdateConfLoadTime()
 						log.Info().Msg("configuration reloaded")
 					} else {
-						support.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
+						support.Logger.Error().Err(err).
+							Msg("reloading configuration error; using old configuration")
 					}
 				}
 				return nil
@@ -112,82 +112,9 @@ func Main() {
 	g.Add(webHandler.Run, webHandler.Close)
 
 	if err := g.Run(); err != nil {
-		support.Logger.Error().Err(err).Msg("Start failed")
+		support.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
 
 	support.Logger.Info().Msg("finished..")
-}
-
-type webHandler struct {
-	handler       *handlers.QueryHandler
-	infoHandler   *handlers.InfoHandler
-	server        *http.Server
-	listenAddress string
-	webConfig     string
-}
-
-func newWebHandler(c *conf.Configuration, listenAddress string, webConfig string,
-	disableParallel bool, disableCache bool) *webHandler {
-	wh := &webHandler{
-		handler:       handlers.NewQueryHandler(c, disableParallel, disableCache),
-		infoHandler:   &handlers.InfoHandler{Configuration: c},
-		listenAddress: listenAddress,
-		webConfig:     webConfig,
-	}
-
-	reqDuration := prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: support.MetricsNamespace,
-			Name:      "request_duration_seconds",
-			Help:      "A histogram of latencies for requests.",
-			Buckets:   []float64{0.5, 1, 5, 10, 60, 120},
-		},
-		[]string{"handler"},
-	)
-
-	prometheus.MustRegister(reqDuration)
-
-	http.Handle("/metrics", promhttp.HandlerFor(
-		prometheus.DefaultGatherer,
-		promhttp.HandlerOpts{
-			// Opt into OpenMetrics to support exemplars.
-			EnableOpenMetrics: true,
-		},
-	))
-	http.Handle("/query",
-		handlers.NewLogMiddleware(
-			promhttp.InstrumentHandlerDuration(
-				reqDuration.MustCurryWith(prometheus.Labels{"handler": "query"}),
-				wh.handler), "query", false))
-	http.Handle("/info",
-		handlers.NewLogMiddleware(
-			promhttp.InstrumentHandlerDuration(
-				reqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
-				wh.infoHandler), "info", true))
-
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	})
-
-	return wh
-}
-
-func (w *webHandler) Run() error {
-	support.Logger.Info().Msgf("Listening on %s", w.listenAddress)
-	w.server = &http.Server{Addr: w.listenAddress}
-	if err := handlers.ListenAndServe(w.server, w.webConfig); err != nil {
-		return fmt.Errorf("listen and serve failed: %w", err)
-	}
-	return nil
-}
-
-func (w *webHandler) Close(err error) {
-	support.Logger.Debug().Msg("web handler close")
-	w.server.Close()
-}
-
-func (w *webHandler) ReloadConf(newConf *conf.Configuration) {
-	w.handler.SetConfiguration(newConf)
-	w.infoHandler.Configuration = newConf
 }

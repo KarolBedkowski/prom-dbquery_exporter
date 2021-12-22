@@ -128,7 +128,8 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 			g.conn.SetMaxIdleConns(p.MaxIdleConnections)
 		}
 		if p.ConnMaxLifeTime > 0 {
-			l.Debug().Int("conn-max-life-time", p.ConnMaxLifeTime).Msg("connection max life time set")
+			l.Debug().Int("conn-max-life-time", p.ConnMaxLifeTime).
+				Msg("connection max life time set")
 			g.conn.SetConnMaxLifetime(time.Duration(p.ConnMaxLifeTime) * time.Second)
 		}
 	}
