@@ -3,14 +3,14 @@
 The dbquery_exporter allow to scrap metrics from supported SQL databases by user-defined SQL-s
 and templates.
 
-Support: SQLite, PostgrSQL, Oracle, MySQL/MariaDB/TiDB, MSSQL (not tested).
+Support: SQLite, PostgrSQL, Oracle, MySQL/MariaDB/TiDB and MSSQL (not tested).
 
 
 ## Building and running
 
 ### Dependency
 
-* golang 1.13
+* golang 1.13+
 * see: go.mod
 
 #### Database drivers
@@ -77,6 +77,24 @@ See dbquery.yaml for configuration examples.
          - targets:
                 - 127.0.0.1:9122       # dbquery_exporter address
 
+    # query by group
+    - job_name: dbquery_scrape_pg
+        static_configs:
+        - targets:
+            - testdbpgsql
+        params:
+        group:
+            - pgstats
+        metrics_path: /query
+        relabel_configs:
+        - source_labels: [__address__]
+            target_label: __param_database
+        - source_labels: [__param_database]
+            target_label: database
+        - target_label: __address__
+            replacement: 127.0.0.1:9122       # dbquery_exporter address
+
+
 
 ## Templates
 
@@ -116,7 +134,11 @@ Data available in tempaltes:
 * keepAlfaNumUnderlineU - keep only unicode letter, digits and "_"
 * keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
 * clean - keep only A-Za-z0-9 and "_", replace spaces to "_", trim, convert to lower case
-# Queries
+
+
+# Requests
+
+## Database scrape
 
 One on more `database` argument is required.
 At least on query (defined by `query` or `group` arguments) is required.
@@ -131,6 +153,10 @@ Multiple queries:
 `http://localhost:9122/query?query=<query_name>&query=<query_name2>&database=<database_name>`.
 
 
+## Other endpoints
+
+* `/health` - simple health status
+* `/info` - current loaded configuration (available only from localhost)
 
 
 # Note
