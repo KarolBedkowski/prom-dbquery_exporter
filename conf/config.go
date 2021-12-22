@@ -71,8 +71,7 @@ func (d *Database) validate() error {
 	}
 
 	switch d.Driver {
-	case "postgresql":
-	case "postgres":
+	case "postgresql", "postgres", "cockroach", "cockroachdb":
 		if d.CheckConnectionParam("connstr") {
 			return nil
 		}
@@ -82,19 +81,13 @@ func (d *Database) validate() error {
 		if !d.CheckConnectionParam("user") {
 			return fmt.Errorf("missing 'user' parameter")
 		}
-	case "sqlite3":
-	case "sqlite":
-	case "mysql":
-	case "mariadb":
-	case "tidb":
-	case "oracle":
-	case "oci8":
+	case "mysql", "mariadb", "tidb", "oracle", "oci8":
 		for _, k := range []string{"database", "host", "port", "user", "password"} {
 			if !d.CheckConnectionParam(k) {
 				return fmt.Errorf("missing '%s' parameter", k)
 			}
 		}
-	case "mssql":
+	case "sqlite3", "sqlite", "mssql":
 		if !d.CheckConnectionParam("database") {
 			return errors.New("missing 'database' parameter")
 		}
