@@ -1,7 +1,7 @@
 //
 // config.go
 
-package main
+package conf
 
 import (
 	"errors"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v2"
+	"prom-dbquery_exporter.app/support"
 )
 
 // PoolConfiguration configure database connection pool
@@ -158,7 +159,7 @@ func (q *Query) validate() error {
 		return errors.New("missing or empty metrics template")
 	}
 
-	tmpl, err := template.New("main").Funcs(templateFuncsMap).Parse(m)
+	tmpl, err := support.TemplateCompile(q.Name, m)
 	if err != nil {
 		return fmt.Errorf("parsing metrics template error: %w", err)
 	}
@@ -214,7 +215,8 @@ func (c *Configuration) validate() error {
 	return nil
 }
 
-func loadConfiguration(filename string) (*Configuration, error) {
+// LoadConfiguration from filename
+func LoadConfiguration(filename string) (*Configuration, error) {
 	c := &Configuration{}
 	b, err := ioutil.ReadFile(filename) // #nosec
 
@@ -241,7 +243,8 @@ func loadConfiguration(filename string) (*Configuration, error) {
 	return c, nil
 }
 
-func (d *Database) connectTimeout() time.Duration {
+// GetConnectTimeout return connection timeout from configuration or default
+func (d *Database) GetConnectTimeout() time.Duration {
 	if d.ConnectTimeout > 0 {
 		return time.Duration(d.ConnectTimeout) * time.Second
 	}

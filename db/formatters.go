@@ -1,4 +1,4 @@
-package main
+package db
 
 //
 // formatters.go
@@ -12,6 +12,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+
+	"prom-dbquery_exporter.app/conf"
 )
 
 // resultTmplData keep query result and some metadata parsed to template
@@ -33,8 +35,8 @@ type resultTmplData struct {
 }
 
 // FormatResult format query result using template from query configuration
-func FormatResult(ctx context.Context, qr *QueryResult, query *Query,
-	db *Database) ([]byte, error) {
+func FormatResult(ctx context.Context, qr *QueryResult, query *conf.Query,
+	db *conf.Database) ([]byte, error) {
 	r := &resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,

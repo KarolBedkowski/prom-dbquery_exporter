@@ -2,7 +2,7 @@
 // driver.go
 // Based on github.com/chop-dbhi/sql-agent
 
-package main
+package db
 
 import (
 	"context"
@@ -18,6 +18,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/conf"
 )
 
 // Record is one record (row) loaded from database
@@ -43,13 +44,13 @@ type (
 	// Loader load data from database
 	Loader interface {
 		// Query execute sql and returns records or error. Open connection when necessary.
-		Query(ctx context.Context, q *Query, params map[string]string) (*QueryResult, error)
+		Query(ctx context.Context, q *conf.Query, params map[string]string) (*QueryResult, error)
 		// Close db connection.
 		Close(ctx context.Context) error
 		// Human-friendly info
 		String() string
 		// ConfChanged return true when given configuration is differ than used
-		ConfChanged(db *Database) bool
+		ConfChanged(db *conf.Database) bool
 
 		// Stats return database stats if available
 		Stats() *LoaderStats
@@ -72,7 +73,7 @@ type (
 		driver                 string
 		conn                   *sqlx.DB
 		initialSQL             []string
-		dbConf                 *Database
+		dbConf                 *conf.Database
 		lock                   sync.RWMutex
 		totalOpenedConnections uint32
 		totalFailedConnections uint32
@@ -133,7 +134,7 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 	}
 
 	// check is database is working
-	lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
+	lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
 	defer cancel()
 	if err := g.conn.PingContext(lctx); err != nil {
 		return fmt.Errorf("ping error: %w", err)
@@ -166,7 +167,7 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	// launch initial sqls if defined
 	for _, sql := range g.initialSQL {
 		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
-		lctx, cancel := context.WithTimeout(ctx, g.dbConf.connectTimeout())
+		lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
 		defer cancel()
 		if _, err := conn.QueryxContext(lctx, sql); err != nil {
 			conn.Close()
@@ -178,7 +179,8 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 }
 
 // Query get data from database
-func (g *genericLoader) Query(ctx context.Context, q *Query, params map[string]string) (*QueryResult, error) {
+func (g *genericLoader) Query(ctx context.Context, q *conf.Query,
+	params map[string]string) (*QueryResult, error) {
 	var err error
 	l := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", q.Name).Logger()
 	ctx = l.WithContext(ctx)
@@ -259,7 +261,7 @@ func (g *genericLoader) Close(ctx context.Context) error {
 	return err
 }
 
-func (g *genericLoader) ConfChanged(db *Database) bool {
+func (g *genericLoader) ConfChanged(db *conf.Database) bool {
 	return !reflect.DeepEqual(g.dbConf, db)
 }
 
@@ -268,7 +270,7 @@ func (g *genericLoader) String() string {
 		g.dbConf.Name, g.driver, g.connStr, g.conn != nil)
 }
 
-func (g *genericLoader) queryTimeout(q *Query) time.Duration {
+func (g *genericLoader) queryTimeout(q *conf.Query) time.Duration {
 	if q.Timeout > 0 {
 		return time.Duration(q.Timeout) * time.Second
 	}
@@ -280,7 +282,7 @@ func (g *genericLoader) queryTimeout(q *Query) time.Duration {
 	return 5 * time.Minute
 }
 
-func newPostgresLoader(d *Database) (Loader, error) {
+func newPostgresLoader(d *conf.Database) (Loader, error) {
 	var connStr string
 	if val, ok := d.Connection["connstr"]; ok && val != "" {
 		connStr = val.(string)
@@ -305,7 +307,7 @@ func newPostgresLoader(d *Database) (Loader, error) {
 	return l, nil
 }
 
-func newSqliteLoader(d *Database) (Loader, error) {
+func newSqliteLoader(d *conf.Database) (Loader, error) {
 	p := url.Values{}
 	var dbname string
 	for k, v := range d.Connection {
@@ -333,7 +335,7 @@ func newSqliteLoader(d *Database) (Loader, error) {
 	return l, nil
 }
 
-func newMysqlLoader(d *Database) (Loader, error) {
+func newMysqlLoader(d *conf.Database) (Loader, error) {
 	p := url.Values{}
 	host := "localhost"
 	port := "3306"
@@ -383,7 +385,7 @@ func newMysqlLoader(d *Database) (Loader, error) {
 	return l, nil
 }
 
-func newOracleLoader(d *Database) (Loader, error) {
+func newOracleLoader(d *conf.Database) (Loader, error) {
 	p := url.Values{}
 	var dbname, user, pass, host, port string
 	for k, v := range d.Connection {
@@ -434,7 +436,7 @@ func newOracleLoader(d *Database) (Loader, error) {
 	return l, nil
 }
 
-func newMssqlLoader(d *Database) (Loader, error) {
+func newMssqlLoader(d *conf.Database) (Loader, error) {
 	p := url.Values{}
 	databaseConfigured := false
 	for k, v := range d.Connection {
@@ -460,7 +462,7 @@ func newMssqlLoader(d *Database) (Loader, error) {
 }
 
 // newLoader returns configured Loader for given configuration.
-func newLoader(d *Database) (Loader, error) {
+func newLoader(d *conf.Database) (Loader, error) {
 	switch d.Driver {
 	case "postgresql", "postgres", "cockroach", "cockroachdb":
 		return newPostgresLoader(d)
@@ -476,7 +478,7 @@ func newLoader(d *Database) (Loader, error) {
 	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
 }
 
-func prepareParams(q *Query, params map[string]string) map[string]interface{} {
+func prepareParams(q *conf.Query, params map[string]string) map[string]interface{} {
 	p := make(map[string]interface{})
 	if q.Params != nil {
 		for k, v := range q.Params {

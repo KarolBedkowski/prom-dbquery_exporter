@@ -2,7 +2,7 @@
 // templates.go
 //
 
-package main
+package support
 
 import (
 	"strconv"
@@ -10,6 +10,11 @@ import (
 	"text/template"
 	"unicode"
 )
+
+// TemplateCompile try to compile template
+func TemplateCompile(name, tmpl string) (*template.Template, error) {
+	return template.New(name).Funcs(templateFuncsMap).Parse(tmpl)
+}
 
 var templateFuncsMap = template.FuncMap{
 	"toLower":                    strings.ToLower,

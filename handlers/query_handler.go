@@ -1,4 +1,4 @@
-package main
+package handlers
 
 //
 // query_handler.go
@@ -18,14 +18,18 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/conf"
+	"prom-dbquery_exporter.app/db"
+	"prom-dbquery_exporter.app/metrics"
+	"prom-dbquery_exporter.app/support"
 )
 
-var queryResultCache = NewCache()
+var queryResultCache = support.NewCache()
 
 // QueryHandler handle all request for metrics
 type (
 	QueryHandler struct {
-		configuration   *Configuration
+		configuration   *conf.Configuration
 		disableParallel bool
 		disableCache    bool
 
@@ -41,7 +45,7 @@ type (
 )
 
 // NewQueryHandler create new QueryHandler from configuration
-func NewQueryHandler(c *Configuration, disableParallel bool,
+func NewQueryHandler(c *conf.Configuration, disableParallel bool,
 	disableCache bool) *QueryHandler {
 	return &QueryHandler{
 		configuration:   c,
@@ -52,7 +56,7 @@ func NewQueryHandler(c *Configuration, disableParallel bool,
 }
 
 // SetConfiguration update handler configuration
-func (q *QueryHandler) SetConfiguration(c *Configuration) {
+func (q *QueryHandler) SetConfiguration(c *conf.Configuration) {
 	q.configuration = c
 	queryResultCache.Clear()
 }
@@ -74,7 +78,7 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 			// no running previous queue or last query is at least 15 minutes earlier
 			q.runningQuery[queryKey] = runningQueryInfo{
 				ts:    time.Now(),
-				reqID: ctx.Value(CtxRequestID).(uint64),
+				reqID: ctx.Value(support.CtxRequestID).(uint64),
 			}
 			q.runningQueryLock.Unlock()
 			return nil
@@ -101,13 +105,13 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 		Str("queryKey", queryKey).Time("startTs", rqi.ts).
 		Interface("block_by", rqi.reqID).TimeDiff("age", time.Now(), rqi.ts).
 		Msg("timeout on waiting to unlock; previous query is still executing or stalled")
-	processErrorsCnt.WithLabelValues("lock").Inc()
+	metrics.ProcessErrorsCnt.WithLabelValues("lock").Inc()
 
 	return ErrQueryLocked
 }
 
 func (q *QueryHandler) markFinished(ctx context.Context, queryKey string) {
-	reqID := ctx.Value(CtxRequestID).(uint64)
+	reqID := ctx.Value(support.CtxRequestID).(uint64)
 
 	// mark query finished
 	q.runningQueryLock.Lock()
@@ -119,7 +123,8 @@ func (q *QueryHandler) markFinished(ctx context.Context, queryKey string) {
 	}
 }
 
-func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, queryName string,
+func (q *QueryHandler) query(ctx context.Context, loader db.Loader,
+	d *conf.Database, queryName string,
 	params map[string]string) ([]byte, error) {
 	query, ok := (q.configuration.Query)[queryName]
 	if !ok {
@@ -127,15 +132,15 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 	}
 
 	logger := log.Ctx(ctx)
-	queryTotalCnt.WithLabelValues(queryName, db.Name).Inc()
-	queryKey := queryName + "@" + db.Name
+	metrics.QueryTotalCnt.WithLabelValues(queryName, d.Name).Inc()
+	queryKey := queryName + "@" + d.Name
 
 	logger.Debug().Msg("query start")
 
 	// try to get item from cache
 	if query.CachingTime > 0 && !q.disableCache {
 		if data, ok := queryResultCache.Get(queryKey); ok {
-			queryCacheHits.Inc()
+			metrics.QueryCacheHits.Inc()
 			logger.Debug().Msg("query result from cache")
 			return data.([]byte), nil
 		}
@@ -143,7 +148,7 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 
 	result, err := loader.Query(ctx, query, params)
 	if err != nil {
-		processErrorsCnt.WithLabelValues("query").Inc()
+		metrics.ProcessErrorsCnt.WithLabelValues("query").Inc()
 		return nil, fmt.Errorf("query error: %w", err)
 	}
 	logger.Debug().
@@ -152,9 +157,9 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 		Msg("query finished")
 
 	// format metrics
-	output, err := FormatResult(ctx, result, query, db)
+	output, err := db.FormatResult(ctx, result, query, d)
 	if err != nil {
-		processErrorsCnt.WithLabelValues("format").Inc()
+		metrics.ProcessErrorsCnt.WithLabelValues("format").Inc()
 		return nil, fmt.Errorf("format result error: %w", err)
 	}
 
@@ -163,14 +168,14 @@ func (q *QueryHandler) query(ctx context.Context, loader Loader, db *Database, q
 		queryResultCache.Put(queryKey, query.CachingTime, output)
 	}
 
-	queryDuration.WithLabelValues(queryName, db.Name).Observe(result.Duration)
+	metrics.QueryDuration.WithLabelValues(queryName, d.Name).Observe(result.Duration)
 
 	return output, nil
 }
 
 func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 	queryNames []string, params map[string]string, w http.ResponseWriter) error {
-	db, ok := q.configuration.Database[dbName]
+	d, ok := q.configuration.Database[dbName]
 	if !ok {
 		return fmt.Errorf("unknown database '%s'", dbName)
 	}
@@ -178,19 +183,19 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 	logger := log.Ctx(ctx)
 	logger.Debug().Msg("start processing database")
 
-	loader, err := GetLoader(db)
+	loader, err := db.GetLoader(d)
 	if err != nil {
 		return fmt.Errorf("get loader error: %w", err)
 	}
 
 	logger.Debug().Str("loader", loader.String()).Msg("loader created")
 
-	writeMutex := ctx.Value(CtxWriteMutexID).(*sync.Mutex)
+	writeMutex := ctx.Value(support.CtxWriteMutexID).(*sync.Mutex)
 	anyProcessed := false
 	for _, queryName := range queryNames {
 		loggerQ := logger.With().Str("query", queryName).Logger()
 		ctxQuery := loggerQ.WithContext(ctx)
-		if output, err := q.query(ctxQuery, loader, db, queryName, params); err == nil {
+		if output, err := q.query(ctxQuery, loader, d, queryName, params); err == nil {
 			select {
 			case <-ctx.Done():
 				return fmt.Errorf("client disconnected: %w", ctx.Err())
@@ -203,7 +208,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 			_, err := w.Write(output)
 			writeMutex.Unlock()
 			if err != nil {
-				processErrorsCnt.WithLabelValues("write").Inc()
+				metrics.ProcessErrorsCnt.WithLabelValues("write").Inc()
 				return fmt.Errorf("write result error: %w", err)
 			}
 		} else {
@@ -241,11 +246,11 @@ func (q *QueryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 
 		logger := logger.With().Str("db", dbName).Logger()
 		ctx := logger.WithContext(ctx)
-		ctx = context.WithValue(ctx, CtxWriteMutexID, &writeMutex)
+		ctx = context.WithValue(ctx, support.CtxWriteMutexID, &writeMutex)
 
 		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 			logger.Warn().Err(err).Msg("query database error")
-			queryErrorCnt.WithLabelValues(dbName).Inc()
+			metrics.QueryErrorCnt.WithLabelValues(dbName).Inc()
 		} else {
 			successProcessed++
 		}
@@ -272,14 +277,14 @@ func (q *QueryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 
 		logger := logger.With().Str("db", dbName).Logger()
 		ctx := logger.WithContext(ctx)
-		ctx = context.WithValue(ctx, CtxWriteMutexID, &writeMutex)
+		ctx = context.WithValue(ctx, support.CtxWriteMutexID, &writeMutex)
 
 		go func(ctx context.Context, dbName string, successProcessed *uint32) {
 			defer wg.Done()
 
 			if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 				zerolog.Ctx(ctx).Warn().Err(err).Msg("query database error")
-				queryErrorCnt.WithLabelValues(dbName).Inc()
+				metrics.QueryErrorCnt.WithLabelValues(dbName).Inc()
 			} else {
 				atomic.AddUint32(successProcessed, 1)
 			}
@@ -340,7 +345,7 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Msg("all database queries finished")
 
 	if successProcessed == 0 {
-		processErrorsCnt.WithLabelValues("bad_requests").Inc()
+		metrics.ProcessErrorsCnt.WithLabelValues("bad_requests").Inc()
 		http.Error(w, "error", http.StatusBadRequest)
 	}
 }

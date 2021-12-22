@@ -1,4 +1,4 @@
-package main
+package metrics
 
 //
 // metrics.go
@@ -11,45 +11,49 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"prom-dbquery_exporter.app/support"
 )
 
 var (
-	// Metrics about the exporter itself.
-	queryDuration = prometheus.NewSummaryVec(
+	// QueryDuration is duration of query
+	QueryDuration = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
-			Namespace: MetricsNamespace,
+			Namespace: support.MetricsNamespace,
 			Name:      "query_duration_seconds",
 			Help:      "Duration of query by the DBQuery exporter",
 		},
 		[]string{"query", "database"},
 	)
-	queryTotalCnt = prometheus.NewCounterVec(
+	// QueryTotalCnt is total number of query executions
+	QueryTotalCnt = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: MetricsNamespace,
+			Namespace: support.MetricsNamespace,
 			Name:      "query_total",
 			Help:      "Total numbers queries per database and query",
 		},
 		[]string{"query", "database"},
 	)
-	queryErrorCnt = prometheus.NewCounterVec(
+	// QueryErrorCnt is total number of execution errors
+	QueryErrorCnt = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: MetricsNamespace,
+			Namespace: support.MetricsNamespace,
 			Name:      "query_database_errors_total",
 			Help:      "Errors in requests to the DBQuery exporter",
 		},
 		[]string{"database"},
 	)
-	queryCacheHits = prometheus.NewCounter(
+	// QueryCacheHits is number of result served from cache
+	QueryCacheHits = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: MetricsNamespace,
+			Namespace: support.MetricsNamespace,
 			Name:      "query_cache_hit",
 			Help:      "Number of result loaded from cache",
 		},
 	)
-
-	processErrorsCnt = prometheus.NewCounterVec(
+	// ProcessErrorsCnt is total number of internal errors by category
+	ProcessErrorsCnt = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: MetricsNamespace,
+			Namespace: support.MetricsNamespace,
 			Name:      "process_errors_total",
 			Help:      "Number of internal processing errors",
 		},
@@ -58,7 +62,7 @@ var (
 
 	configReloadTime = prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: MetricsNamespace,
+			Namespace: support.MetricsNamespace,
 			Name:      "configuration_load_time",
 			Help:      "Current configuration load time",
 		},
@@ -66,11 +70,11 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(queryDuration)
-	prometheus.MustRegister(queryTotalCnt)
-	prometheus.MustRegister(queryErrorCnt)
-	prometheus.MustRegister(queryCacheHits)
-	prometheus.MustRegister(processErrorsCnt)
+	prometheus.MustRegister(QueryDuration)
+	prometheus.MustRegister(QueryTotalCnt)
+	prometheus.MustRegister(QueryErrorCnt)
+	prometheus.MustRegister(QueryCacheHits)
+	prometheus.MustRegister(ProcessErrorsCnt)
 	prometheus.MustRegister(configReloadTime)
 }
 

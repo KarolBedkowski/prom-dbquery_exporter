@@ -1,4 +1,4 @@
-package main
+package handlers
 
 //
 // security.go
@@ -22,9 +22,12 @@ import (
 	"github.com/prometheus/exporter-toolkit/web"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v2"
+	"prom-dbquery_exporter.app/metrics"
+	"prom-dbquery_exporter.app/support"
 )
 
-func listenAndServe(server *http.Server, tlsConfigPath string) error {
+// ListenAndServe start webserver
+func ListenAndServe(server *http.Server, tlsConfigPath string) error {
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		return err
@@ -33,7 +36,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	defer listener.Close()
 
 	if tlsConfigPath == "" {
-		Logger.Info().Msg("TLS is disabled.")
+		support.Logger.Info().Msg("TLS is disabled.")
 		return server.Serve(listener)
 	}
 
@@ -58,9 +61,9 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 			server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 		}
 		// Valid TLS config.
-		Logger.Info().Msg("TLS is enabled.")
+		support.Logger.Info().Msg("TLS is enabled.")
 	} else {
-		Logger.Info().Msg("TLS is disabled.")
+		support.Logger.Info().Msg("TLS is disabled.")
 		return server.Serve(listener)
 	}
 
@@ -109,9 +112,9 @@ type secWebHandler struct {
 
 func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 	if cu := len(conf.Users); cu > 0 {
-		Logger.Info().Int("users", cu).Msg("Authorization enabled")
+		support.Logger.Info().Int("users", cu).Msg("Authorization enabled")
 	} else {
-		Logger.Info().Msg("Authorization disabled")
+		support.Logger.Info().Msg("Authorization disabled")
 	}
 
 	return &secWebHandler{
@@ -163,7 +166,7 @@ func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	processErrorsCnt.WithLabelValues("unauthorized").Inc()
+	metrics.ProcessErrorsCnt.WithLabelValues("unauthorized").Inc()
 	w.Header().Set("WWW-Authenticate", "Basic")
 	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }

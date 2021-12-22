@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"flag"
@@ -9,13 +9,11 @@ import (
 	"runtime"
 	"syscall"
 
-	//	_ "net/http/pprof"
-
-	// _ "github.com/denisenkom/go-mssqldb"
-	// _ "github.com/go-sql-driver/mysql"
-	// _ "github.com/mattn/go-oci8"
-	_ "github.com/lib/pq"
-	_ "github.com/mattn/go-sqlite3"
+	"prom-dbquery_exporter.app/conf"
+	"prom-dbquery_exporter.app/db"
+	"prom-dbquery_exporter.app/handlers"
+	"prom-dbquery_exporter.app/metrics"
+	"prom-dbquery_exporter.app/support"
 
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
@@ -28,7 +26,8 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-func main() {
+// Main is main function for cli
+func Main() {
 	var (
 		showVersion = flag.Bool("version", false, "Print version information.")
 		configFile  = flag.String("config.file", "dbquery.yaml",
@@ -53,17 +52,17 @@ func main() {
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	InitializeLogger(*loglevel, *logformat)
-	Logger.Info().
+	support.InitializeLogger(*loglevel, *logformat)
+	support.Logger.Info().
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
 
-	c, err := loadConfiguration(*configFile)
+	c, err := conf.LoadConfiguration(*configFile)
 	if err != nil {
-		Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
+		support.Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
 	}
-	UpdateConfLoadTime()
+	metrics.UpdateConfLoadTime()
 
 	webHandler := newWebHandler(c, *listenAddress, *webConfig, *disableParallel,
 		*disableCache)
@@ -76,8 +75,8 @@ func main() {
 		g.Add(
 			func() error {
 				<-term
-				Logger.Warn().Msg("Received SIGTERM, exiting...")
-				CloseLoaders()
+				support.Logger.Warn().Msg("Received SIGTERM, exiting...")
+				db.CloseLoaders()
 				return nil
 			},
 			func(err error) {
@@ -93,13 +92,13 @@ func main() {
 			func() error {
 				for range hup {
 					log.Info().Msg("reloading configuration")
-					if newConf, err := loadConfiguration(*configFile); err == nil {
+					if newConf, err := conf.LoadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
-						UpdateConfiguration(newConf)
-						UpdateConfLoadTime()
+						db.UpdateConfiguration(newConf)
+						metrics.UpdateConfLoadTime()
 						log.Info().Msg("configuration reloaded")
 					} else {
-						Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
+						support.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
 					}
 				}
 				return nil
@@ -113,33 +112,33 @@ func main() {
 	g.Add(webHandler.Run, webHandler.Close)
 
 	if err := g.Run(); err != nil {
-		Logger.Error().Err(err).Msg("Start failed")
+		support.Logger.Error().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
 
-	Logger.Info().Msg("finished..")
+	support.Logger.Info().Msg("finished..")
 }
 
 type webHandler struct {
-	handler       *QueryHandler
-	infoHandler   *infoHandler
+	handler       *handlers.QueryHandler
+	infoHandler   *handlers.InfoHandler
 	server        *http.Server
 	listenAddress string
 	webConfig     string
 }
 
-func newWebHandler(c *Configuration, listenAddress string, webConfig string,
+func newWebHandler(c *conf.Configuration, listenAddress string, webConfig string,
 	disableParallel bool, disableCache bool) *webHandler {
 	wh := &webHandler{
-		handler:       NewQueryHandler(c, disableParallel, disableCache),
-		infoHandler:   &infoHandler{Configuration: c},
+		handler:       handlers.NewQueryHandler(c, disableParallel, disableCache),
+		infoHandler:   &handlers.InfoHandler{Configuration: c},
 		listenAddress: listenAddress,
 		webConfig:     webConfig,
 	}
 
 	reqDuration := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Namespace: MetricsNamespace,
+			Namespace: support.MetricsNamespace,
 			Name:      "request_duration_seconds",
 			Help:      "A histogram of latencies for requests.",
 			Buckets:   []float64{0.5, 1, 5, 10, 60, 120},
@@ -157,12 +156,12 @@ func newWebHandler(c *Configuration, listenAddress string, webConfig string,
 		},
 	))
 	http.Handle("/query",
-		newLogMiddleware(
+		handlers.NewLogMiddleware(
 			promhttp.InstrumentHandlerDuration(
 				reqDuration.MustCurryWith(prometheus.Labels{"handler": "query"}),
 				wh.handler), "query", false))
 	http.Handle("/info",
-		newLogMiddleware(
+		handlers.NewLogMiddleware(
 			promhttp.InstrumentHandlerDuration(
 				reqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
 				wh.infoHandler), "info", true))
@@ -175,20 +174,20 @@ func newWebHandler(c *Configuration, listenAddress string, webConfig string,
 }
 
 func (w *webHandler) Run() error {
-	Logger.Info().Msgf("Listening on %s", w.listenAddress)
+	support.Logger.Info().Msgf("Listening on %s", w.listenAddress)
 	w.server = &http.Server{Addr: w.listenAddress}
-	if err := listenAndServe(w.server, w.webConfig); err != nil {
+	if err := handlers.ListenAndServe(w.server, w.webConfig); err != nil {
 		return fmt.Errorf("listen and serve failed: %w", err)
 	}
 	return nil
 }
 
 func (w *webHandler) Close(err error) {
-	Logger.Debug().Msg("web handler close")
+	support.Logger.Debug().Msg("web handler close")
 	w.server.Close()
 }
 
-func (w *webHandler) ReloadConf(newConf *Configuration) {
+func (w *webHandler) ReloadConf(newConf *conf.Configuration) {
 	w.handler.SetConfiguration(newConf)
 	w.infoHandler.Configuration = newConf
 }

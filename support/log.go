@@ -6,7 +6,7 @@
 //
 // based on: github.com/prometheus/common/log
 
-package main
+package support
 
 import (
 	"fmt"
