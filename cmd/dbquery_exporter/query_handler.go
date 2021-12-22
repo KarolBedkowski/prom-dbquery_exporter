@@ -180,7 +180,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 
 	loader, err := GetLoader(db)
 	if err != nil {
-		return errors.New("get loader error")
+		return fmt.Errorf("get loader error: %w", err)
 	}
 
 	logger.Debug().Str("loader", loader.String()).Msg("loader created")
