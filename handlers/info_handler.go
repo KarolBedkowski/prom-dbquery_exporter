@@ -1,4 +1,4 @@
-package main
+package handlers
 
 //
 // info_handler.go
@@ -12,6 +12,9 @@ import (
 	"net/http"
 	"strings"
 	"text/template"
+
+	"prom-dbquery_exporter.app/conf"
+	"prom-dbquery_exporter.app/support"
 )
 
 const infoTmpl = `
@@ -64,8 +67,9 @@ var funcMap = template.FuncMap{
 	"redact": redact,
 }
 
+// infoHandler handle request and return information about current configuration
 type infoHandler struct {
-	Configuration *Configuration
+	Configuration *conf.Configuration
 }
 
 func (q infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,6 +82,6 @@ func (q infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	t := template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl))
 	if err := t.Execute(w, q.Configuration); err != nil {
-		Logger.Error().Err(err).Msg("executing template error")
+		support.Logger.Error().Err(err).Msg("executing template error")
 	}
 }

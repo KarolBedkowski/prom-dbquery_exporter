@@ -1,7 +1,7 @@
 //
 // config.go
 
-package main
+package conf
 
 import (
 	"errors"
@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v2"
+	"prom-dbquery_exporter.app/support"
 )
 
 // PoolConfiguration configure database connection pool
@@ -70,8 +71,7 @@ func (d *Database) validate() error {
 	}
 
 	switch d.Driver {
-	case "postgresql":
-	case "postgres":
+	case "postgresql", "postgres", "cockroach", "cockroachdb":
 		if d.CheckConnectionParam("connstr") {
 			return nil
 		}
@@ -81,19 +81,13 @@ func (d *Database) validate() error {
 		if !d.CheckConnectionParam("user") {
 			return fmt.Errorf("missing 'user' parameter")
 		}
-	case "sqlite3":
-	case "sqlite":
-	case "mysql":
-	case "mariadb":
-	case "tidb":
-	case "oracle":
-	case "oci8":
+	case "mysql", "mariadb", "tidb", "oracle", "oci8":
 		for _, k := range []string{"database", "host", "port", "user", "password"} {
 			if !d.CheckConnectionParam(k) {
 				return fmt.Errorf("missing '%s' parameter", k)
 			}
 		}
-	case "mssql":
+	case "sqlite3", "sqlite", "mssql":
 		if !d.CheckConnectionParam("database") {
 			return errors.New("missing 'database' parameter")
 		}
@@ -139,6 +133,9 @@ type Query struct {
 	// Max time for query result
 	Timeout uint `yaml:"timeout"`
 
+	// Groups define group names that query belong to
+	Groups []string `yaml:"groups"`
+
 	// Parsed template  (internal)
 	MetricTpl *template.Template `yaml:"-"`
 	// Query name for internal use
@@ -155,7 +152,7 @@ func (q *Query) validate() error {
 		return errors.New("missing or empty metrics template")
 	}
 
-	tmpl, err := template.New("main").Funcs(templateFuncsMap).Parse(m)
+	tmpl, err := support.TemplateCompile(q.Name, m)
 	if err != nil {
 		return fmt.Errorf("parsing metrics template error: %w", err)
 	}
@@ -170,6 +167,21 @@ type Configuration struct {
 	Database map[string]*Database
 	// Queries
 	Query map[string]*Query
+}
+
+// GroupQueries return queries that belong to given group
+func (c *Configuration) GroupQueries(group string) []string {
+	var queries []string
+outerloop:
+	for name, q := range c.Query {
+		for _, gr := range q.Groups {
+			if gr == group {
+				queries = append(queries, name)
+				continue outerloop
+			}
+		}
+	}
+	return queries
 }
 
 func (c *Configuration) validate() error {
@@ -196,7 +208,8 @@ func (c *Configuration) validate() error {
 	return nil
 }
 
-func loadConfiguration(filename string) (*Configuration, error) {
+// LoadConfiguration from filename
+func LoadConfiguration(filename string) (*Configuration, error) {
 	c := &Configuration{}
 	b, err := ioutil.ReadFile(filename) // #nosec
 
@@ -223,7 +236,8 @@ func loadConfiguration(filename string) (*Configuration, error) {
 	return c, nil
 }
 
-func (d *Database) connectTimeout() time.Duration {
+// GetConnectTimeout return connection timeout from configuration or default
+func (d *Database) GetConnectTimeout() time.Duration {
 	if d.ConnectTimeout > 0 {
 		return time.Duration(d.ConnectTimeout) * time.Second
 	}

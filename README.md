@@ -3,22 +3,32 @@
 The dbquery_exporter allow to scrap metrics from supported SQL databases by user-defined SQL-s
 and templates.
 
-Support: SQLite, PostgrSQL, Oracle, MySQL/MariaDB/TiDB, MSSQL (not tested).
+Support: SQLite, PostgrSQL/Cockroach, Oracle, MySQL/MariaDB/TiDB and MSSQL (not tested).
 
 
 ## Building and running
 
 ### Dependency
 
-* golang 1.13
+* golang 1.13+
 * see: go.mod
 
 #### Database drivers
-* PostgrSQL: github.com/lib/pq
-* SQLite: github.com/mattn/go-sqlite3
-* Oracle: github.com/mattn/go-oci8 - require enable on compile and external libraries
-* MSSQL: github.com/denisenkom/go-mssqldb - require enable on compile
-* MySQL/MariaDB/TiB: github.com/go-sql-driver/mysql - require enable on compile
+* PostgrSQL
+	* lib: github.com/lib/pq
+	* configuration driver name: postgres, postgresql, cockroach, cockroachdb
+* SQLite
+	* lib: github.com/mattn/go-sqlite3
+	* configuration driver name: dqlite3, sqlite
+* Oracle
+	* lib: github.com/mattn/go-oci8 - require enable on compile and external libraries
+	* configuration driver name: oracle, oci8
+* MSSQL
+	* lib: github.com/denisenkom/go-mssqldb - require enable on compile
+	* configuration driver name: mssql
+* MySQL/MariaDB/TiB
+	* lib: github.com/go-sql-driver/mysql - require enable on compile
+	* configuration driver name: mysql, mariadb, tidb
 
 
 ### Local Build & Run
@@ -77,6 +87,24 @@ See dbquery.yaml for configuration examples.
          - targets:
                 - 127.0.0.1:9122       # dbquery_exporter address
 
+    # query by group
+    - job_name: dbquery_scrape_pg
+        static_configs:
+        - targets:
+            - testdbpgsql
+        params:
+        group:
+            - pgstats
+        metrics_path: /query
+        relabel_configs:
+        - source_labels: [__address__]
+            target_label: __param_database
+        - source_labels: [__param_database]
+            target_label: database
+        - target_label: __address__
+            replacement: 127.0.0.1:9122       # dbquery_exporter address
+
+
 
 ## Templates
 
@@ -117,9 +145,43 @@ Data available in tempaltes:
 * keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
 * clean - keep only A-Za-z0-9 and "_", replace spaces to "_", trim, convert to lower case
 
-### Note
+
+# Requests
+
+## Database scrape
+
+One on more `database` argument is required.
+At least on query (defined by `query` or `group` arguments) is required.
+
+Simple query:
+`http://localhost:9122/query?query=<query_name>&database=<database_name>`.
+
+By group:
+`http://localhost:9122/query?group=<group_name>&database=<database_name>`.
+
+Multiple queries:
+`http://localhost:9122/query?query=<query_name>&query=<query_name2>&database=<database_name>`.
+
+
+## Other endpoints
+
+* `/health` - simple health status
+* `/info` - current loaded configuration (available only from localhost)
+
+
+# Note
 
 Oracle return column in upper case. Probably NLS_LANG environment variable should be also used in most cases (i.e. `NLS_LANG=American_America.UTF8`).
+
+All queries should be reasonable fast - long queries should be avoided. As a rule of thumb - each request should take no more 1 minute.
+
+There is a simple protection preventing to run exactly the same queries (request) parallel.
+When next query arrive it may wait up to 5 minutes to previous request finished. After 15 minutes from start
+query is considered as death and next request will be processes.
+
+There is also simple caching mechanism - for each query there can be defined timeout in which previous result
+of query will be returned. This helpful when metrics are gathered i.e. every minute but there is no need to
+get data from database that often.
 
 
 

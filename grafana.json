@@ -22,7 +22,7 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": 64,
-  "iteration": 1639838041784,
+  "iteration": 1640182685792,
   "links": [],
   "liveNow": false,
   "panels": [
@@ -106,7 +106,7 @@
       },
       "gridPos": {
         "h": 3,
-        "w": 23,
+        "w": 16,
         "x": 0,
         "y": 0
       },
@@ -139,6 +139,145 @@
       ],
       "title": "Version",
       "type": "table"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 30
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
+      "id": 32,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "8.3.0-beta2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "000000011"
+          },
+          "exemplar": false,
+          "expr": "time() - dbquery_exporter_start_time{instance=\"$instance\"}",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Uptime",
+      "type": "stat"
+    },
+    {
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 30
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
+      "id": 28,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "pluginVersion": "8.3.0-beta2",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "000000011"
+          },
+          "exemplar": false,
+          "expr": "time() - dbquery_exporter_configuration_load_time{instance=\"$instance\"}",
+          "instant": true,
+          "interval": "",
+          "legendFormat": "",
+          "refId": "A"
+        }
+      ],
+      "title": "Configuration age",
+      "type": "stat"
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 3
+      },
+      "id": 31,
+      "panels": [],
+      "title": "Queries",
+      "type": "row"
     },
     {
       "fieldConfig": {
@@ -196,7 +335,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 3
+        "y": 4
       },
       "id": 21,
       "options": {
@@ -282,7 +421,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 3
+        "y": 4
       },
       "id": 22,
       "options": {
@@ -370,7 +509,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 11
+        "y": 12
       },
       "id": 25,
       "options": {
@@ -455,7 +594,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 11
+        "y": 12
       },
       "id": 26,
       "options": {
@@ -491,7 +630,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 17
+        "y": 18
       },
       "id": 19,
       "panels": [],
@@ -554,7 +693,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 18
+        "y": 19
       },
       "id": 15,
       "options": {
@@ -640,7 +779,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 18
+        "y": 19
       },
       "id": 17,
       "options": {
@@ -725,7 +864,7 @@
         "h": 5,
         "w": 12,
         "x": 12,
-        "y": 26
+        "y": 27
       },
       "id": 23,
       "options": {
@@ -760,7 +899,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 31
+        "y": 32
       },
       "id": 13,
       "panels": [],
@@ -824,7 +963,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 32
+        "y": 33
       },
       "id": 4,
       "options": {
@@ -921,7 +1060,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 32
+        "y": 33
       },
       "id": 6,
       "options": {
@@ -1017,7 +1156,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 40
+        "y": 41
       },
       "id": 8,
       "options": {
@@ -1101,7 +1240,7 @@
         "h": 6,
         "w": 12,
         "x": 12,
-        "y": 40
+        "y": 41
       },
       "id": 9,
       "options": {
@@ -1186,7 +1325,7 @@
         "h": 6,
         "w": 12,
         "x": 0,
-        "y": 46
+        "y": 47
       },
       "id": 11,
       "options": {
@@ -1251,13 +1390,13 @@
     ]
   },
   "time": {
-    "from": "now-6h",
+    "from": "now-12h",
     "to": "now"
   },
   "timepicker": {},
   "timezone": "",
   "title": "dbquery_exporter",
   "uid": "kSis7vT7z",
-  "version": 19,
+  "version": 25,
   "weekStart": ""
 }
