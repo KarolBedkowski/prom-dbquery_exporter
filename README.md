@@ -3,7 +3,7 @@
 The dbquery_exporter allow to scrap metrics from supported SQL databases by user-defined SQL-s
 and templates.
 
-Support: SQLite, PostgrSQL, Oracle, MySQL/MariaDB/TiDB and MSSQL (not tested).
+Support: SQLite, PostgrSQL/Cockroach, Oracle, MySQL/MariaDB/TiDB and MSSQL (not tested).
 
 
 ## Building and running
@@ -14,11 +14,21 @@ Support: SQLite, PostgrSQL, Oracle, MySQL/MariaDB/TiDB and MSSQL (not tested).
 * see: go.mod
 
 #### Database drivers
-* PostgrSQL: github.com/lib/pq
-* SQLite: github.com/mattn/go-sqlite3
-* Oracle: github.com/mattn/go-oci8 - require enable on compile and external libraries
-* MSSQL: github.com/denisenkom/go-mssqldb - require enable on compile
-* MySQL/MariaDB/TiB: github.com/go-sql-driver/mysql - require enable on compile
+* PostgrSQL
+	* lib: github.com/lib/pq
+	* configuration driver name: postgres, postgresql, cockroach, cockroachdb
+* SQLite
+	* lib: github.com/mattn/go-sqlite3
+	* configuration driver name: dqlite3, sqlite
+* Oracle
+	* lib: github.com/mattn/go-oci8 - require enable on compile and external libraries
+	* configuration driver name: oracle, oci8
+* MSSQL
+	* lib: github.com/denisenkom/go-mssqldb - require enable on compile
+	* configuration driver name: mssql
+* MySQL/MariaDB/TiB
+	* lib: github.com/go-sql-driver/mysql - require enable on compile
+	* configuration driver name: mysql, mariadb, tidb
 
 
 ### Local Build & Run
