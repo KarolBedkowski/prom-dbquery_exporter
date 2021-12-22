@@ -26,9 +26,9 @@ import (
 
 var queryResultCache = support.NewCache()
 
-// QueryHandler handle all request for metrics
+// queryHandler handle all request for metrics
 type (
-	QueryHandler struct {
+	queryHandler struct {
 		configuration   *conf.Configuration
 		disableParallel bool
 		disableCache    bool
@@ -45,15 +45,15 @@ type (
 )
 
 // SetConfiguration update handler configuration
-func (q *QueryHandler) SetConfiguration(c *conf.Configuration) {
+func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	q.configuration = c
 	queryResultCache.Clear()
 }
 
-// ErrQueryLocked is error when given query is locked more than 5 minutes
-var ErrQueryLocked = errors.New("query locked")
+// errQueryLocked is error when given query is locked more than 5 minutes
+var errQueryLocked = errors.New("query locked")
 
-func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error {
+func (q *queryHandler) waitForFinish(ctx context.Context, queryKey string) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
@@ -94,12 +94,12 @@ func (q *QueryHandler) waitForFinish(ctx context.Context, queryKey string) error
 		Str("queryKey", queryKey).Time("startTs", rqi.ts).
 		Interface("block_by", rqi.reqID).TimeDiff("age", time.Now(), rqi.ts).
 		Msg("timeout on waiting to unlock; previous query is still executing or stalled")
-	metrics.ProcessErrorsCnt.WithLabelValues("lock").Inc()
+	metrics.IncProcessErrorsCnt("lock")
 
-	return ErrQueryLocked
+	return errQueryLocked
 }
 
-func (q *QueryHandler) markFinished(ctx context.Context, queryKey string) {
+func (q *queryHandler) markFinished(ctx context.Context, queryKey string) {
 	reqID := ctx.Value(support.CtxRequestID).(uint64)
 
 	// mark query finished
@@ -112,7 +112,7 @@ func (q *QueryHandler) markFinished(ctx context.Context, queryKey string) {
 	}
 }
 
-func (q *QueryHandler) query(ctx context.Context, loader db.Loader,
+func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 	d *conf.Database, queryName string,
 	params map[string]string) ([]byte, error) {
 	query, ok := (q.configuration.Query)[queryName]
@@ -121,7 +121,7 @@ func (q *QueryHandler) query(ctx context.Context, loader db.Loader,
 	}
 
 	logger := log.Ctx(ctx)
-	metrics.QueryTotalCnt.WithLabelValues(queryName, d.Name).Inc()
+	metrics.IncQueryTotalCnt(queryName, d.Name)
 	queryKey := queryName + "@" + d.Name
 
 	logger.Debug().Msg("query start")
@@ -129,7 +129,7 @@ func (q *QueryHandler) query(ctx context.Context, loader db.Loader,
 	// try to get item from cache
 	if query.CachingTime > 0 && !q.disableCache {
 		if data, ok := queryResultCache.Get(queryKey); ok {
-			metrics.QueryCacheHits.Inc()
+			metrics.IncQueryCacheHits()
 			logger.Debug().Msg("query result from cache")
 			return data.([]byte), nil
 		}
@@ -137,7 +137,7 @@ func (q *QueryHandler) query(ctx context.Context, loader db.Loader,
 
 	result, err := loader.Query(ctx, query, params)
 	if err != nil {
-		metrics.ProcessErrorsCnt.WithLabelValues("query").Inc()
+		metrics.IncProcessErrorsCnt("query")
 		return nil, fmt.Errorf("query error: %w", err)
 	}
 	logger.Debug().
@@ -148,7 +148,7 @@ func (q *QueryHandler) query(ctx context.Context, loader db.Loader,
 	// format metrics
 	output, err := db.FormatResult(ctx, result, query, d)
 	if err != nil {
-		metrics.ProcessErrorsCnt.WithLabelValues("format").Inc()
+		metrics.IncProcessErrorsCnt("format")
 		return nil, fmt.Errorf("format result error: %w", err)
 	}
 
@@ -157,12 +157,12 @@ func (q *QueryHandler) query(ctx context.Context, loader db.Loader,
 		queryResultCache.Put(queryKey, query.CachingTime, output)
 	}
 
-	metrics.QueryDuration.WithLabelValues(queryName, d.Name).Observe(result.Duration)
+	metrics.ObserveQueryDuration(queryName, d.Name, result.Duration)
 
 	return output, nil
 }
 
-func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
+func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
 	queryNames []string, params map[string]string, w http.ResponseWriter) error {
 	d, ok := q.configuration.Database[dbName]
 	if !ok {
@@ -197,7 +197,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 			_, err := w.Write(output)
 			writeMutex.Unlock()
 			if err != nil {
-				metrics.ProcessErrorsCnt.WithLabelValues("write").Inc()
+				metrics.IncProcessErrorsCnt("write")
 				return fmt.Errorf("write result error: %w", err)
 			}
 		} else {
@@ -216,7 +216,7 @@ func (q *QueryHandler) queryDatabase(ctx context.Context, dbName string,
 }
 
 // queryDatabasesSeq query all given databases sequentially
-func (q *QueryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
+func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]string, w http.ResponseWriter) uint32 {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
@@ -239,7 +239,7 @@ func (q *QueryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 
 		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 			logger.Warn().Err(err).Msg("query database error")
-			metrics.QueryErrorCnt.WithLabelValues(dbName).Inc()
+			metrics.IncQueryTotalErrCnt(dbName)
 		} else {
 			successProcessed++
 		}
@@ -249,7 +249,7 @@ func (q *QueryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 }
 
 // queryDatabasesPar query all databases in parallel
-func (q *QueryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
+func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]string, w http.ResponseWriter) uint32 {
 	logger := zerolog.Ctx(ctx)
 
@@ -273,7 +273,7 @@ func (q *QueryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 
 			if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 				zerolog.Ctx(ctx).Warn().Err(err).Msg("query database error")
-				metrics.QueryErrorCnt.WithLabelValues(dbName).Inc()
+				metrics.IncQueryTotalErrCnt(dbName)
 			} else {
 				atomic.AddUint32(successProcessed, 1)
 			}
@@ -284,7 +284,7 @@ func (q *QueryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 	return successProcessed
 }
 
-func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.Ctx(ctx)
 
@@ -305,7 +305,7 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// prevent to run the same request twice
-	if err := q.waitForFinish(ctx, r.URL.RawQuery); err == ErrQueryLocked {
+	if err := q.waitForFinish(ctx, r.URL.RawQuery); err == errQueryLocked {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -334,7 +334,7 @@ func (q *QueryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Msg("all database queries finished")
 
 	if successProcessed == 0 {
-		metrics.ProcessErrorsCnt.WithLabelValues("bad_requests").Inc()
+		metrics.IncProcessErrorsCnt("bad_requests")
 		http.Error(w, "error", http.StatusBadRequest)
 	}
 }

@@ -20,8 +20,8 @@ import (
 
 // WebHandler manage http handlers
 type WebHandler struct {
-	handler       *QueryHandler
-	infoHandler   *InfoHandler
+	handler       *queryHandler
+	infoHandler   *infoHandler
 	server        *http.Server
 	listenAddress string
 	webConfig     string
@@ -63,7 +63,7 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 func (w *WebHandler) Run() error {
 	support.Logger.Info().Msgf("Listening on %s", w.listenAddress)
 	w.server = &http.Server{Addr: w.listenAddress}
-	if err := ListenAndServe(w.server, w.webConfig); err != nil {
+	if err := listenAndServe(w.server, w.webConfig); err != nil {
 		return fmt.Errorf("listen and serve failed: %w", err)
 	}
 	return nil
@@ -83,27 +83,27 @@ func (w *WebHandler) ReloadConf(newConf *conf.Configuration) {
 
 // newQueryHandler create new query handler with logging and instrumentation
 func newQueryHandler(c *conf.Configuration, disableParallel bool,
-	disableCache bool) (*QueryHandler, http.Handler) {
-	qh := &QueryHandler{
+	disableCache bool) (*queryHandler, http.Handler) {
+	qh := &queryHandler{
 		configuration:   c,
 		runningQuery:    make(map[string]runningQueryInfo),
 		disableParallel: disableParallel,
 		disableCache:    disableCache,
 	}
-	h := NewLogMiddleware(
+	h := newLogMiddleware(
 		promhttp.InstrumentHandlerDuration(
-			metrics.ReqDuration.MustCurryWith(prometheus.Labels{"handler": "query"}),
+			metrics.NewReqDurationWraper("query"),
 			qh), "query", false)
 
 	return qh, h
 }
 
 // newInfoHandler create new info handler with logging and instrumentation
-func newInfoHandler(c *conf.Configuration) (*InfoHandler, http.Handler) {
-	ih := &InfoHandler{Configuration: c}
-	h := NewLogMiddleware(
+func newInfoHandler(c *conf.Configuration) (*infoHandler, http.Handler) {
+	ih := &infoHandler{Configuration: c}
+	h := newLogMiddleware(
 		promhttp.InstrumentHandlerDuration(
-			metrics.ReqDuration.MustCurryWith(prometheus.Labels{"handler": "info"}),
+			metrics.NewReqDurationWraper("info"),
 			ih), "info", false)
 
 	return ih, h

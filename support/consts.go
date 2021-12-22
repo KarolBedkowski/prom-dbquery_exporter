@@ -7,7 +7,7 @@ package support
 // Distributed under terms of the GPLv3 license.
 //
 
-// CtxKey is type for keys in context
+// CtxKey is type of keys in context
 type CtxKey int
 
 const (
@@ -16,6 +16,3 @@ const (
 	// CtxWriteMutexID is key for mutex that block parallel write http response
 	CtxWriteMutexID CtxKey = iota
 )
-
-// MetricsNamespace is namespace for prometheus metrics
-const MetricsNamespace = "dbquery_exporter"

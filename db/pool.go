@@ -14,6 +14,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"prom-dbquery_exporter.app/conf"
+	"prom-dbquery_exporter.app/metrics"
 	"prom-dbquery_exporter.app/support"
 )
 
@@ -21,7 +22,7 @@ func init() {
 	prometheus.MustRegister(
 		prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
-				Namespace: support.MetricsNamespace,
+				Namespace: metrics.MetricsNamespace,
 				Name:      "loaders_in_pool",
 				Help:      "Number of active loaders in pool",
 			},

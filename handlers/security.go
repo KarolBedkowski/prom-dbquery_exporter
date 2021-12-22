@@ -26,8 +26,8 @@ import (
 	"prom-dbquery_exporter.app/support"
 )
 
-// ListenAndServe start webserver
-func ListenAndServe(server *http.Server, tlsConfigPath string) error {
+// listenAndServe start webserver
+func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
 		return err
@@ -167,7 +167,7 @@ func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	metrics.ProcessErrorsCnt.WithLabelValues("unauthorized").Inc()
+	metrics.IncProcessErrorsCnt("unauthorized")
 	w.Header().Set("WWW-Authenticate", "Basic")
 	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }

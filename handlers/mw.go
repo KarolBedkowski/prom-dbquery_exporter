@@ -45,10 +45,10 @@ func (r *logResponseWriter) WriteHeader(statusCode int) {
 
 var requestID uint64
 
-// NewLogMiddleware create new logging middleware.
+// newLogMiddleware create new logging middleware.
 // `name` is handler name added to log.
 // If `asDebug` is true log level for non-error events is DEBUG; if false - is INFO.
-func NewLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler {
+func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler {
 	mlog := support.Logger
 	logFn := func(rw http.ResponseWriter, r *http.Request) {
 		start := time.Now()
