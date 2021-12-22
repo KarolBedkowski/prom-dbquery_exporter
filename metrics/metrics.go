@@ -8,8 +8,6 @@ package metrics
 //
 
 import (
-	"time"
-
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -80,6 +78,14 @@ var (
 		},
 		[]string{"handler"},
 	)
+
+	uptime = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: MetricsNamespace,
+			Name:      "start_time",
+			Help:      "dbquery_exporter start time",
+		},
+	)
 )
 
 func init() {
@@ -90,11 +96,13 @@ func init() {
 	prometheus.MustRegister(processErrorsCnt)
 	prometheus.MustRegister(configReloadTime)
 	prometheus.MustRegister(reqDuration)
+	prometheus.MustRegister(uptime)
+	uptime.SetToCurrentTime()
 }
 
 // UpdateConfLoadTime set current time for configuration_load_time metric
 func UpdateConfLoadTime() {
-	configReloadTime.Set(float64(time.Now().UTC().Unix()))
+	configReloadTime.SetToCurrentTime()
 }
 
 // IncProcessErrorsCnt increment process errors count in category
