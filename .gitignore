@@ -1,8 +1,10 @@
-prom-dbquery_exporter
+prom-dbquery_exporter*
+dbquery_exporter*
 tags
 .*
 *~
 *.db
 *.key
 *.crt
+*.log
 tmp/

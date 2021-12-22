@@ -1,4 +1,4 @@
-package main
+package handlers
 
 //
 // mw.go
@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"prom-dbquery_exporter.app/support"
 )
 
 type (
@@ -48,7 +49,7 @@ var requestID uint64
 // `name` is handler name added to log.
 // If `asDebug` is true log level for non-error events is DEBUG; if false - is INFO.
 func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler {
-	mlog := Logger
+	mlog := support.Logger
 	logFn := func(rw http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 
@@ -56,7 +57,7 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 		l := mlog.With().Uint64("req_id", requestID).Logger()
 		// replace context
 		ctx := l.WithContext(r.Context())
-		ctx = context.WithValue(ctx, CtxRequestID, requestID)
+		ctx = context.WithValue(ctx, support.CtxRequestID, requestID)
 		r = r.WithContext(ctx)
 
 		ll := l.With().

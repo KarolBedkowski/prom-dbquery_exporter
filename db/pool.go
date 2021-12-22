@@ -1,4 +1,4 @@
-package main
+package db
 
 //
 // pool.go
@@ -13,13 +13,16 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"prom-dbquery_exporter.app/conf"
+	"prom-dbquery_exporter.app/metrics"
+	"prom-dbquery_exporter.app/support"
 )
 
 func init() {
 	prometheus.MustRegister(
 		prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
-				Namespace: MetricsNamespace,
+				Namespace: metrics.MetricsNamespace,
 				Name:      "loaders_in_pool",
 				Help:      "Number of active loaders in pool",
 			},
@@ -61,7 +64,7 @@ func (l *loadersPool) loadersStats() (stats []*LoaderStats) {
 }
 
 // GetLoader create or return existing loader according to configuration
-func GetLoader(d *Database) (Loader, error) {
+func GetLoader(d *conf.Database) (Loader, error) {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()
 
@@ -69,7 +72,7 @@ func GetLoader(d *Database) (Loader, error) {
 		return loader, nil
 	}
 
-	Logger.Debug().Str("name", d.Name).Msg("creating new loader")
+	support.Logger.Debug().Str("name", d.Name).Msg("creating new loader")
 	loader, err := newLoader(d)
 	if err == nil {
 		lp.loaders[d.Name] = loader
@@ -81,11 +84,11 @@ func GetLoader(d *Database) (Loader, error) {
 // UpdateConfiguration update configuration for existing loaders:
 // close not existing any more loaders and close loaders with changed
 // configuration so they can be create with new conf on next use.
-func UpdateConfiguration(c *Configuration) {
+func UpdateConfiguration(c *conf.Configuration) {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()
 
-	logger := Logger
+	logger := support.Logger
 	ctx := logger.WithContext(context.Background())
 
 	var dbToClose []string
@@ -114,14 +117,14 @@ func CloseLoaders() {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()
 
-	Logger.Debug().Interface("loaders", lp.loaders).Msg("")
+	support.Logger.Debug().Interface("loaders", lp.loaders).Msg("")
 
-	ctx := Logger.WithContext(context.Background())
+	ctx := support.Logger.WithContext(context.Background())
 
 	for _, l := range lp.loaders {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		if err := l.Close(cctx); err != nil {
-			Logger.Error().Err(err).Msg("close loader error")
+			support.Logger.Error().Err(err).Msg("close loader error")
 		}
 		cancel()
 	}

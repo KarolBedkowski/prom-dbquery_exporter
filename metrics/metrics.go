@@ -1,4 +1,4 @@
-package main
+package metrics
 
 //
 // metrics.go
@@ -13,8 +13,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// MetricsNamespace is namespace for prometheus metrics
+const MetricsNamespace = "dbquery_exporter"
+
 var (
-	// Metrics about the exporter itself.
+	// queryDuration is duration of query
 	queryDuration = prometheus.NewSummaryVec(
 		prometheus.SummaryOpts{
 			Namespace: MetricsNamespace,
@@ -23,6 +26,7 @@ var (
 		},
 		[]string{"query", "database"},
 	)
+	// queryTotalCnt is total number of query executions
 	queryTotalCnt = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: MetricsNamespace,
@@ -31,6 +35,7 @@ var (
 		},
 		[]string{"query", "database"},
 	)
+	// queryErrorCnt is total number of execution errors
 	queryErrorCnt = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: MetricsNamespace,
@@ -39,6 +44,7 @@ var (
 		},
 		[]string{"database"},
 	)
+	// queryCacheHits is number of result served from cache
 	queryCacheHits = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Namespace: MetricsNamespace,
@@ -46,7 +52,7 @@ var (
 			Help:      "Number of result loaded from cache",
 		},
 	)
-
+	// processErrorsCnt is total number of internal errors by category
 	processErrorsCnt = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: MetricsNamespace,
@@ -63,6 +69,17 @@ var (
 			Help:      "Current configuration load time",
 		},
 	)
+
+	// reqDuration measure http request duration
+	reqDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: MetricsNamespace,
+			Name:      "request_duration_seconds",
+			Help:      "A histogram of latencies for requests.",
+			Buckets:   []float64{0.5, 1, 5, 10, 60, 120},
+		},
+		[]string{"handler"},
+	)
 )
 
 func init() {
@@ -72,9 +89,40 @@ func init() {
 	prometheus.MustRegister(queryCacheHits)
 	prometheus.MustRegister(processErrorsCnt)
 	prometheus.MustRegister(configReloadTime)
+	prometheus.MustRegister(reqDuration)
 }
 
 // UpdateConfLoadTime set current time for configuration_load_time metric
 func UpdateConfLoadTime() {
 	configReloadTime.Set(float64(time.Now().UTC().Unix()))
+}
+
+// IncProcessErrorsCnt increment process errors count in category
+func IncProcessErrorsCnt(category string) {
+	processErrorsCnt.WithLabelValues(category).Inc()
+}
+
+// IncQueryTotalCnt increment query_total metric
+func IncQueryTotalCnt(queryName, dbName string) {
+	queryTotalCnt.WithLabelValues(queryName, dbName).Inc()
+}
+
+// IncQueryTotalErrCnt increment query_database_errors_total metric
+func IncQueryTotalErrCnt(dbName string) {
+	queryErrorCnt.WithLabelValues(dbName).Inc()
+}
+
+// ObserveQueryDuration update query_duration_seconds metric
+func ObserveQueryDuration(queryName, dbName string, duration float64) {
+	queryDuration.WithLabelValues(queryName, dbName).Observe(duration)
+}
+
+// IncQueryCacheHits increment query_cache_hit metric
+func IncQueryCacheHits() {
+	queryCacheHits.Inc()
+}
+
+// NewReqDurationWraper create new ObserverVec for InstrumentHandlerDuration
+func NewReqDurationWraper(handler string) prometheus.ObserverVec {
+	return reqDuration.MustCurryWith(prometheus.Labels{"handler": handler})
 }
