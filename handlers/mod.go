@@ -29,9 +29,9 @@ type WebHandler struct {
 
 // NewWebHandler create new WebHandler
 func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string,
-	disableParallel bool, disableCache bool) *WebHandler {
+	disableParallel bool, disableCache bool, validateOutput bool) *WebHandler {
 
-	qh, h := newQueryHandler(c, disableParallel, disableCache)
+	qh, h := newQueryHandler(c, disableParallel, disableCache, validateOutput)
 	http.Handle("/query", h)
 
 	ih, h := newInfoHandler(c)
@@ -83,12 +83,13 @@ func (w *WebHandler) ReloadConf(newConf *conf.Configuration) {
 
 // newQueryHandler create new query handler with logging and instrumentation
 func newQueryHandler(c *conf.Configuration, disableParallel bool,
-	disableCache bool) (*queryHandler, http.Handler) {
+	disableCache bool, validateOutput bool) (*queryHandler, http.Handler) {
 	qh := &queryHandler{
-		configuration:   c,
-		runningQuery:    make(map[string]runningQueryInfo),
-		disableParallel: disableParallel,
-		disableCache:    disableCache,
+		configuration:         c,
+		runningQuery:          make(map[string]runningQueryInfo),
+		disableParallel:       disableParallel,
+		disableCache:          disableCache,
+		validateOutputEnabled: validateOutput,
 	}
 	h := newLogMiddleware(
 		promhttp.InstrumentHandlerDuration(

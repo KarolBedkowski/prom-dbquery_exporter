@@ -8,6 +8,7 @@ package handlers
 //
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/conf"
@@ -29,9 +31,10 @@ var queryResultCache = support.NewCache()
 // queryHandler handle all request for metrics
 type (
 	queryHandler struct {
-		configuration   *conf.Configuration
-		disableParallel bool
-		disableCache    bool
+		configuration         *conf.Configuration
+		disableParallel       bool
+		disableCache          bool
+		validateOutputEnabled bool
 
 		// runningQuery lock the same request for running twice
 		runningQuery     map[string]runningQueryInfo
@@ -150,6 +153,13 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 	if err != nil {
 		metrics.IncProcessErrorsCnt("format")
 		return nil, fmt.Errorf("format result error: %w", err)
+	}
+
+	if q.validateOutputEnabled {
+		var parser expfmt.TextParser
+		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
+			return nil, fmt.Errorf("validate result error: %w", err)
+		}
 	}
 
 	if query.CachingTime > 0 && !q.disableCache {

@@ -40,6 +40,7 @@ func Main() {
 			"Path to config yaml file that can enable TLS or authentication.")
 		disableParallel = flag.Bool("no-parallel-query", false, "Disable parallel queries")
 		disableCache    = flag.Bool("no-cache", false, "Disable query result caching")
+		validateOutput  = flag.Bool("validate-output", false, "Enable output validation")
 	)
 	flag.Parse()
 
@@ -64,7 +65,7 @@ func Main() {
 	metrics.UpdateConfLoadTime()
 
 	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableParallel,
-		*disableCache)
+		*disableCache, *validateOutput)
 
 	var g run.Group
 	{
