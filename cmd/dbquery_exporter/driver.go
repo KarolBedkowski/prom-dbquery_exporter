@@ -462,18 +462,13 @@ func newMssqlLoader(d *Database) (Loader, error) {
 // newLoader returns configured Loader for given configuration.
 func newLoader(d *Database) (Loader, error) {
 	switch d.Driver {
-	case "postgresql":
-	case "postgres":
+	case "postgresql", "postgres", "cockroach", "cockroachdb":
 		return newPostgresLoader(d)
-	case "sqlite3":
-	case "sqlite":
+	case "sqlite3", "sqlite":
 		return newSqliteLoader(d)
-	case "mysql":
-	case "mariadb":
-	case "tidb":
+	case "mysql", "mariadb", "tidb":
 		return newMysqlLoader(d)
-	case "oracle":
-	case "oci8":
+	case "oracle", "oci8":
 		return newOracleLoader(d)
 	case "mssql":
 		return newMssqlLoader(d)
