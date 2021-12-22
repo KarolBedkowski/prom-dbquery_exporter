@@ -63,6 +63,7 @@ func main() {
 	if err != nil {
 		Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
 	}
+	UpdateConfLoadTime()
 
 	webHandler := newWebHandler(c, *listenAddress, *webConfig, *disableParallel,
 		*disableCache)
@@ -95,6 +96,7 @@ func main() {
 					if newConf, err := loadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
 						UpdateConfiguration(newConf)
+						UpdateConfLoadTime()
 						log.Info().Msg("configuration reloaded")
 					} else {
 						Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")

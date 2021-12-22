@@ -7,7 +7,11 @@ package main
 // Distributed under terms of the GPLv3 license.
 //
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+)
 
 var (
 	// Metrics about the exporter itself.
@@ -51,6 +55,14 @@ var (
 		},
 		[]string{"error"},
 	)
+
+	configReloadTime = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: MetricsNamespace,
+			Name:      "configuration_load_time",
+			Help:      "Current configuration load time",
+		},
+	)
 )
 
 func init() {
@@ -59,4 +71,10 @@ func init() {
 	prometheus.MustRegister(queryErrorCnt)
 	prometheus.MustRegister(queryCacheHits)
 	prometheus.MustRegister(processErrorsCnt)
+	prometheus.MustRegister(configReloadTime)
+}
+
+// UpdateConfLoadTime set current time for configuration_load_time metric
+func UpdateConfLoadTime() {
+	configReloadTime.Set(float64(time.Now().UTC().Unix()))
 }
