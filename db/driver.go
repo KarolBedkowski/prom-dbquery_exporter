@@ -329,7 +329,15 @@ func newSqliteLoader(d *conf.Database) (Loader, error) {
 		return nil, errors.New("missing database")
 	}
 
-	l := &genericLoader{connStr: dbname, driver: "sqlite3", initialSQL: d.InitialQuery,
+	var connstr strings.Builder
+	connstr.WriteString("file:")
+	connstr.WriteString(dbname)
+	if len(p) > 0 {
+		connstr.WriteRune('?')
+		connstr.WriteString(p.Encode())
+	}
+
+	l := &genericLoader{connStr: connstr.String(), driver: "sqlite3", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	if len(p) > 0 {
