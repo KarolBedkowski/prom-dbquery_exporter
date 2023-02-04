@@ -56,7 +56,7 @@ database:
       database: test
       host: 127.0.0.1
       user: testuser
-      password: testpass
+      password: testpass#1
       port: 1521
     initial_query:
       - alter session set default_schema=test

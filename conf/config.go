@@ -6,7 +6,7 @@ package conf
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
 	"strings"
 	"text/template"
 	"time"
@@ -211,7 +211,7 @@ func (c *Configuration) validate() error {
 // LoadConfiguration from filename
 func LoadConfiguration(filename string) (*Configuration, error) {
 	c := &Configuration{}
-	b, err := ioutil.ReadFile(filename) // #nosec
+	b, err := os.ReadFile(filename) // #nosec
 
 	if err != nil {
 		return nil, fmt.Errorf("read file error: %w", err)
