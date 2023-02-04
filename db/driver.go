@@ -290,11 +290,13 @@ func newPostgresLoader(d *conf.Database) (Loader, error) {
 	} else {
 		p := make([]string, 0, len(d.Connection))
 		for k, v := range d.Connection {
-			vstr := ""
 			if v != nil {
-				vstr = fmt.Sprintf("'%v'", v)
+				vstr := fmt.Sprintf("%v", v)
+				vstr = strings.ReplaceAll(vstr, "'", "\\'")
+				p = append(p, k+"='"+vstr+"'")
+			} else {
+				p = append(p, k+"=")
 			}
-			p = append(p, k+"="+vstr)
 		}
 		connStr = strings.Join(p, " ")
 	}
