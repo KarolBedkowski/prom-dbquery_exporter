@@ -359,15 +359,15 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 		}
 		switch k {
 		case "database":
-			dbname = vstr
+			dbname = url.PathEscape(vstr)
 		case "host":
-			host = vstr
+			host = url.PathEscape(vstr)
 		case "port":
-			port = vstr
+			port = url.PathEscape(vstr)
 		case "user":
-			user = vstr
+			user = url.PathEscape(vstr)
 		case "password":
-			pass = vstr
+			pass = url.PathEscape(vstr)
 		default:
 			p.Add(k, vstr)
 		}
@@ -377,20 +377,27 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 		return nil, errors.New("missing database")
 	}
 
-	var connstr string
+	var connstr strings.Builder
 	if user != "" {
+		connstr.WriteString(user)
 		if pass != "" {
-			connstr = user + ":" + pass + "@"
-		} else {
-			connstr = user + "@"
+			connstr.WriteRune('/')
+			connstr.WriteString(pass)
 		}
+		connstr.WriteRune('@')
 	}
-	connstr += "tcp(" + host + ":" + port + ")/" + dbname
+	connstr.WriteString("tcp(")
+	connstr.WriteString(host)
+	connstr.WriteRune(':')
+	connstr.WriteString(port)
+	connstr.WriteString(")/")
+	connstr.WriteString(dbname)
 	if len(p) > 0 {
-		connstr += "?" + p.Encode()
+		connstr.WriteRune('?')
+		connstr.WriteString(p.Encode())
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "mysql", initialSQL: d.InitialQuery,
+	l := &genericLoader{connStr: connstr.String(), driver: "mysql", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	return l, nil
