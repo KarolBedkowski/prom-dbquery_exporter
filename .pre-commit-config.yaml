@@ -1,0 +1,40 @@
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: mixed-line-ending
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.4.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline']
+
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v2.40.0
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  - repo: https://github.com/tekwizely/pre-commit-golang
+    rev: v1.0.0-rc.1
+    hooks:
+      - id: go-build-mod
+      - id: go-mod-tidy
+      - id: go-test-mod
+      - id: go-vet-mod
+      - id: go-revive-mod
+      - id: go-staticcheck-repo-mod
+      - id: go-fmt
+      - id: go-imports      # replaces go-fmt
+      - id: go-lint
+        #      - id: go-critic
+        #        args: ["-disable=sloppyTypeAssert"]
+      - id: golangci-lint-mod
+        args: ["-e", "Error return value of `.+` is not checked"]
