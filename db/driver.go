@@ -290,11 +290,13 @@ func newPostgresLoader(d *conf.Database) (Loader, error) {
 	} else {
 		p := make([]string, 0, len(d.Connection))
 		for k, v := range d.Connection {
-			vstr := ""
 			if v != nil {
-				vstr = fmt.Sprintf("'%v'", v)
+				vstr := fmt.Sprintf("%v", v)
+				vstr = strings.ReplaceAll(vstr, "'", "\\'")
+				p = append(p, k+"='"+vstr+"'")
+			} else {
+				p = append(p, k+"=")
 			}
-			p = append(p, k+"="+vstr)
 		}
 		connStr = strings.Join(p, " ")
 	}
@@ -327,7 +329,15 @@ func newSqliteLoader(d *conf.Database) (Loader, error) {
 		return nil, errors.New("missing database")
 	}
 
-	l := &genericLoader{connStr: dbname, driver: "sqlite3", initialSQL: d.InitialQuery,
+	var connstr strings.Builder
+	connstr.WriteString("file:")
+	connstr.WriteString(dbname)
+	if len(p) > 0 {
+		connstr.WriteRune('?')
+		connstr.WriteString(p.Encode())
+	}
+
+	l := &genericLoader{connStr: connstr.String(), driver: "sqlite3", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	if len(p) > 0 {
@@ -349,15 +359,15 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 		}
 		switch k {
 		case "database":
-			dbname = vstr
+			dbname = url.PathEscape(vstr)
 		case "host":
-			host = vstr
+			host = url.PathEscape(vstr)
 		case "port":
-			port = vstr
+			port = url.PathEscape(vstr)
 		case "user":
-			user = vstr
+			user = url.PathEscape(vstr)
 		case "password":
-			pass = vstr
+			pass = url.PathEscape(vstr)
 		default:
 			p.Add(k, vstr)
 		}
@@ -367,20 +377,27 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 		return nil, errors.New("missing database")
 	}
 
-	var connstr string
+	var connstr strings.Builder
 	if user != "" {
+		connstr.WriteString(user)
 		if pass != "" {
-			connstr = user + ":" + pass + "@"
-		} else {
-			connstr = user + "@"
+			connstr.WriteRune('/')
+			connstr.WriteString(pass)
 		}
+		connstr.WriteRune('@')
 	}
-	connstr += "tcp(" + host + ":" + port + ")/" + dbname
+	connstr.WriteString("tcp(")
+	connstr.WriteString(host)
+	connstr.WriteRune(':')
+	connstr.WriteString(port)
+	connstr.WriteString(")/")
+	connstr.WriteString(dbname)
 	if len(p) > 0 {
-		connstr += "?" + p.Encode()
+		connstr.WriteRune('?')
+		connstr.WriteString(p.Encode())
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "mysql", initialSQL: d.InitialQuery,
+	l := &genericLoader{connStr: connstr.String(), driver: "mysql", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	return l, nil
@@ -396,15 +413,15 @@ func newOracleLoader(d *conf.Database) (Loader, error) {
 		}
 		switch k {
 		case "database":
-			dbname = vstr
+			dbname = url.PathEscape(vstr)
 		case "host":
-			host = vstr
+			host = url.PathEscape(vstr)
 		case "port":
-			port = vstr
+			port = url.PathEscape(vstr)
 		case "user":
-			user = vstr
+			user = url.PathEscape(vstr)
 		case "password":
-			pass = vstr
+			pass = url.PathEscape(vstr)
 		default:
 			p.Add(k, vstr)
 		}
@@ -414,24 +431,31 @@ func newOracleLoader(d *conf.Database) (Loader, error) {
 		return nil, errors.New("missing database")
 	}
 
-	var connstr string
+	var connstr strings.Builder
+	connstr.WriteString("oracle://")
+
 	if user != "" {
+		connstr.WriteString(user)
 		if pass != "" {
-			connstr = user + "/" + pass + "@"
-		} else {
-			connstr = user + "@"
+			connstr.WriteRune('/')
+			connstr.WriteString(pass)
 		}
-	}
-	connstr += host
-	if port != "" {
-		connstr += ":" + port
-	}
-	connstr += "/" + dbname
-	if len(p) > 0 {
-		connstr += "?" + p.Encode()
+		connstr.WriteRune('@')
 	}
 
-	l := &genericLoader{connStr: connstr, driver: "oci8", initialSQL: d.InitialQuery,
+	connstr.WriteString(host)
+	if port != "" {
+		connstr.WriteRune(':')
+		connstr.WriteString(port)
+	}
+	connstr.WriteRune('/')
+	connstr.WriteString(dbname)
+	if len(p) > 0 {
+		connstr.WriteRune('?')
+		connstr.WriteString(p.Encode())
+	}
+
+	l := &genericLoader{connStr: connstr.String(), driver: "oracle", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	return l, nil

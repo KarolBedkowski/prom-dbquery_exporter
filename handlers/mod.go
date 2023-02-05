@@ -10,6 +10,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -44,11 +45,15 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 		webConfig:     webConfig,
 	}
 
+	local := strings.HasPrefix(listenAddress, "127.0.0.1:") || strings.HasPrefix(listenAddress, "localhost:")
+
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
 		promhttp.HandlerOpts{
 			// Opt into OpenMetrics to support exemplars.
 			EnableOpenMetrics: true,
+			// disable compression when listen on lo; reduce memory allocations & usage
+			DisableCompression: local,
 		},
 	))
 

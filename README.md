@@ -10,7 +10,7 @@ Support: SQLite, PostgrSQL/Cockroach, Oracle, MySQL/MariaDB/TiDB and MSSQL (not 
 
 ### Dependency
 
-* golang 1.13+
+* golang 1.15+
 * see: go.mod
 
 #### Database drivers
@@ -21,7 +21,7 @@ Support: SQLite, PostgrSQL/Cockroach, Oracle, MySQL/MariaDB/TiDB and MSSQL (not 
 	* lib: github.com/mattn/go-sqlite3
 	* configuration driver name: dqlite3, sqlite
 * Oracle
-	* lib: github.com/mattn/go-oci8 - require enable on compile and external libraries
+	* lib: https://github.com/sijms/go-ora
 	* configuration driver name: oracle, oci8
 * MSSQL
 	* lib: github.com/denisenkom/go-mssqldb - require enable on compile

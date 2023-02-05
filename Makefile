@@ -6,7 +6,7 @@ REVISION=`git describe --always`
 DATE=`date +%Y%m%d%H%M%S`
 USER=`whoami`
 BRANCH=`git branch | grep '^\*' | cut -d ' ' -f 2`
-LDFLAGS=" -w \
+LDFLAGS=" -w -s \
 	-X github.com/prometheus/common/version.Version=$(VERSION) \
 	-X github.com/prometheus/common/version.Revision=$(REVISION) \
 	-X github.com/prometheus/common/version.BuildDate=$(DATE) \
@@ -22,6 +22,6 @@ build_arm64:
 		go build -v -o dbquery_exporter_arm64  --ldflags $(LDFLAGS)
 
 run:
-	go run -v cmd/dbquery_exporter/*.go -log.level debug
+	go run -v main.go -log.level debug
 
 # vim:ft=make

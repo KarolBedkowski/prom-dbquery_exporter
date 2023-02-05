@@ -12,9 +12,9 @@ package handlers
 import (
 	"crypto/tls"
 	"encoding/hex"
-	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"sync"
 
@@ -84,17 +84,17 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 }
 
 func getConfig(configPath string) (*web.Config, error) {
-	content, err := ioutil.ReadFile(configPath) // #nosec
+	content, err := os.ReadFile(configPath) // #nosec
 	if err != nil {
 		return nil, err
 	}
 	c := &web.Config{
-		TLSConfig: web.TLSStruct{
+		TLSConfig: web.TLSConfig{
 			MinVersion:               tls.VersionTLS12,
 			MaxVersion:               tls.VersionTLS13,
 			PreferServerCipherSuites: true,
 		},
-		HTTPConfig: web.HTTPStruct{HTTP2: true},
+		HTTPConfig: web.HTTPConfig{HTTP2: true},
 	}
 	err = yaml.UnmarshalStrict(content, c)
 	c.TLSConfig.SetDirectory(filepath.Dir(configPath))

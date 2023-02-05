@@ -8,7 +8,6 @@ package db
 //
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -49,13 +48,10 @@ func FormatResult(ctx context.Context, qr *QueryResult, query *conf.Query,
 	}
 
 	var output bytes.Buffer
-	bw := bufio.NewWriter(&output)
-	err := query.MetricTpl.Execute(bw, r)
+	err := query.MetricTpl.Execute(&output, r)
 	if err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
-
-	_ = bw.Flush()
 
 	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
 	return b, nil
