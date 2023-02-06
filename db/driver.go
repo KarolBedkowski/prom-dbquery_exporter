@@ -381,7 +381,7 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 	if user != "" {
 		connstr.WriteString(user)
 		if pass != "" {
-			connstr.WriteRune('/')
+			connstr.WriteRune(':')
 			connstr.WriteString(pass)
 		}
 		connstr.WriteRune('@')
@@ -437,7 +437,7 @@ func newOracleLoader(d *conf.Database) (Loader, error) {
 	if user != "" {
 		connstr.WriteString(user)
 		if pass != "" {
-			connstr.WriteRune('/')
+			connstr.WriteRune(':')
 			connstr.WriteString(pass)
 		}
 		connstr.WriteRune('@')
