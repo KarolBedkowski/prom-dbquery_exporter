@@ -337,7 +337,8 @@ func newSqliteLoader(d *conf.Database) (Loader, error) {
 		connstr.WriteString(p.Encode())
 	}
 
-	l := &genericLoader{connStr: connstr.String(), driver: "sqlite3", initialSQL: d.InitialQuery,
+	// glebarez/go-sqlite uses 'sqlite', mattn/go-sqlite3 - 'sqlite3'
+	l := &genericLoader{connStr: connstr.String(), driver: "sqlite", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	if len(p) > 0 {

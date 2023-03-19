@@ -18,7 +18,7 @@ Support: SQLite, PostgrSQL/Cockroach, Oracle, MySQL/MariaDB/TiDB and MSSQL (not 
 	* lib: github.com/lib/pq
 	* configuration driver name: postgres, postgresql, cockroach, cockroachdb
 * SQLite
-	* lib: github.com/mattn/go-sqlite3
+	* lib: github.com/glebarez/go-sqlite
 	* configuration driver name: dqlite3, sqlite
 * Oracle
 	* lib: https://github.com/sijms/go-ora
