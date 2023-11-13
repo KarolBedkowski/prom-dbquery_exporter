@@ -123,10 +123,12 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 			l.Debug().Int("max-conn", p.MaxConnections).Msg("max connection set")
 			g.conn.SetMaxOpenConns(p.MaxConnections)
 		}
+
 		if p.MaxIdleConnections > 0 {
 			l.Debug().Int("max-idle", p.MaxIdleConnections).Msg("max idle connection set")
 			g.conn.SetMaxIdleConns(p.MaxIdleConnections)
 		}
+
 		if p.ConnMaxLifeTime > 0 {
 			l.Debug().Int("conn-max-life-time", p.ConnMaxLifeTime).
 				Msg("connection max life time set")
@@ -137,11 +139,13 @@ func (g *genericLoader) openConnection(ctx context.Context) (err error) {
 	// check is database is working
 	lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
 	defer cancel()
+
 	if err := g.conn.PingContext(lctx); err != nil {
 		return fmt.Errorf("ping error: %w", err)
 	}
 
 	l.Debug().Msg("genericQuery connected")
+
 	return nil
 }
 
@@ -168,8 +172,10 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	// launch initial sqls if defined
 	for _, sql := range g.initialSQL {
 		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
+
 		lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
 		defer cancel()
+
 		if _, err := conn.QueryxContext(lctx, sql); err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("execute initial sql error: %w", err)
@@ -184,6 +190,7 @@ func (g *genericLoader) Query(ctx context.Context, q *conf.Query,
 	params map[string]string,
 ) (*QueryResult, error) {
 	var err error
+
 	l := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", q.Name).Logger()
 	ctx = l.WithContext(ctx)
 
@@ -204,6 +211,7 @@ func (g *genericLoader) Query(ctx context.Context, q *conf.Query,
 	}
 
 	timeout := g.queryTimeout(q)
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -237,10 +245,12 @@ func (g *genericLoader) Query(ctx context.Context, q *conf.Query,
 		if err != nil {
 			return nil, err
 		}
+
 		result.Records = append(result.Records, rec)
 	}
 
 	result.Duration = float64(time.Since(result.Start).Seconds())
+
 	return result, nil
 }
 
@@ -256,8 +266,10 @@ func (g *genericLoader) Close(ctx context.Context) error {
 
 	log.Ctx(ctx).Debug().Interface("conn", g.conn).
 		Str("db", g.dbConf.Name).Msg("genericQuery close conn")
+
 	err := g.conn.Close()
 	g.conn = nil
+
 	return err
 }
 
@@ -288,6 +300,7 @@ func newPostgresLoader(d *conf.Database) (Loader, error) {
 		connStr = val.(string)
 	} else {
 		p := make([]string, 0, len(d.Connection))
+
 		for k, v := range d.Connection {
 			if v != nil {
 				vstr := fmt.Sprintf("%v", v)
@@ -297,6 +310,7 @@ func newPostgresLoader(d *conf.Database) (Loader, error) {
 				p = append(p, k+"=")
 			}
 		}
+
 		connStr = strings.Join(p, " ")
 	}
 
@@ -306,17 +320,21 @@ func newPostgresLoader(d *conf.Database) (Loader, error) {
 		initialSQL: d.InitialQuery,
 		dbConf:     d,
 	}
+
 	return l, nil
 }
 
 func newSqliteLoader(d *conf.Database) (Loader, error) {
 	p := url.Values{}
+
 	var dbname string
+
 	for k, v := range d.Connection {
 		vstr := ""
 		if v != nil {
 			vstr = fmt.Sprintf("%v", v)
 		}
+
 		if k == "database" {
 			dbname = vstr
 		} else {
@@ -329,8 +347,10 @@ func newSqliteLoader(d *conf.Database) (Loader, error) {
 	}
 
 	var connstr strings.Builder
+
 	connstr.WriteString("file:")
 	connstr.WriteString(dbname)
+
 	if len(p) > 0 {
 		connstr.WriteRune('?')
 		connstr.WriteString(p.Encode())
@@ -344,6 +364,7 @@ func newSqliteLoader(d *conf.Database) (Loader, error) {
 	if len(p) > 0 {
 		l.connStr += "?" + p.Encode()
 	}
+
 	return l, nil
 }
 
@@ -351,6 +372,7 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 	p := url.Values{}
 	host := "localhost"
 	port := "3306"
+
 	var dbname, user, pass string
 
 	for k, v := range d.Connection {
@@ -358,6 +380,7 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 		if v != nil {
 			vstr = fmt.Sprintf("%v", v)
 		}
+
 		switch k {
 		case "database":
 			dbname = url.PathEscape(vstr)
@@ -381,18 +404,22 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 	var connstr strings.Builder
 	if user != "" {
 		connstr.WriteString(user)
+
 		if pass != "" {
 			connstr.WriteRune(':')
 			connstr.WriteString(pass)
 		}
+
 		connstr.WriteRune('@')
 	}
+
 	connstr.WriteString("tcp(")
 	connstr.WriteString(host)
 	connstr.WriteRune(':')
 	connstr.WriteString(port)
 	connstr.WriteString(")/")
 	connstr.WriteString(dbname)
+
 	if len(p) > 0 {
 		connstr.WriteRune('?')
 		connstr.WriteString(p.Encode())
@@ -402,17 +429,21 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 		connStr: connstr.String(), driver: "mysql", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
+
 	return l, nil
 }
 
 func newOracleLoader(d *conf.Database) (Loader, error) {
 	p := url.Values{}
+
 	var dbname, user, pass, host, port string
+
 	for k, v := range d.Connection {
 		vstr := ""
 		if v != nil {
 			vstr = fmt.Sprintf("%v", v)
 		}
+
 		switch k {
 		case "database":
 			dbname = url.PathEscape(vstr)
@@ -434,24 +465,30 @@ func newOracleLoader(d *conf.Database) (Loader, error) {
 	}
 
 	var connstr strings.Builder
+
 	connstr.WriteString("oracle://")
 
 	if user != "" {
 		connstr.WriteString(user)
+
 		if pass != "" {
 			connstr.WriteRune(':')
 			connstr.WriteString(pass)
 		}
+
 		connstr.WriteRune('@')
 	}
 
 	connstr.WriteString(host)
+
 	if port != "" {
 		connstr.WriteRune(':')
 		connstr.WriteString(port)
 	}
+
 	connstr.WriteRune('/')
 	connstr.WriteString(dbname)
+
 	if len(p) > 0 {
 		connstr.WriteRune('?')
 		connstr.WriteString(p.Encode())
@@ -461,16 +498,19 @@ func newOracleLoader(d *conf.Database) (Loader, error) {
 		connStr: connstr.String(), driver: "oracle", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
+
 	return l, nil
 }
 
 func newMssqlLoader(d *conf.Database) (Loader, error) {
 	p := url.Values{}
 	databaseConfigured := false
+
 	for k, v := range d.Connection {
 		if v != nil {
 			vstr := fmt.Sprintf("%v", v)
 			p.Add(k, vstr)
+
 			if k == "database" {
 				databaseConfigured = true
 			}
@@ -487,6 +527,7 @@ func newMssqlLoader(d *conf.Database) (Loader, error) {
 		connStr: connstr, driver: "mssql", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
+
 	return l, nil
 }
 
@@ -504,16 +545,19 @@ func newLoader(d *conf.Database) (Loader, error) {
 	case "mssql":
 		return newMssqlLoader(d)
 	}
+
 	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
 }
 
 func prepareParams(q *conf.Query, params map[string]string) map[string]interface{} {
 	p := make(map[string]interface{})
+
 	if q.Params != nil {
 		for k, v := range q.Params {
 			p[k] = v
 		}
 	}
+
 	for k, v := range params {
 		p[k] = v
 	}

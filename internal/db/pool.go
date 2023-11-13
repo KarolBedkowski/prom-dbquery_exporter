@@ -73,6 +73,7 @@ func GetLoader(d *conf.Database) (Loader, error) {
 	}
 
 	support.Logger.Debug().Str("name", d.Name).Msg("creating new loader")
+
 	loader, err := newLoader(d)
 	if err == nil {
 		lp.loaders[d.Name] = loader
@@ -92,6 +93,7 @@ func UpdateConfiguration(c *conf.Configuration) {
 	ctx := logger.WithContext(context.Background())
 
 	var dbToClose []string
+
 	for k, l := range lp.loaders {
 		if newConf, ok := c.Database[k]; !ok {
 			dbToClose = append(dbToClose, k)
@@ -104,9 +106,11 @@ func UpdateConfiguration(c *conf.Configuration) {
 	for _, name := range dbToClose {
 		l := lp.loaders[name]
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+
 		if err := l.Close(cctx); err != nil {
 			logger.Error().Err(err).Msg("close loader error")
 		}
+
 		cancel()
 		delete(lp.loaders, name)
 	}
@@ -126,6 +130,7 @@ func CloseLoaders() {
 		if err := l.Close(cctx); err != nil {
 			support.Logger.Error().Err(err).Msg("close loader error")
 		}
+
 		cancel()
 	}
 }

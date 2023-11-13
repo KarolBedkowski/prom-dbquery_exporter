@@ -36,6 +36,7 @@ func NewCache() *Cache {
 func (r *Cache) Get(key string) (interface{}, bool) {
 	r.cacheLock.Lock()
 	defer r.cacheLock.Unlock()
+
 	ci, ok := r.cache[key]
 	if !ok {
 		return nil, false
@@ -46,6 +47,7 @@ func (r *Cache) Get(key string) (interface{}, bool) {
 	}
 
 	delete(r.cache, key)
+
 	return nil, false
 }
 

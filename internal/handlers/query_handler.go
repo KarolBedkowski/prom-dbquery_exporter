@@ -51,6 +51,7 @@ type (
 // SetConfiguration update handler configuration
 func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	q.configuration = c
+
 	queryResultCache.Clear()
 }
 
@@ -66,6 +67,7 @@ func (q *queryHandler) waitForFinish(ctx context.Context, queryKey string) error
 	for i := 0; i < 60; i++ { // 5min
 		q.runningQueryLock.Lock()
 		var ok bool
+
 		rqi, ok = q.runningQuery[queryKey]
 		if !ok || time.Since(rqi.ts).Minutes() > 15 {
 			// no running previous qu(eue or last query is at least 15 minutes earlier
@@ -75,6 +77,7 @@ func (q *queryHandler) waitForFinish(ctx context.Context, queryKey string) error
 				reqID: reqID.String(),
 			}
 			q.runningQueryLock.Unlock()
+
 			return nil
 		}
 		q.runningQueryLock.Unlock()
@@ -127,6 +130,7 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 	}
 
 	logger := log.Ctx(ctx)
+
 	metrics.IncQueryTotalCnt(queryName, d.Name)
 	queryKey := queryName + "@" + d.Name
 
@@ -137,6 +141,7 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 		if data, ok := queryResultCache.Get(queryKey); ok {
 			metrics.IncQueryCacheHits()
 			logger.Debug().Msg("query result from cache")
+
 			return data.([]byte), nil
 		}
 	}
@@ -146,6 +151,7 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 		metrics.IncProcessErrorsCnt("query")
 		return nil, fmt.Errorf("query error: %w", err)
 	}
+
 	logger.Debug().
 		Int("records", len(result.Records)).
 		Float64("duration", result.Duration).
@@ -195,8 +201,10 @@ func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
 
 	writeMutex := ctx.Value(support.CtxWriteMutexID).(*sync.Mutex)
 	anyProcessed := false
+
 	for _, queryName := range queryNames {
 		loggerQ := logger.With().Str("query", queryName).Logger()
+
 		ctxQuery := loggerQ.WithContext(ctx)
 		if output, err := q.query(ctxQuery, loader, d, queryName, params); err == nil {
 			select {
@@ -210,6 +218,7 @@ func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
 			writeMutex.Lock()
 			_, err := w.Write(output)
 			writeMutex.Unlock()
+
 			if err != nil {
 				metrics.IncProcessErrorsCnt("write")
 				return fmt.Errorf("write result error: %w", err)
@@ -237,6 +246,7 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 	logger.Debug().Msg("database sequential processing start")
 
 	writeMutex := sync.Mutex{}
+
 	var successProcessed uint32 = 0
 
 	for _, dbName := range dbNames {
@@ -275,6 +285,7 @@ func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 	writeMutex := sync.Mutex{}
 	// number of successful processes databases
 	var successProcessed uint32 = 0
+
 	var wg sync.WaitGroup
 	// query databases parallel
 	for _, dbName := range dbNames {
@@ -297,6 +308,7 @@ func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 	}
 
 	wg.Wait()
+
 	return successProcessed
 }
 
@@ -328,6 +340,7 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer q.markFinished(ctx, r.URL.RawQuery)
 
 	params := make(map[string]string)
+
 	for k, v := range r.URL.Query() {
 		if k != "query" && k != "database" {
 			params[k] = v[0]

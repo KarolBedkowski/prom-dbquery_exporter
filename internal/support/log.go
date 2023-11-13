@@ -57,6 +57,7 @@ func InitializeLogger(level string, format string) {
 
 	log.Logger = l.With().Caller().Logger()
 	Logger = log.Logger
+
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(log.Logger)
 }

@@ -53,6 +53,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	if server.Handler != nil {
 		handler = server.Handler
 	}
+
 	server.Handler = newSecWebHandler(c, handler)
 
 	config, err := web.ConfigToTLSConfig(&c.TLSConfig)
@@ -73,13 +74,17 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 		if err != nil {
 			return nil, err
 		}
+
 		tlsconf, err := web.ConfigToTLSConfig(&config.TLSConfig)
 		if err != nil {
 			return nil, err
 		}
+
 		tlsconf.NextProtos = server.TLSConfig.NextProtos
+
 		return tlsconf, nil
 	}
+
 	return server.ServeTLS(listener, "", "")
 }
 
@@ -88,6 +93,7 @@ func getConfig(configPath string) (*web.Config, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	c := &web.Config{
 		TLSConfig: web.TLSConfig{
 			MinVersion:               tls.VersionTLS12,
@@ -98,6 +104,7 @@ func getConfig(configPath string) (*web.Config, error) {
 	}
 	err = yaml.UnmarshalStrict(content, c)
 	c.TLSConfig.SetDirectory(filepath.Dir(configPath))
+
 	return c, err
 }
 
@@ -151,6 +158,7 @@ func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			[]byte(pass)...))
 
 		wh.mtx.Lock()
+
 		authOk, ok := wh.cache[cacheKey]
 		if !ok {
 			// This user, hashedPassword, password is not cached.

@@ -36,8 +36,10 @@ func replaceSpaces(i string) string {
 		if unicode.IsSpace(r) {
 			return '_'
 		}
+
 		return r
 	}
+
 	return strings.Map(rmap, i)
 }
 
@@ -46,8 +48,10 @@ func removeSpaces(i string) string {
 		if unicode.IsSpace(r) {
 			return -1
 		}
+
 		return r
 	}
+
 	return strings.Map(rmap, i)
 }
 
@@ -61,8 +65,10 @@ func keepAlfaNum(i string) string {
 		case r >= '0' && r <= '9':
 			return r
 		}
+
 		return -1
 	}
+
 	return strings.Map(rmap, i)
 }
 
@@ -78,8 +84,10 @@ func keepAlfaNumUnderline(i string) string {
 		case r == '_':
 			return r
 		}
+
 		return -1
 	}
+
 	return strings.Map(rmap, i)
 }
 
@@ -97,8 +105,10 @@ func keepAlfaNumUnderlineSpace(i string) string {
 		case r == ' ':
 			return r
 		}
+
 		return -1
 	}
+
 	return strings.Map(rmap, i)
 }
 
@@ -112,6 +122,7 @@ func keepAlfaNumUnderlineU(i string) string {
 		case r == '_':
 			return r
 		}
+
 		return -1
 	}
 
@@ -130,6 +141,7 @@ func keepAlfaNumUnderlineSpaceU(i string) string {
 		case r == '_':
 			return r
 		}
+
 		return -1
 	}
 
@@ -142,5 +154,6 @@ func clean(i string) string {
 	res = replaceSpaces(res)
 	res = strings.ReplaceAll(res, "__", "_")
 	res = strings.ToLower(res)
+
 	return res
 }

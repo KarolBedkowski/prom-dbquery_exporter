@@ -49,11 +49,13 @@ func FormatResult(ctx context.Context, qr *QueryResult, query *conf.Query,
 	}
 
 	var output bytes.Buffer
+
 	err := query.MetricTpl.Execute(&output, r)
 	if err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 
 	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
+
 	return b, nil
 }

@@ -60,6 +60,7 @@ func redact(key string, val interface{}) string {
 	if strings.HasPrefix(strings.ToLower(key), "pass") {
 		return "***"
 	}
+
 	return fmt.Sprintf("%v", val)
 }
 

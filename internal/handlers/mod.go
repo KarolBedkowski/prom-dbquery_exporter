@@ -73,10 +73,12 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 // Run webhandler
 func (w *WebHandler) Run() error {
 	support.Logger.Info().Msgf("Listening on %s", w.listenAddress)
+
 	w.server = &http.Server{Addr: w.listenAddress}
 	if err := listenAndServe(w.server, w.webConfig); err != nil {
 		return fmt.Errorf("listen and serve failed: %w", err)
 	}
+
 	return nil
 }
 

@@ -26,12 +26,15 @@ func (p *PoolConfiguration) validate() error {
 	if p.MaxConnections < 0 {
 		return errors.New("invalid max_connections")
 	}
+
 	if p.MaxIdleConnections < 0 {
 		return errors.New("invalid max_idle_connections")
 	}
+
 	if p.ConnMaxLifeTime < 0 {
 		return errors.New("invalid conn_max_life_time")
 	}
+
 	return nil
 }
 
@@ -75,9 +78,11 @@ func (d *Database) validate() error {
 		if d.CheckConnectionParam("connstr") {
 			return nil
 		}
+
 		if !d.CheckConnectionParam("database") && !d.CheckConnectionParam("dbname") {
 			return fmt.Errorf("missing 'database' or 'dbname' parameter")
 		}
+
 		if !d.CheckConnectionParam("user") {
 			return fmt.Errorf("missing 'user' parameter")
 		}
@@ -111,6 +116,7 @@ func (d *Database) CheckConnectionParam(key string) bool {
 	if !ok {
 		return false
 	}
+
 	switch val := val.(type) {
 	case string:
 		return strings.TrimSpace(val) != ""
@@ -156,6 +162,7 @@ func (q *Query) validate() error {
 	if err != nil {
 		return fmt.Errorf("parsing metrics template error: %w", err)
 	}
+
 	q.MetricTpl = tmpl
 
 	return nil
@@ -181,6 +188,7 @@ outerloop:
 			}
 		}
 	}
+
 	return queries
 }
 
@@ -204,12 +212,14 @@ func (c *Configuration) validate() error {
 			return fmt.Errorf("validate database '%s' error: %w", name, err)
 		}
 	}
+
 	return nil
 }
 
 // LoadConfiguration from filename
 func LoadConfiguration(filename string) (*Configuration, error) {
 	c := &Configuration{}
+
 	b, err := os.ReadFile(filename) // #nosec
 	if err != nil {
 		return nil, fmt.Errorf("read file error: %w", err)

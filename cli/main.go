@@ -42,10 +42,12 @@ func Main() {
 		disableCache    = flag.Bool("no-cache", false, "Disable query result caching")
 		validateOutput  = flag.Bool("validate-output", false, "Enable output validation")
 	)
+
 	flag.Parse()
 
 	if *showVersion {
 		_, _ = fmt.Println(version.Print("DBQuery exporter"))
+
 		os.Exit(0)
 	}
 
@@ -62,6 +64,7 @@ func Main() {
 		support.Logger.Fatal().Err(err).Str("file", *configFile).
 			Msg("load config file error")
 	}
+
 	metrics.UpdateConfLoadTime()
 
 	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableParallel,
@@ -77,6 +80,7 @@ func Main() {
 				<-term
 				support.Logger.Warn().Msg("Received SIGTERM, exiting...")
 				db.CloseLoaders()
+
 				return nil
 			},
 			func(err error) {
@@ -92,6 +96,7 @@ func Main() {
 			func() error {
 				for range hup {
 					log.Info().Msg("reloading configuration")
+
 					if newConf, err := conf.LoadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
 						db.UpdateConfiguration(newConf)
@@ -102,6 +107,7 @@ func Main() {
 							Msg("reloading configuration error; using old configuration")
 					}
 				}
+
 				return nil
 			},
 			func(err error) {
