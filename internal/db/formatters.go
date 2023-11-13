@@ -15,7 +15,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-// resultTmplData keep query result and some metadata parsed to template
+// resultTmplData keep query result and some metadata parsed to template.
 type resultTmplData struct {
 	// Records (rows)
 	R []Record
@@ -33,7 +33,7 @@ type resultTmplData struct {
 	Database string
 }
 
-// FormatResult format query result using template from query configuration
+// FormatResult format query result using template from query configuration.
 func FormatResult(ctx context.Context, qr *QueryResult, query *conf.Query,
 	db *conf.Database,
 ) ([]byte, error) {

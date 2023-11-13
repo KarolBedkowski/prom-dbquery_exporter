@@ -217,7 +217,7 @@ type Configuration struct {
 	Query map[string]*Query
 }
 
-// GroupQueries return queries that belong to given group
+// GroupQueries return queries that belong to given group.
 func (c *Configuration) GroupQueries(group string) []string {
 	var queries []string
 outerloop:

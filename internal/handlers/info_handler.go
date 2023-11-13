@@ -69,7 +69,7 @@ var funcMap = template.FuncMap{
 	"redact": redact,
 }
 
-// infoHandler handle request and return information about current configuration
+// infoHandler handle request and return information about current configuration.
 type infoHandler struct {
 	Configuration *conf.Configuration
 }
@@ -77,6 +77,7 @@ type infoHandler struct {
 func (q infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.RemoteAddr, "127.") && !strings.HasPrefix(r.RemoteAddr, "localhost:") {
 		http.Error(w, "forbidden", http.StatusForbidden)
+
 		return
 	}
 

@@ -20,7 +20,7 @@ import (
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-// WebHandler manage http handlers
+// WebHandler manage http handlers.
 type WebHandler struct {
 	handler       *queryHandler
 	infoHandler   *infoHandler
@@ -29,7 +29,7 @@ type WebHandler struct {
 	webConfig     string
 }
 
-// NewWebHandler create new WebHandler
+// NewWebHandler create new WebHandler.
 func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string,
 	disableParallel bool, disableCache bool, validateOutput bool,
 ) *WebHandler {
@@ -69,7 +69,7 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 	return wh
 }
 
-// Run webhandler
+// Run webhandler.
 func (w *WebHandler) Run() error {
 	log.Logger.Info().Msgf("Listening on %s", w.listenAddress)
 
@@ -81,19 +81,19 @@ func (w *WebHandler) Run() error {
 	return nil
 }
 
-// Close stop listen webhandler
+// Close stop listen webhandler.
 func (w *WebHandler) Close(err error) {
 	log.Logger.Debug().Msg("web handler close")
 	w.server.Close()
 }
 
-// ReloadConf reload configuration in all handlers
+// ReloadConf reload configuration in all handlers.
 func (w *WebHandler) ReloadConf(newConf *conf.Configuration) {
 	w.handler.SetConfiguration(newConf)
 	w.infoHandler.Configuration = newConf
 }
 
-// newQueryHandler create new query handler with logging and instrumentation
+// newQueryHandler create new query handler with logging and instrumentation.
 func newQueryHandler(c *conf.Configuration, disableParallel bool,
 	disableCache bool, validateOutput bool,
 ) (*queryHandler, http.Handler) {
@@ -112,7 +112,7 @@ func newQueryHandler(c *conf.Configuration, disableParallel bool,
 	return qh, h
 }
 
-// newInfoHandler create new info handler with logging and instrumentation
+// newInfoHandler create new info handler with logging and instrumentation.
 func newInfoHandler(c *conf.Configuration) (*infoHandler, http.Handler) {
 	ih := &infoHandler{Configuration: c}
 	h := newLogMiddleware(

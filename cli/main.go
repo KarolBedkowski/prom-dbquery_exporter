@@ -24,7 +24,7 @@ func init() {
 	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
 }
 
-// Main is main function for cli
+// Main is main function for cli.
 func Main() {
 	var (
 		showVersion = flag.Bool("version", false, "Print version information.")

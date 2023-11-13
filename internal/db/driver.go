@@ -21,7 +21,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-// Record is one record (row) loaded from database
+// Record is one record (row) loaded from database.
 type Record map[string]interface{}
 
 func newRecord(rows *sqlx.Rows) (Record, error) {
@@ -41,7 +41,7 @@ func newRecord(rows *sqlx.Rows) (Record, error) {
 }
 
 type (
-	// Loader load data from database
+	// Loader load data from database.
 	Loader interface {
 		// Query execute sql and returns records or error. Open connection when necessary.
 		Query(ctx context.Context, q *conf.Query, params map[string]string) (*QueryResult, error)
@@ -56,7 +56,7 @@ type (
 		Stats() *LoaderStats
 	}
 
-	// QueryResult is result of Loader.Query
+	// QueryResult is result of Loader.Query.
 	QueryResult struct {
 		// rows
 		Records []Record
@@ -79,7 +79,7 @@ type (
 		totalFailedConnections uint32
 	}
 
-	// LoaderStats transfer stats from database driver
+	// LoaderStats transfer stats from database driver.
 	LoaderStats struct {
 		Name                   string
 		DBStats                sql.DBStats
@@ -185,7 +185,7 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	return conn, nil
 }
 
-// Query get data from database
+// Query get data from database.
 func (g *genericLoader) Query(ctx context.Context, q *conf.Query,
 	params map[string]string,
 ) (*QueryResult, error) {
@@ -254,7 +254,7 @@ func (g *genericLoader) Query(ctx context.Context, q *conf.Query,
 	return result, nil
 }
 
-// Close database connection
+// Close database connection.
 func (g *genericLoader) Close(ctx context.Context) error {
 	if g.conn == nil {
 		return nil

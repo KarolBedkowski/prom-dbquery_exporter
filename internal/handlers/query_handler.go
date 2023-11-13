@@ -29,7 +29,7 @@ import (
 
 var queryResultCache = support.NewCache()
 
-// queryHandler handle all request for metrics
+// queryHandler handle all request for metrics.
 type (
 	queryHandler struct {
 		configuration         *conf.Configuration
@@ -48,18 +48,20 @@ type (
 	}
 )
 
-// SetConfiguration update handler configuration
+// SetConfiguration update handler configuration.
 func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	q.configuration = c
 
 	queryResultCache.Clear()
 }
 
-// errQueryLocked is error when given query is locked more than 5 minutes
+// errQueryLocked is error when given query is locked more than 5 minutes.
 var errQueryLocked = errors.New("query locked")
 
+const waitForFinishTicks = 5 * time.Second
+
 func (q *queryHandler) waitForFinish(ctx context.Context, queryKey string) error {
-	ticker := time.NewTicker(5 * time.Second)
+	ticker := time.NewTicker(waitForFinishTicks)
 	defer ticker.Stop()
 
 	var rqi runningQueryInfo
@@ -88,12 +90,15 @@ func (q *queryHandler) waitForFinish(ctx context.Context, queryKey string) error
 
 		select {
 		case <-ticker.C:
-			{
-			}
+			// tick, next iteration
 		case <-ctx.Done():
 			{
 				// context cancelled, ie. client disconnected
-				return ctx.Err()
+				if err := ctx.Err(); err != nil {
+					return fmt.Errorf("context cancelled: %w", err)
+				}
+
+				return nil
 			}
 		}
 	}
@@ -121,7 +126,7 @@ func (q *queryHandler) markFinished(ctx context.Context, queryKey string) {
 }
 
 func (q *queryHandler) query(ctx context.Context, loader db.Loader,
-	d *conf.Database, queryName string,
+	database *conf.Database, queryName string,
 	params map[string]string,
 ) ([]byte, error) {
 	query, ok := (q.configuration.Query)[queryName]
@@ -131,8 +136,8 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 
 	logger := log.Ctx(ctx)
 
-	metrics.IncQueryTotalCnt(queryName, d.Name)
-	queryKey := queryName + "@" + d.Name
+	metrics.IncQueryTotalCnt(queryName, database.Name)
+	queryKey := queryName + "@" + database.Name
 
 	logger.Debug().Msg("query start")
 
@@ -158,7 +163,7 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 		Msg("query finished")
 
 	// format metrics
-	output, err := db.FormatResult(ctx, result, query, d)
+	output, err := db.FormatResult(ctx, result, query, database)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("format")
 		return nil, fmt.Errorf("format result error: %w", err)
@@ -176,7 +181,7 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 		queryResultCache.Put(queryKey, query.CachingTime, output)
 	}
 
-	metrics.ObserveQueryDuration(queryName, d.Name, result.Duration)
+	metrics.ObserveQueryDuration(queryName, database.Name, result.Duration)
 
 	return output, nil
 }
@@ -238,7 +243,7 @@ func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
 	return nil
 }
 
-// queryDatabasesSeq query all given databases sequentially
+// queryDatabasesSeq query all given databases sequentially.
 func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]string, w http.ResponseWriter,
 ) uint32 {
@@ -273,7 +278,7 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 	return successProcessed
 }
 
-// queryDatabasesPar query all databases in parallel
+// queryDatabasesPar query all databases in parallel.
 func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]string, w http.ResponseWriter,
 ) uint32 {
@@ -284,19 +289,19 @@ func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 	// writeMutex block parallel writes to Writer
 	writeMutex := sync.Mutex{}
 	// number of successful processes databases
-	var successProcessed uint32 = 0
+	var successProcessed uint32
 
-	var wg sync.WaitGroup
+	var waitGroup sync.WaitGroup
 	// query databases parallel
 	for _, dbName := range dbNames {
-		wg.Add(1)
+		waitGroup.Add(1)
 
 		logger := logger.With().Str("db", dbName).Logger()
 		ctx := logger.WithContext(ctx)
 		ctx = context.WithValue(ctx, support.CtxWriteMutexID, &writeMutex)
 
 		go func(ctx context.Context, dbName string, successProcessed *uint32) {
-			defer wg.Done()
+			defer waitGroup.Done()
 
 			if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 				zerolog.Ctx(ctx).Warn().Err(err).Msg("query database error")
@@ -307,7 +312,7 @@ func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 		}(ctx, dbName, &successProcessed)
 	}
 
-	wg.Wait()
+	waitGroup.Wait()
 
 	return successProcessed
 }
@@ -333,7 +338,7 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// prevent to run the same request twice
-	if err := q.waitForFinish(ctx, r.URL.RawQuery); err == errQueryLocked {
+	if err := q.waitForFinish(ctx, r.URL.RawQuery); errors.Is(err, errQueryLocked) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

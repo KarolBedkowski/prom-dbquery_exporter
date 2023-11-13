@@ -32,7 +32,7 @@ func init() {
 	prometheus.MustRegister(loggersPoolCollector{})
 }
 
-// loadersPool keep database loaders
+// loadersPool keep database loaders.
 type loadersPool struct {
 	// map of loader instances
 	loaders map[string]Loader
@@ -63,7 +63,7 @@ func (l *loadersPool) loadersStats() (stats []*LoaderStats) {
 	return stats
 }
 
-// GetLoader create or return existing loader according to configuration
+// GetLoader create or return existing loader according to configuration.
 func GetLoader(d *conf.Database) (Loader, error) {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()
@@ -116,7 +116,7 @@ func UpdateConfiguration(c *conf.Configuration) {
 	}
 }
 
-// CloseLoaders close all active loaders in pool
+// CloseLoaders close all active loaders in pool.
 func CloseLoaders() {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()

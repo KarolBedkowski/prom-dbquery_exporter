@@ -26,7 +26,7 @@ import (
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-// listenAndServe start webserver
+// listenAndServe start webserver.
 func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {

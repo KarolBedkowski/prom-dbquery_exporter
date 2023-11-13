@@ -13,7 +13,7 @@ import (
 )
 
 type (
-	// Cache with per item expire time
+	// Cache with per item expire time.
 	Cache struct {
 		cache     map[string]*cacheItem
 		cacheLock sync.Mutex
@@ -25,25 +25,25 @@ type (
 	}
 )
 
-// NewCache create  new cache object
+// NewCache create  new cache object.
 func NewCache() *Cache {
 	return &Cache{
 		cache: make(map[string]*cacheItem),
 	}
 }
 
-// Get key from cache if exists and not expired
+// Get key from cache if exists and not expired.
 func (r *Cache) Get(key string) (interface{}, bool) {
 	r.cacheLock.Lock()
 	defer r.cacheLock.Unlock()
 
-	ci, ok := r.cache[key]
+	item, ok := r.cache[key]
 	if !ok {
 		return nil, false
 	}
 
-	if ci.expireTS.After(time.Now()) {
-		return ci.content, true
+	if item.expireTS.After(time.Now()) {
+		return item.content, true
 	}
 
 	delete(r.cache, key)
@@ -51,7 +51,7 @@ func (r *Cache) Get(key string) (interface{}, bool) {
 	return nil, false
 }
 
-// Put data into cache
+// Put data into cache.
 func (r *Cache) Put(key string, ttl uint, data interface{}) {
 	r.cacheLock.Lock()
 	r.cache[key] = &cacheItem{
@@ -61,7 +61,7 @@ func (r *Cache) Put(key string, ttl uint, data interface{}) {
 	r.cacheLock.Unlock()
 }
 
-// Clear whole cache
+// Clear whole cache.
 func (r *Cache) Clear() {
 	r.cacheLock.Lock()
 	// create new cache using last size as default

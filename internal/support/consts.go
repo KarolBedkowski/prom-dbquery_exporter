@@ -7,7 +7,7 @@ package support
 // Distributed under terms of the GPLv3 license.
 //
 
-// CtxKey is type of keys in context
+// CtxKey is type of keys in context.
 type CtxKey int
 
 const (

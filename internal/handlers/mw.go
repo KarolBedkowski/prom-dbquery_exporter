@@ -9,6 +9,7 @@ package handlers
 // Inspired by: https://arunvelsriram.dev/simple-golang-http-logging-middleware
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -34,7 +35,11 @@ func (r *logResponseWriter) Write(b []byte) (int, error) {
 	size, err := r.ResponseWriter.Write(b) // write response using original http.ResponseWriter
 	r.responseData.size += size            // capture size
 
-	return size, err
+	if err != nil {
+		return size, fmt.Errorf("write response error: %w", err)
+	}
+
+	return size, nil
 }
 
 func (r *logResponseWriter) WriteHeader(statusCode int) {
