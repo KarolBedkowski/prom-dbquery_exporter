@@ -54,14 +54,14 @@ func Main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	support.InitializeLogger(*loglevel, *logformat)
-	support.Logger.Info().
+	log.Logger.Info().
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
 
 	c, err := conf.LoadConfiguration(*configFile)
 	if err != nil {
-		support.Logger.Fatal().Err(err).Str("file", *configFile).
+		log.Logger.Fatal().Err(err).Str("file", *configFile).
 			Msg("load config file error")
 	}
 
@@ -78,7 +78,7 @@ func Main() {
 		g.Add(
 			func() error {
 				<-term
-				support.Logger.Warn().Msg("Received SIGTERM, exiting...")
+				log.Logger.Warn().Msg("Received SIGTERM, exiting...")
 				db.CloseLoaders()
 
 				return nil
@@ -103,7 +103,7 @@ func Main() {
 						metrics.UpdateConfLoadTime()
 						log.Info().Msg("configuration reloaded")
 					} else {
-						support.Logger.Error().Err(err).
+						log.Logger.Error().Err(err).
 							Msg("reloading configuration error; using old configuration")
 					}
 				}
@@ -119,9 +119,9 @@ func Main() {
 	g.Add(webHandler.Run, webHandler.Close)
 
 	if err := g.Run(); err != nil {
-		support.Logger.Fatal().Err(err).Msg("Start failed")
+		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
 
-	support.Logger.Info().Msg("finished..")
+	log.Logger.Info().Msg("finished..")
 }

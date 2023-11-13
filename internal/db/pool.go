@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 func init() {
@@ -72,7 +72,7 @@ func GetLoader(d *conf.Database) (Loader, error) {
 		return loader, nil
 	}
 
-	support.Logger.Debug().Str("name", d.Name).Msg("creating new loader")
+	log.Logger.Debug().Str("name", d.Name).Msg("creating new loader")
 
 	loader, err := newLoader(d)
 	if err == nil {
@@ -89,7 +89,7 @@ func UpdateConfiguration(c *conf.Configuration) {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()
 
-	logger := support.Logger
+	logger := log.Logger
 	ctx := logger.WithContext(context.Background())
 
 	var dbToClose []string
@@ -121,14 +121,14 @@ func CloseLoaders() {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()
 
-	support.Logger.Debug().Interface("loaders", lp.loaders).Msg("")
+	log.Logger.Debug().Interface("loaders", lp.loaders).Msg("")
 
-	ctx := support.Logger.WithContext(context.Background())
+	ctx := log.Logger.WithContext(context.Background())
 
 	for _, l := range lp.loaders {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		if err := l.Close(cctx); err != nil {
-			support.Logger.Error().Err(err).Msg("close loader error")
+			log.Logger.Error().Err(err).Msg("close loader error")
 		}
 
 		cancel()

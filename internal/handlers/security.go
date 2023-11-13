@@ -20,10 +20,10 @@ import (
 
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/exporter-toolkit/web"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v2"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 // listenAndServe start webserver
@@ -36,7 +36,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	defer listener.Close()
 
 	if tlsConfigPath == "" {
-		support.Logger.Info().Msg("TLS is disabled.")
+		log.Logger.Info().Msg("TLS is disabled.")
 		return server.Serve(listener)
 	}
 
@@ -62,9 +62,9 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 			server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 		}
 		// Valid TLS config.
-		support.Logger.Info().Msg("TLS is enabled.")
+		log.Logger.Info().Msg("TLS is enabled.")
 	} else {
-		support.Logger.Info().Msg("TLS is disabled.")
+		log.Logger.Info().Msg("TLS is disabled.")
 		return server.Serve(listener)
 	}
 
@@ -119,9 +119,9 @@ type secWebHandler struct {
 
 func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 	if cu := len(conf.Users); cu > 0 {
-		support.Logger.Info().Int("users", cu).Msg("Authorization enabled")
+		log.Logger.Info().Int("users", cu).Msg("Authorization enabled")
 	} else {
-		support.Logger.Info().Msg("Authorization disabled")
+		log.Logger.Info().Msg("Authorization disabled")
 	}
 
 	return &secWebHandler{

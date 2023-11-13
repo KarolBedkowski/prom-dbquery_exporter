@@ -18,7 +18,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 // WebHandler manage http handlers
@@ -72,7 +71,7 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 
 // Run webhandler
 func (w *WebHandler) Run() error {
-	support.Logger.Info().Msgf("Listening on %s", w.listenAddress)
+	log.Logger.Info().Msgf("Listening on %s", w.listenAddress)
 
 	w.server = &http.Server{Addr: w.listenAddress}
 	if err := listenAndServe(w.server, w.webConfig); err != nil {
@@ -84,7 +83,7 @@ func (w *WebHandler) Run() error {
 
 // Close stop listen webhandler
 func (w *WebHandler) Close(err error) {
-	support.Logger.Debug().Msg("web handler close")
+	log.Logger.Debug().Msg("web handler close")
 	w.server.Close()
 }
 

@@ -18,9 +18,6 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Logger is application global logger
-var Logger zerolog.Logger
-
 // InitializeLogger set log level and optional log filename
 func InitializeLogger(level string, format string) {
 	var l zerolog.Logger
@@ -56,7 +53,6 @@ func InitializeLogger(level string, format string) {
 	}
 
 	log.Logger = l.With().Caller().Logger()
-	Logger = log.Logger
 
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(log.Logger)

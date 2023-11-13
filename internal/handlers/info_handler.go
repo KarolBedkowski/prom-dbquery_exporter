@@ -14,7 +14,8 @@ import (
 	"text/template"
 
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/support"
+
+	"github.com/rs/zerolog/log"
 )
 
 const infoTmpl = `
@@ -83,6 +84,6 @@ func (q infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	t := template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl))
 	if err := t.Execute(w, q.Configuration); err != nil {
-		support.Logger.Error().Err(err).Msg("executing template error")
+		log.Logger.Error().Err(err).Msg("executing template error")
 	}
 }
