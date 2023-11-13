@@ -15,7 +15,47 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
-// PoolConfiguration configure database connection pool
+// MissingFieldError is error generated when `field` is missing in configuration.
+type MissingFieldError struct {
+	Field string
+}
+
+func (e MissingFieldError) Error() string {
+	return fmt.Sprintf("missing field %s", e.Field)
+}
+
+// InvalidFieldError is error generated when validation of `field` with `value` failed.
+type InvalidFieldError struct {
+	Field   string
+	Value   any
+	Message string
+}
+
+func (e InvalidFieldError) Error() string {
+	res := "invalid " + e.Field
+
+	if e.Value != nil {
+		res += fmt.Sprintf(" (%v)", e.Value)
+	}
+
+	if e.Message != "" {
+		res += ": " + e.Message
+	}
+
+	return res
+}
+
+// WithMsg add message to InvalidFieldError.
+func (e InvalidFieldError) WithMsg(msg string) InvalidFieldError {
+	return InvalidFieldError{e.Field, e.Value, msg}
+}
+
+// NewInvalidFieldError create InvalidFieldError.
+func NewInvalidFieldError(field string, value any) InvalidFieldError {
+	return InvalidFieldError{field, value, ""}
+}
+
+// PoolConfiguration configure database connection pool.
 type PoolConfiguration struct {
 	MaxConnections     int `yaml:"max_connections"`
 	MaxIdleConnections int `yaml:"max_idle_connections"`
@@ -24,21 +64,21 @@ type PoolConfiguration struct {
 
 func (p *PoolConfiguration) validate() error {
 	if p.MaxConnections < 0 {
-		return errors.New("invalid max_connections")
+		return NewInvalidFieldError("max_connections", p.MaxConnections)
 	}
 
 	if p.MaxIdleConnections < 0 {
-		return errors.New("invalid max_idle_connections")
+		return NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections)
 	}
 
 	if p.ConnMaxLifeTime < 0 {
-		return errors.New("invalid conn_max_life_time")
+		return NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections)
 	}
 
 	return nil
 }
 
-// Database define database connection
+// Database define database connection.
 type Database struct {
 	// Driver name - see sql-agent
 	Driver string
@@ -64,7 +104,7 @@ type Database struct {
 
 func (d *Database) validate() error {
 	if d.Driver == "" {
-		return errors.New("missing driver")
+		return MissingFieldError{"driver"}
 	}
 
 	if d.Pool != nil {
@@ -80,29 +120,29 @@ func (d *Database) validate() error {
 		}
 
 		if !d.CheckConnectionParam("database") && !d.CheckConnectionParam("dbname") {
-			return fmt.Errorf("missing 'database' or 'dbname' parameter")
+			return MissingFieldError{"'database' or 'dbname'"}
 		}
 
 		if !d.CheckConnectionParam("user") {
-			return fmt.Errorf("missing 'user' parameter")
+			return MissingFieldError{"user"}
 		}
 	case "mysql", "mariadb", "tidb", "oracle", "oci8":
 		for _, k := range []string{"database", "host", "port", "user", "password"} {
 			if !d.CheckConnectionParam(k) {
-				return fmt.Errorf("missing '%s' parameter", k)
+				return MissingFieldError{k}
 			}
 		}
 	case "sqlite3", "sqlite", "mssql":
 		if !d.CheckConnectionParam("database") {
-			return errors.New("missing 'database' parameter")
+			return MissingFieldError{"database"}
 		}
 	default:
-		return fmt.Errorf("unknown database '%s'", d.Driver)
+		return NewInvalidFieldError("database", "d.Driver").WithMsg("unknown database")
 	}
 
 	if port, ok := d.Connection["port"]; ok {
 		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
-			return errors.New("invalid 'port'")
+			return NewInvalidFieldError("port", port)
 		}
 	}
 
@@ -110,7 +150,7 @@ func (d *Database) validate() error {
 }
 
 // CheckConnectionParam return true when parameter with key exists
-// and is not empty
+// and is not empty.
 func (d *Database) CheckConnectionParam(key string) bool {
 	val, ok := d.Connection[key]
 	if !ok {
@@ -126,7 +166,7 @@ func (d *Database) CheckConnectionParam(key string) bool {
 	return true
 }
 
-// Query is definition of single query
+// Query is definition of single query.
 type Query struct {
 	// SQL script to launch
 	SQL string
@@ -150,17 +190,18 @@ type Query struct {
 
 func (q *Query) validate() error {
 	if q.SQL == "" {
-		return errors.New("missing SQL")
+		return MissingFieldError{"sql"}
 	}
 
 	m := strings.TrimSpace(q.Metrics) + "\n"
 	if m == "" {
-		return errors.New("missing or empty metrics template")
+		return MissingFieldError{"metrics template"}
 	}
 
 	tmpl, err := support.TemplateCompile(q.Name, m)
 	if err != nil {
-		return fmt.Errorf("parsing metrics template error: %w", err)
+		return NewInvalidFieldError("metrics template", "").WithMsg(err.Error())
+		// fmt.Errorf("parsing error: %w", err))
 	}
 
 	q.MetricTpl = tmpl
@@ -168,7 +209,7 @@ func (q *Query) validate() error {
 	return nil
 }
 
-// Configuration keep application configuration
+// Configuration keep application configuration.
 type Configuration struct {
 	// Databases
 	Database map[string]*Database
@@ -216,39 +257,41 @@ func (c *Configuration) validate() error {
 	return nil
 }
 
-// LoadConfiguration from filename
+// LoadConfiguration from filename.
 func LoadConfiguration(filename string) (*Configuration, error) {
-	c := &Configuration{}
+	conf := &Configuration{}
 
 	b, err := os.ReadFile(filename) // #nosec
 	if err != nil {
 		return nil, fmt.Errorf("read file error: %w", err)
 	}
 
-	if err = yaml.Unmarshal(b, c); err != nil {
+	if err = yaml.Unmarshal(b, conf); err != nil {
 		return nil, fmt.Errorf("unmarshal file error: %w", err)
 	}
 
-	if err = c.validate(); err != nil {
+	if err = conf.validate(); err != nil {
 		return nil, fmt.Errorf("validate error: %w", err)
 	}
 
-	for name, db := range c.Database {
+	for name, db := range conf.Database {
 		db.Name = name
 	}
 
-	for name, q := range c.Query {
+	for name, q := range conf.Query {
 		q.Name = name
 	}
 
-	return c, nil
+	return conf, nil
 }
 
-// GetConnectTimeout return connection timeout from configuration or default
+const defaultConnectioTimeout = 15 * time.Second
+
+// GetConnectTimeout return connection timeout from configuration or default.
 func (d *Database) GetConnectTimeout() time.Duration {
 	if d.ConnectTimeout > 0 {
 		return time.Duration(d.ConnectTimeout) * time.Second
 	}
 
-	return 15 * time.Second
+	return defaultConnectioTimeout
 }
