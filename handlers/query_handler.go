@@ -117,7 +117,8 @@ func (q *queryHandler) markFinished(ctx context.Context, queryKey string) {
 
 func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 	d *conf.Database, queryName string,
-	params map[string]string) ([]byte, error) {
+	params map[string]string,
+) ([]byte, error) {
 	query, ok := (q.configuration.Query)[queryName]
 	if !ok {
 		return nil, fmt.Errorf("unknown query '%s'", queryName)
@@ -173,7 +174,8 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 }
 
 func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
-	queryNames []string, params map[string]string, w http.ResponseWriter) error {
+	queryNames []string, params map[string]string, w http.ResponseWriter,
+) error {
 	d, ok := q.configuration.Database[dbName]
 	if !ok {
 		return fmt.Errorf("unknown database '%s'", dbName)
@@ -227,7 +229,8 @@ func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
 
 // queryDatabasesSeq query all given databases sequentially
 func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]string, w http.ResponseWriter) uint32 {
+	queryNames []string, params map[string]string, w http.ResponseWriter,
+) uint32 {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
 
@@ -260,7 +263,8 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 
 // queryDatabasesPar query all databases in parallel
 func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]string, w http.ResponseWriter) uint32 {
+	queryNames []string, params map[string]string, w http.ResponseWriter,
+) uint32 {
 	logger := zerolog.Ctx(ctx)
 
 	logger.Debug().Msg("database parallel processing start")

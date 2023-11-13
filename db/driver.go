@@ -181,7 +181,8 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 
 // Query get data from database
 func (g *genericLoader) Query(ctx context.Context, q *conf.Query,
-	params map[string]string) (*QueryResult, error) {
+	params map[string]string,
+) (*QueryResult, error) {
 	var err error
 	l := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", q.Name).Logger()
 	ctx = l.WithContext(ctx)
@@ -338,7 +339,8 @@ func newSqliteLoader(d *conf.Database) (Loader, error) {
 	}
 
 	// glebarez/go-sqlite uses 'sqlite', mattn/go-sqlite3 - 'sqlite3'
-	l := &genericLoader{connStr: connstr.String(), driver: "sqlite", initialSQL: d.InitialQuery,
+	l := &genericLoader{
+		connStr: connstr.String(), driver: "sqlite", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	if len(p) > 0 {
@@ -398,7 +400,8 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 		connstr.WriteString(p.Encode())
 	}
 
-	l := &genericLoader{connStr: connstr.String(), driver: "mysql", initialSQL: d.InitialQuery,
+	l := &genericLoader{
+		connStr: connstr.String(), driver: "mysql", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	return l, nil
@@ -456,7 +459,8 @@ func newOracleLoader(d *conf.Database) (Loader, error) {
 		connstr.WriteString(p.Encode())
 	}
 
-	l := &genericLoader{connStr: connstr.String(), driver: "oracle", initialSQL: d.InitialQuery,
+	l := &genericLoader{
+		connStr: connstr.String(), driver: "oracle", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	return l, nil
@@ -481,7 +485,8 @@ func newMssqlLoader(d *conf.Database) (Loader, error) {
 
 	connstr := p.Encode()
 
-	l := &genericLoader{connStr: connstr, driver: "mssql", initialSQL: d.InitialQuery,
+	l := &genericLoader{
+		connStr: connstr, driver: "mssql", initialSQL: d.InitialQuery,
 		dbConf: d,
 	}
 	return l, nil

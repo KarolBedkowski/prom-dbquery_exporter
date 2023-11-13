@@ -203,7 +203,6 @@ func (c *Configuration) validate() error {
 		if err := db.validate(); err != nil {
 			return fmt.Errorf("validate database '%s' error: %w", name, err)
 		}
-
 	}
 	return nil
 }
@@ -212,7 +211,6 @@ func (c *Configuration) validate() error {
 func LoadConfiguration(filename string) (*Configuration, error) {
 	c := &Configuration{}
 	b, err := os.ReadFile(filename) // #nosec
-
 	if err != nil {
 		return nil, fmt.Errorf("read file error: %w", err)
 	}

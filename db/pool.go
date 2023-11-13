@@ -131,8 +131,7 @@ func CloseLoaders() {
 }
 
 // loggersPoolCollector collect metric from active loggers in loggersPool.
-type loggersPoolCollector struct {
-}
+type loggersPoolCollector struct{}
 
 var (
 	dbpoolActConnsDesc = prometheus.NewDesc(

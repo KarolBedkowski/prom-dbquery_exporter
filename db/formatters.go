@@ -35,7 +35,8 @@ type resultTmplData struct {
 
 // FormatResult format query result using template from query configuration
 func FormatResult(ctx context.Context, qr *QueryResult, query *conf.Query,
-	db *conf.Database) ([]byte, error) {
+	db *conf.Database,
+) ([]byte, error) {
 	r := &resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,
