@@ -14,6 +14,8 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rs/zerolog/hlog"
+	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/conf"
 	"prom-dbquery_exporter.app/metrics"
 	"prom-dbquery_exporter.app/support"
@@ -33,9 +35,13 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 	disableParallel bool, disableCache bool, validateOutput bool,
 ) *WebHandler {
 	qh, h := newQueryHandler(c, disableParallel, disableCache, validateOutput)
+	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
+	h = hlog.NewHandler(log.Logger)(h)
 	http.Handle("/query", h)
 
 	ih, h := newInfoHandler(c)
+	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
+	h = hlog.NewHandler(log.Logger)(h)
 	http.Handle("/info", h)
 
 	wh := &WebHandler{
@@ -58,7 +64,7 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 	))
 
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	return wh

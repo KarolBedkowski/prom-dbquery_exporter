@@ -19,6 +19,7 @@ import (
 
 	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/conf"
 	"prom-dbquery_exporter.app/db"
@@ -43,7 +44,7 @@ type (
 
 	runningQueryInfo struct {
 		ts    time.Time
-		reqID uint64
+		reqID string
 	}
 )
 
@@ -67,10 +68,11 @@ func (q *queryHandler) waitForFinish(ctx context.Context, queryKey string) error
 		var ok bool
 		rqi, ok = q.runningQuery[queryKey]
 		if !ok || time.Since(rqi.ts).Minutes() > 15 {
-			// no running previous queue or last query is at least 15 minutes earlier
+			// no running previous qu(eue or last query is at least 15 minutes earlier
+			reqID, _ := hlog.IDFromCtx(ctx)
 			q.runningQuery[queryKey] = runningQueryInfo{
 				ts:    time.Now(),
-				reqID: ctx.Value(support.CtxRequestID).(uint64),
+				reqID: reqID.String(),
 			}
 			q.runningQueryLock.Unlock()
 			return nil
@@ -103,14 +105,14 @@ func (q *queryHandler) waitForFinish(ctx context.Context, queryKey string) error
 }
 
 func (q *queryHandler) markFinished(ctx context.Context, queryKey string) {
-	reqID := ctx.Value(support.CtxRequestID).(uint64)
+	reqID, _ := hlog.IDFromCtx(ctx)
 
 	// mark query finished
 	q.runningQueryLock.Lock()
 	defer q.runningQueryLock.Unlock()
 
 	// unlock only own locks;
-	if l, ok := q.runningQuery[queryKey]; ok && l.reqID == reqID {
+	if l, ok := q.runningQuery[queryKey]; ok && l.reqID == reqID.String() {
 		delete(q.runningQuery, queryKey)
 	}
 }
