@@ -22,8 +22,8 @@ import (
 	"github.com/prometheus/exporter-toolkit/web"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v2"
-	"prom-dbquery_exporter.app/metrics"
-	"prom-dbquery_exporter.app/support"
+	"prom-dbquery_exporter.app/internal/metrics"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 // listenAndServe start webserver

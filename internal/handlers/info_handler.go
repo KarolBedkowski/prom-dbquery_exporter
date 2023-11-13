@@ -13,8 +13,8 @@ import (
 	"strings"
 	"text/template"
 
-	"prom-dbquery_exporter.app/conf"
-	"prom-dbquery_exporter.app/support"
+	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 const infoTmpl = `

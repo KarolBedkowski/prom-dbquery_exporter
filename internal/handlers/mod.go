@@ -16,9 +16,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
-	"prom-dbquery_exporter.app/conf"
-	"prom-dbquery_exporter.app/metrics"
-	"prom-dbquery_exporter.app/support"
+	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 // WebHandler manage http handlers

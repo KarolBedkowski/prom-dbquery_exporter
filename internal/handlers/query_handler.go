@@ -21,10 +21,10 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
-	"prom-dbquery_exporter.app/conf"
-	"prom-dbquery_exporter.app/db"
-	"prom-dbquery_exporter.app/metrics"
-	"prom-dbquery_exporter.app/support"
+	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/db"
+	"prom-dbquery_exporter.app/internal/metrics"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 var queryResultCache = support.NewCache()

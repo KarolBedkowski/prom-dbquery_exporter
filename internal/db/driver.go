@@ -18,7 +18,7 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog/log"
-	"prom-dbquery_exporter.app/conf"
+	"prom-dbquery_exporter.app/internal/conf"
 )
 
 // Record is one record (row) loaded from database

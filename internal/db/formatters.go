@@ -12,7 +12,7 @@ import (
 	"context"
 	"fmt"
 
-	"prom-dbquery_exporter.app/conf"
+	"prom-dbquery_exporter.app/internal/conf"
 )
 
 // resultTmplData keep query result and some metadata parsed to template

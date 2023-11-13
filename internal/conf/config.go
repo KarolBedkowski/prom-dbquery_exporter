@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v2"
-	"prom-dbquery_exporter.app/support"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 // PoolConfiguration configure database connection pool
