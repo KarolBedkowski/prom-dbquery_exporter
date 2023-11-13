@@ -210,19 +210,17 @@ func (g *genericLoader) Query(ctx context.Context, q *conf.Query,
 	l.Debug().Dur("timeout", timeout).Str("sql", q.SQL).Interface("params", q.Params).
 		Msg("genericQuery start execute")
 
-	var rows *sqlx.Rows
-	// query
-	if len(p) > 0 {
-		// sqlx.Conn not support NamedQuery...
-		sql, params, err2 := sqlx.Named(q.SQL, p)
-		if err2 != nil {
-			return nil, fmt.Errorf("prepare sql error: %w", err2)
-		}
-		rows, err = conn.QueryxContext(ctx, sql, params...)
-	} else {
-		rows, err = conn.QueryxContext(ctx, q.SQL)
+	tx, err := conn.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("prepare tx error: %w", err)
 	}
 
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	// query
+	rows, err := tx.NamedQuery(q.SQL, p)
 	if err != nil {
 		return nil, fmt.Errorf("execute query error: %w", err)
 	}
