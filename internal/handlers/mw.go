@@ -62,11 +62,13 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 			Str("handler", name).
 			Logger()
 
+		level := zerolog.InfoLevel
+
 		if asDebug {
-			llog.Debug().Msg("request start")
-		} else {
-			llog.Info().Msg("request start")
+			level = zerolog.DebugLevel
 		}
+
+		llog.WithLevel(level).Msg("request start")
 
 		responseData := &responseData{
 			status: 0,
@@ -81,14 +83,9 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 
 		// log request result
 		duration := time.Since(start)
-		level := zerolog.WarnLevel
 
-		if responseData.status < 400 && responseData.status != 404 {
-			if asDebug {
-				level = zerolog.DebugLevel
-			} else {
-				level = zerolog.InfoLevel
-			}
+		if responseData.status >= 400 && responseData.status != 404 {
+			level = zerolog.WarnLevel
 		}
 
 		llog.WithLevel(level).

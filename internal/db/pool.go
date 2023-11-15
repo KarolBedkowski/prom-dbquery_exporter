@@ -121,17 +121,17 @@ func CloseLoaders() {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()
 
-	log.Logger.Debug().Interface("loaders", lp.loaders).Msg("")
+	log.Logger.Debug().Interface("loaders", lp.loaders).Msg("closing loaders")
 
 	ctx := log.Logger.WithContext(context.Background())
 
 	for _, l := range lp.loaders {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+
 		if err := l.Close(cctx); err != nil {
 			log.Logger.Error().Err(err).Msg("close loader error")
 		}
-
-		cancel()
 	}
 }
 

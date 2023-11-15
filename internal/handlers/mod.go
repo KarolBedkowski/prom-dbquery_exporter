@@ -8,16 +8,16 @@ package handlers
 //
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 // WebHandler manage http handlers.
@@ -33,15 +33,11 @@ type WebHandler struct {
 func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string,
 	disableParallel bool, disableCache bool, validateOutput bool,
 ) *WebHandler {
-	qh, h := newQueryHandler(c, disableParallel, disableCache, validateOutput)
-	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
-	h = hlog.NewHandler(log.Logger)(h)
-	http.Handle("/query", h)
+	qh := newQueryHandler(c, disableParallel, disableCache, validateOutput)
+	http.Handle("/query", qh.Handler())
 
-	ih, h := newInfoHandler(c)
-	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
-	h = hlog.NewHandler(log.Logger)(h)
-	http.Handle("/info", h)
+	ih := newInfoHandler(c)
+	http.Handle("/info", ih.Handler())
 
 	wh := &WebHandler{
 		handler:       qh,
@@ -84,41 +80,15 @@ func (w *WebHandler) Run() error {
 // Close stop listen webhandler.
 func (w *WebHandler) Close(err error) {
 	log.Logger.Debug().Msg("web handler close")
-	w.server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(10)*time.Second)
+	defer cancel()
+
+	w.server.Shutdown(ctx)
 }
 
 // ReloadConf reload configuration in all handlers.
 func (w *WebHandler) ReloadConf(newConf *conf.Configuration) {
 	w.handler.SetConfiguration(newConf)
 	w.infoHandler.Configuration = newConf
-}
-
-// newQueryHandler create new query handler with logging and instrumentation.
-func newQueryHandler(c *conf.Configuration, disableParallel bool,
-	disableCache bool, validateOutput bool,
-) (*queryHandler, http.Handler) {
-	qh := &queryHandler{
-		configuration:         c,
-		runningQuery:          make(map[string]runningQueryInfo),
-		disableParallel:       disableParallel,
-		disableCache:          disableCache,
-		validateOutputEnabled: validateOutput,
-	}
-	h := newLogMiddleware(
-		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWraper("query"),
-			qh), "query", false)
-
-	return qh, h
-}
-
-// newInfoHandler create new info handler with logging and instrumentation.
-func newInfoHandler(c *conf.Configuration) (*infoHandler, http.Handler) {
-	ih := &infoHandler{Configuration: c}
-	h := newLogMiddleware(
-		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWraper("info"),
-			ih), "info", false)
-
-	return ih, h
 }

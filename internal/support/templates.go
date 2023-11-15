@@ -16,7 +16,7 @@ import (
 func TemplateCompile(name, tmpl string) (*template.Template, error) {
 	t, err := template.New(name).Funcs(templateFuncsMap).Parse(tmpl)
 	if err != nil {
-		return nil, fmt.Errorf("template compile error: %w", err)
+		return nil, fmt.Errorf("template %s compile error: %w", name, err)
 	}
 
 	return t, nil

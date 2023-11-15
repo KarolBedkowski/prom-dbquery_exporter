@@ -17,6 +17,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
@@ -47,6 +48,29 @@ type (
 		reqID string
 	}
 )
+
+func newQueryHandler(c *conf.Configuration, disableParallel bool,
+	disableCache bool, validateOutput bool,
+) *queryHandler {
+	return &queryHandler{
+		configuration:         c,
+		runningQuery:          make(map[string]runningQueryInfo),
+		disableParallel:       disableParallel,
+		disableCache:          disableCache,
+		validateOutputEnabled: validateOutput,
+	}
+}
+
+func (q *queryHandler) Handler() http.Handler {
+	h := newLogMiddleware(
+		promhttp.InstrumentHandlerDuration(
+			metrics.NewReqDurationWraper("query"),
+			q), "query", false)
+
+	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
+	h = hlog.NewHandler(log.Logger)(h)
+	return h
+}
 
 // SetConfiguration update handler configuration.
 func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
