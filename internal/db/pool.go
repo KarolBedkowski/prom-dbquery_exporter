@@ -50,9 +50,11 @@ func (l *loadersPool) loadersInPool() float64 {
 	return float64(len(l.loaders))
 }
 
-func (l *loadersPool) loadersStats() (stats []*LoaderStats) {
+func (l *loadersPool) loadersStats() []*LoaderStats {
 	lp.lock.Lock()
 	defer lp.lock.Unlock()
+
+	var stats []*LoaderStats
 
 	for _, l := range l.loaders {
 		if s := l.Stats(); s != nil {
@@ -104,16 +106,20 @@ func UpdateConfiguration(c *conf.Configuration) {
 	}
 
 	for _, name := range dbToClose {
-		l := lp.loaders[name]
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-
-		if err := l.Close(cctx); err != nil {
-			logger.Error().Err(err).Msg("close loader error")
-		}
-
-		cancel()
-		delete(lp.loaders, name)
+		unloadLoader(ctx, name)
 	}
+}
+
+func unloadLoader(ctx context.Context, name string) {
+	l := lp.loaders[name]
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+
+	if err := l.Close(cctx); err != nil {
+		log.Ctx(ctx).Error().Err(err).Msg("close loader error")
+	}
+
+	delete(lp.loaders, name)
 }
 
 // CloseLoaders close all active loaders in pool.
