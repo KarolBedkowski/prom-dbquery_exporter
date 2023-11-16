@@ -1,6 +1,6 @@
 module prom-dbquery_exporter.app
 
-go 1.19
+go 1.21
 
 require (
 	github.com/glebarez/go-sqlite v1.21.2
