@@ -18,6 +18,13 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
+const (
+	defaultTimeout         uint = 300 // sec
+	defaultConnMaxLifetime      = 600 * time.Second
+	defaultMaxOpenConns         = 10
+	defaultMaxIdleConns         = 2
+)
+
 // Record is one record (row) loaded from database.
 type Record map[string]interface{}
 
@@ -99,27 +106,27 @@ func (g *genericLoader) Stats() *LoaderStats {
 }
 
 func (g *genericLoader) configureConnection(ctx context.Context) {
-	g.conn.SetConnMaxLifetime(600 * time.Second)
-	g.conn.SetMaxOpenConns(10)
-	g.conn.SetMaxIdleConns(1)
+	g.conn.SetConnMaxLifetime(defaultConnMaxLifetime)
+	g.conn.SetMaxOpenConns(defaultMaxOpenConns)
+	g.conn.SetMaxIdleConns(defaultMaxIdleConns)
 
-	if p := g.dbConf.Pool; p != nil {
+	if pool := g.dbConf.Pool; pool != nil {
 		l := log.Ctx(ctx)
 
-		if p.MaxConnections > 0 {
-			l.Debug().Int("max-conn", p.MaxConnections).Msg("max connection set")
-			g.conn.SetMaxOpenConns(p.MaxConnections)
+		if pool.MaxConnections > 0 {
+			l.Debug().Int("max-conn", pool.MaxConnections).Msg("max connection set")
+			g.conn.SetMaxOpenConns(pool.MaxConnections)
 		}
 
-		if p.MaxIdleConnections > 0 {
-			l.Debug().Int("max-idle", p.MaxIdleConnections).Msg("max idle connection set")
-			g.conn.SetMaxIdleConns(p.MaxIdleConnections)
+		if pool.MaxIdleConnections > 0 {
+			l.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("max idle connection set")
+			g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
 		}
 
-		if p.ConnMaxLifeTime > 0 {
-			l.Debug().Int("conn-max-life-time", p.ConnMaxLifeTime).
+		if pool.ConnMaxLifeTime > 0 {
+			l.Debug().Int("conn-max-life-time", pool.ConnMaxLifeTime).
 				Msg("connection max life time set")
-			g.conn.SetConnMaxLifetime(time.Duration(p.ConnMaxLifeTime) * time.Second)
+			g.conn.SetConnMaxLifetime(time.Duration(pool.ConnMaxLifeTime) * time.Second)
 		}
 	}
 }
@@ -154,8 +161,8 @@ func (g *genericLoader) openConnection(ctx context.Context) error {
 }
 
 func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
-	l := log.Ctx(ctx)
-	l.Debug().Interface("conn", g.conn).Msg("conn")
+	llog := log.Ctx(ctx)
+	llog.Debug().Interface("conn", g.conn).Msg("conn")
 
 	if g.conn == nil {
 		// connect to database if not connected
@@ -176,33 +183,40 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	atomic.AddUint32(&g.totalOpenedConnections, 1)
 
 	// launch initial sqls if defined
-	for _, sql := range g.initialSQL {
-		l.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
+	for idx, sql := range g.initialSQL {
+		llog.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
 
-		lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
-		defer cancel()
-
-		if _, err := conn.QueryxContext(lctx, sql); err != nil {
+		if err := g.executeInitialQuery(ctx, sql, conn); err != nil {
 			conn.Close()
 
-			return nil, fmt.Errorf("execute initial sql error: %w", err)
+			return nil, fmt.Errorf("execute initial sql [%d] error: %w", idx, err)
 		}
 	}
 
 	return conn, nil
 }
 
-// Query get data from database.
-func (g *genericLoader) Query(ctx context.Context, q *conf.Query, params map[string]string,
-) (*QueryResult, error) {
-	var err error
+func (g *genericLoader) executeInitialQuery(ctx context.Context, sql string, conn *sqlx.Conn) error {
+	lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
+	defer cancel()
 
-	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", q.Name).Logger()
+	rows, err := conn.QueryxContext(lctx, sql)
+	if rows != nil {
+		rows.Close()
+	}
+
+	return err
+}
+
+// Query get data from database.
+func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map[string]string,
+) (*QueryResult, error) {
+	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
 
 	conn, err := g.getConnection(ctx)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("get connection error: %w", err)
 	}
 	defer conn.Close()
 
@@ -210,18 +224,18 @@ func (g *genericLoader) Query(ctx context.Context, q *conf.Query, params map[str
 	defer g.lock.RUnlock()
 
 	// prepare query parameters; combine parameters from query and params
-	queryParams := prepareParams(q, params)
-	timeout := g.queryTimeout(q)
+	queryParams := prepareParams(query, params)
+	timeout := g.queryTimeout(query)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	llog.Debug().Dur("timeout", timeout).Str("sql", q.SQL).Interface("params", q.Params).
+	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", query.Params).
 		Msg("genericQuery start execute")
 
 	tx, err := conn.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
 	if err != nil {
-		return nil, fmt.Errorf("prepare tx error: %w", err)
+		return nil, fmt.Errorf("begin tx error: %w", err)
 	}
 
 	defer func() {
@@ -229,7 +243,7 @@ func (g *genericLoader) Query(ctx context.Context, q *conf.Query, params map[str
 	}()
 
 	// query
-	rows, err := tx.NamedQuery(q.SQL, queryParams)
+	rows, err := tx.NamedQuery(query.SQL, queryParams)
 	if err != nil {
 		return nil, fmt.Errorf("execute query error: %w", err)
 	}
@@ -252,7 +266,7 @@ func (g *genericLoader) Query(ctx context.Context, q *conf.Query, params map[str
 		result.Records = append(result.Records, rec)
 	}
 
-	result.Duration = float64(time.Since(result.Start).Seconds())
+	result.Duration = time.Since(result.Start).Seconds()
 
 	return result, nil
 }
@@ -290,15 +304,16 @@ func (g *genericLoader) String() string {
 }
 
 func (g *genericLoader) queryTimeout(q *conf.Query) time.Duration {
-	if q.Timeout > 0 {
-		return time.Duration(q.Timeout) * time.Second
+	timeout := defaultTimeout
+
+	switch {
+	case q.Timeout > 0:
+		timeout = q.Timeout
+	case g.dbConf.Timeout > 0:
+		timeout = g.dbConf.Timeout
 	}
 
-	if g.dbConf.Timeout > 0 {
-		return time.Duration(g.dbConf.Timeout) * time.Second
-	}
-
-	return 5 * time.Minute
+	return time.Duration(timeout) * time.Second
 }
 
 func prepareParams(q *conf.Query, params map[string]string) map[string]interface{} {
