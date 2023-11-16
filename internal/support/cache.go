@@ -14,32 +14,32 @@ import (
 
 type (
 	// Cache with per item expire time.
-	Cache struct {
-		cache     map[string]*cacheItem
+	Cache[T any] struct {
+		cache     map[string]*cacheItem[T]
 		cacheLock sync.Mutex
 	}
 
-	cacheItem struct {
+	cacheItem[T any] struct {
 		expireTS time.Time
-		content  interface{}
+		content  T
 	}
 )
 
 // NewCache create  new cache object.
-func NewCache() *Cache {
-	return &Cache{
-		cache: make(map[string]*cacheItem),
+func NewCache[T any]() *Cache[T] {
+	return &Cache[T]{
+		cache: make(map[string]*cacheItem[T]),
 	}
 }
 
 // Get key from cache if exists and not expired.
-func (r *Cache) Get(key string) (interface{}, bool) {
+func (r *Cache[T]) Get(key string) (T, bool) {
 	r.cacheLock.Lock()
 	defer r.cacheLock.Unlock()
 
 	item, ok := r.cache[key]
 	if !ok {
-		return nil, false
+		return *new(T), false
 	}
 
 	if item.expireTS.After(time.Now()) {
@@ -48,13 +48,13 @@ func (r *Cache) Get(key string) (interface{}, bool) {
 
 	delete(r.cache, key)
 
-	return nil, false
+	return *new(T), false
 }
 
 // Put data into cache.
-func (r *Cache) Put(key string, ttl uint, data interface{}) {
+func (r *Cache[T]) Put(key string, ttl uint, data T) {
 	r.cacheLock.Lock()
-	r.cache[key] = &cacheItem{
+	r.cache[key] = &cacheItem[T]{
 		expireTS: time.Now().Add(time.Duration(ttl) * time.Second),
 		content:  data,
 	}
@@ -62,10 +62,10 @@ func (r *Cache) Put(key string, ttl uint, data interface{}) {
 }
 
 // Clear whole cache.
-func (r *Cache) Clear() {
+func (r *Cache[T]) Clear() {
 	r.cacheLock.Lock()
 	// create new cache using last size as default
-	r.cache = make(map[string]*cacheItem, len(r.cache))
+	clear(r.cache)
 	r.cacheLock.Unlock()
 }
 

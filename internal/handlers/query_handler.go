@@ -28,7 +28,7 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
-var queryResultCache = support.NewCache()
+var queryResultCache = support.NewCache[[]byte]()
 
 // queryHandler handle all request for metrics.
 type (
@@ -171,7 +171,7 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 			metrics.IncQueryCacheHits()
 			logger.Debug().Msg("query result from cache")
 
-			return data.([]byte), nil
+			return data, nil
 		}
 	}
 
