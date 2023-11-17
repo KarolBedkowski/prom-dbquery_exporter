@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/expfmt"
@@ -30,6 +29,47 @@ import (
 
 var queryResultCache = support.NewCache[[]byte]()
 
+type locker struct {
+	sync.Mutex
+
+	runningQuery map[string]string
+}
+
+func newLocker() locker {
+	return locker{runningQuery: make(map[string]string)}
+}
+
+func (l *locker) tryLock(queryKey, reqID string) error {
+	l.Lock()
+	defer l.Unlock()
+
+	if rid, ok := l.runningQuery[queryKey]; ok {
+		return fmt.Errorf("query already running, started by %s", rid)
+	}
+
+	l.runningQuery[queryKey] = reqID
+
+	return nil
+}
+
+func (l *locker) unlock(queryKey, reqID string) error {
+	l.Lock()
+	defer l.Unlock()
+
+	var err error
+
+	// unlock only own locks;
+	if rid, ok := l.runningQuery[queryKey]; ok {
+		if rid != reqID {
+			err = fmt.Errorf("running query (%s) not match current reqID", rid)
+		}
+
+		delete(l.runningQuery, queryKey)
+	}
+
+	return err
+}
+
 // queryHandler handle all request for metrics.
 type (
 	queryHandler struct {
@@ -39,13 +79,7 @@ type (
 		validateOutputEnabled bool
 
 		// runningQuery lock the same request for running twice
-		runningQuery     map[string]runningQueryInfo
-		runningQueryLock sync.Mutex
-	}
-
-	runningQueryInfo struct {
-		ts    time.Time
-		reqID string
+		queryLocker locker
 	}
 )
 
@@ -54,7 +88,7 @@ func newQueryHandler(c *conf.Configuration, disableParallel bool,
 ) *queryHandler {
 	return &queryHandler{
 		configuration:         c,
-		runningQuery:          make(map[string]runningQueryInfo),
+		queryLocker:           newLocker(),
 		disableParallel:       disableParallel,
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
@@ -77,76 +111,6 @@ func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	q.configuration = c
 
 	queryResultCache.Clear()
-}
-
-// errQueryLocked is error when given query is locked more than 5 minutes.
-var errQueryLocked = errors.New("query locked")
-
-const waitForFinishTicks = 5 * time.Second
-
-func (q *queryHandler) waitForFinish(ctx context.Context, queryKey string) error {
-	ticker := time.NewTicker(waitForFinishTicks)
-	defer ticker.Stop()
-
-	var rqi runningQueryInfo
-
-	for i := 0; i < 60; i++ { // 5min
-		q.runningQueryLock.Lock()
-		var ok bool
-
-		rqi, ok = q.runningQuery[queryKey]
-		if !ok || time.Since(rqi.ts).Minutes() > 15 {
-			// no running previous qu(eue or last query is at least 15 minutes earlier
-			reqID, _ := hlog.IDFromCtx(ctx)
-			q.runningQuery[queryKey] = runningQueryInfo{
-				ts:    time.Now(),
-				reqID: reqID.String(),
-			}
-			q.runningQueryLock.Unlock()
-
-			return nil
-		}
-		q.runningQueryLock.Unlock()
-		log.Ctx(ctx).Debug().
-			Str("queryKey", queryKey).Time("startTs", rqi.ts).
-			TimeDiff("age", time.Now(), rqi.ts).Interface("block_by", rqi.reqID).
-			Msg("wait for unlock")
-
-		select {
-		case <-ticker.C:
-			// tick, next iteration
-		case <-ctx.Done():
-			{
-				// context cancelled, ie. client disconnected
-				if err := ctx.Err(); err != nil {
-					return fmt.Errorf("context cancelled: %w", err)
-				}
-
-				return nil
-			}
-		}
-	}
-
-	log.Ctx(ctx).Warn().
-		Str("queryKey", queryKey).Time("startTs", rqi.ts).
-		Interface("block_by", rqi.reqID).TimeDiff("age", time.Now(), rqi.ts).
-		Msg("timeout on waiting to unlock; previous query is still executing or stalled")
-	metrics.IncProcessErrorsCnt("lock")
-
-	return errQueryLocked
-}
-
-func (q *queryHandler) markFinished(ctx context.Context, queryKey string) {
-	reqID, _ := hlog.IDFromCtx(ctx)
-
-	// mark query finished
-	q.runningQueryLock.Lock()
-	defer q.runningQueryLock.Unlock()
-
-	// unlock only own locks;
-	if l, ok := q.runningQuery[queryKey]; ok && l.reqID == reqID.String() {
-		delete(q.runningQuery, queryKey)
-	}
 }
 
 func (q *queryHandler) query(ctx context.Context, loader db.Loader,
@@ -347,6 +311,7 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	queryNames := r.URL.Query()["query"]
 	dbNames := r.URL.Query()["database"]
+	requestID, _ := hlog.IDFromCtx(ctx)
 
 	for _, g := range r.URL.Query()["group"] {
 		q := q.configuration.GroupQueries(g)
@@ -362,11 +327,16 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// prevent to run the same request twice
-	if err := q.waitForFinish(ctx, r.URL.RawQuery); errors.Is(err, errQueryLocked) {
+	if err := q.queryLocker.tryLock(r.URL.RawQuery, requestID.String()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer q.markFinished(ctx, r.URL.RawQuery)
+
+	defer func() {
+		if err := q.queryLocker.unlock(r.URL.RawQuery, requestID.String()); err != nil {
+			logger.Warn().Err(err).Msg("unlock query error")
+		}
+	}()
 
 	params := make(map[string]string)
 
@@ -402,7 +372,7 @@ func deduplicateStringList(inp []string) []string {
 		return inp
 	}
 
-	tmpMap := make(map[string]bool)
+	tmpMap := make(map[string]bool, len(inp))
 	for _, s := range inp {
 		tmpMap[s] = true
 	}

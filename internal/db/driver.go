@@ -44,53 +44,51 @@ func newRecord(rows *sqlx.Rows) (Record, error) {
 	return rec, nil
 }
 
-type (
-	// Loader load data from database.
-	Loader interface {
-		// Query execute sql and returns records or error. Open connection when necessary.
-		Query(ctx context.Context, q *conf.Query, params map[string]string) (*QueryResult, error)
-		// Close db connection.
-		Close(ctx context.Context) error
-		// Human-friendly info
-		String() string
-		// ConfChanged return true when given configuration is differ than used
-		ConfChanged(db *conf.Database) bool
+// Loader load data from database.
+type Loader interface {
+	// Query execute sql and returns records or error. Open connection when necessary.
+	Query(ctx context.Context, q *conf.Query, params map[string]string) (*QueryResult, error)
+	// Close db connection.
+	Close(ctx context.Context) error
+	// Human-friendly info
+	String() string
+	// ConfChanged return true when given configuration is differ than used
+	ConfChanged(db *conf.Database) bool
 
-		// Stats return database stats if available
-		Stats() *LoaderStats
-	}
+	// Stats return database stats if available
+	Stats() *LoaderStats
+}
 
-	// QueryResult is result of Loader.Query.
-	QueryResult struct {
-		// rows
-		Records []Record
-		// query duration
-		Duration float64
-		// query start time
-		Start time.Time
-		// all query parameters
-		Params map[string]interface{}
-	}
+// QueryResult is result of Loader.Query.
+type QueryResult struct {
+	// rows
+	Records []Record
+	// query duration
+	Duration float64
+	// query start time
+	Start time.Time
+	// all query parameters
+	Params map[string]interface{}
+}
 
-	genericLoader struct {
-		connStr                string
-		driver                 string
-		conn                   *sqlx.DB
-		initialSQL             []string
-		dbConf                 *conf.Database
-		lock                   sync.RWMutex
-		totalOpenedConnections uint32
-		totalFailedConnections uint32
-	}
+type genericLoader struct {
+	connStr                string
+	driver                 string
+	conn                   *sqlx.DB
+	initialSQL             []string
+	dbConf                 *conf.Database
+	lock                   sync.RWMutex
+	totalOpenedConnections uint32
+	totalFailedConnections uint32
+}
 
-	// LoaderStats transfer stats from database driver.
-	LoaderStats struct {
-		Name                   string
-		DBStats                sql.DBStats
-		TotalOpenedConnections uint32
-		TotalFailedConnections uint32
-	}
-)
+// LoaderStats transfer stats from database driver.
+type LoaderStats struct {
+	Name                   string
+	DBStats                sql.DBStats
+	TotalOpenedConnections uint32
+	TotalFailedConnections uint32
+}
 
 func (g *genericLoader) Stats() *LoaderStats {
 	if g.conn != nil {
