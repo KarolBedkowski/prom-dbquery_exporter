@@ -112,7 +112,7 @@ func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, b
 	return nil, false
 }
 
-func (q *queryHandler) putInfoCache(query *conf.Query, dbName string, data []byte) {
+func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byte) {
 	if query.CachingTime > 0 && !q.disableCache {
 		queryKey := query.Name + "@" + dbName
 		queryResultCache.Put(queryKey, query.CachingTime, data)
@@ -122,13 +122,11 @@ func (q *queryHandler) putInfoCache(query *conf.Query, dbName string, data []byt
 // queryDatabases query all given databases sequentially.
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]string,
-) (chan *db.TaskResult, int) {
+) chan *db.TaskResult {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
 
-	output := make(chan *db.TaskResult)
-
-	scheduled := 0
+	output := make(chan *db.TaskResult, len(dbNames)*len(queryNames))
 
 	for _, dbName := range dbNames {
 		for _, queryName := range queryNames {
@@ -160,13 +158,12 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			if err := db.DatabasesPool.PutTask(&task); err != nil {
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
-			} else {
-				scheduled++
+				output <- &db.TaskResult{Error: err}
 			}
 		}
 	}
 
-	return output, scheduled
+	return output
 }
 
 func (q *queryHandler) writeResult(ctx context.Context, output chan *db.TaskResult, scheduled int,
@@ -183,9 +180,9 @@ loop:
 		case res := <-output:
 			scheduled--
 
-			if res.Error != nil {
-				logger.Error().Err(res.Error).Msg("result error")
-			} else {
+			if res.Error == nil {
+				logger.Debug().Object("res", res).Msg("write result")
+
 				if _, err := writer.Write(res.Result); err != nil {
 					logger.Error().Err(err).Msg("write errror")
 					metrics.IncProcessErrorsCnt("write")
@@ -194,7 +191,7 @@ loop:
 				}
 
 				if res.Query != nil {
-					q.putInfoCache(res.Query, res.DBName, res.Result)
+					q.putIntoCache(res.Query, res.DBName, res.Result)
 				}
 			}
 		case <-ctx.Done():
@@ -246,8 +243,8 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params)
-	successProcessed := q.writeResult(ctx, out, scheduled, writer)
+	out := q.queryDatabases(ctx, dbNames, queryNames, params)
+	successProcessed := q.writeResult(ctx, out, len(dbNames)*len(queryNames), writer)
 
 	logger.Debug().Int("successProcessed", successProcessed).
 		Msg("all database queries finished")

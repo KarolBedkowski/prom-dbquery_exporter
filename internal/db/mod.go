@@ -63,6 +63,13 @@ type TaskResult struct {
 	Query     *conf.Query
 }
 
+func (t TaskResult) MarshalZerologObject(e *zerolog.Event) {
+	e.Str("db", t.DBName).
+		Str("query", t.QueryName).
+		Err(t.Error).
+		Int("result_size", len(t.Result))
+}
+
 type dbLoader struct {
 	dbName string
 
