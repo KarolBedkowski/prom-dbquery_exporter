@@ -80,7 +80,7 @@ func Main() {
 			func() error {
 				<-term
 				log.Logger.Warn().Msg("Received SIGTERM, exiting...")
-				db.CloseLoaders()
+				db.DatabasesPool.Close()
 
 				return nil
 			},

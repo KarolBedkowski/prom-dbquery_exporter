@@ -8,13 +8,7 @@ package db
 //
 
 import (
-	"context"
-	"sync"
-	"time"
-
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/zerolog/log"
-	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
@@ -26,119 +20,10 @@ func init() {
 				Name:      "loaders_in_pool",
 				Help:      "Number of active loaders in pool",
 			},
-			lp.loadersInPool,
+			DatabasesPool.loadersInPool,
 		))
 
 	prometheus.MustRegister(loggersPoolCollector{})
-}
-
-// loadersPool keep database loaders.
-type loadersPool struct {
-	// map of loader instances
-	loaders map[string]Loader
-	lock    sync.Mutex
-}
-
-var lp loadersPool = loadersPool{
-	loaders: make(map[string]Loader),
-}
-
-func (l *loadersPool) loadersInPool() float64 {
-	lp.lock.Lock()
-	defer lp.lock.Unlock()
-
-	return float64(len(l.loaders))
-}
-
-func (l *loadersPool) loadersStats() []*LoaderStats {
-	lp.lock.Lock()
-	defer lp.lock.Unlock()
-
-	var stats []*LoaderStats
-
-	for _, l := range l.loaders {
-		if s := l.Stats(); s != nil {
-			stats = append(stats, s)
-		}
-	}
-
-	return stats
-}
-
-// GetLoader create or return existing loader according to configuration.
-func GetLoader(d *conf.Database) (Loader, error) {
-	lp.lock.Lock()
-	defer lp.lock.Unlock()
-
-	if loader, ok := lp.loaders[d.Name]; ok {
-		return loader, nil
-	}
-
-	log.Logger.Debug().Str("name", d.Name).Msg("creating new loader")
-
-	loader, err := newLoader(d)
-	if err == nil {
-		lp.loaders[d.Name] = loader
-	}
-
-	return loader, err
-}
-
-// UpdateConfiguration update configuration for existing loaders:
-// close not existing any more loaders and close loaders with changed
-// configuration so they can be create with new conf on next use.
-func UpdateConfiguration(c *conf.Configuration) {
-	lp.lock.Lock()
-	defer lp.lock.Unlock()
-
-	logger := log.Logger
-	ctx := logger.WithContext(context.Background())
-
-	var dbToClose []string
-
-	for k, l := range lp.loaders {
-		if newConf, ok := c.Database[k]; !ok {
-			dbToClose = append(dbToClose, k)
-		} else if l.ConfChanged(newConf) {
-			logger.Info().Str("db", k).Msg("configuration changed")
-			dbToClose = append(dbToClose, k)
-		}
-	}
-
-	for _, name := range dbToClose {
-		unloadLoader(ctx, name)
-	}
-}
-
-func unloadLoader(ctx context.Context, name string) {
-	l := lp.loaders[name]
-	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-
-	if err := l.Close(cctx); err != nil {
-		log.Ctx(ctx).Error().Err(err).Msg("close loader error")
-	}
-
-	delete(lp.loaders, name)
-}
-
-// CloseLoaders close all active loaders in pool.
-func CloseLoaders() {
-	lp.lock.Lock()
-	defer lp.lock.Unlock()
-
-	log.Logger.Debug().Interface("loaders", lp.loaders).Msg("closing loaders")
-
-	ctx := log.Logger.WithContext(context.Background())
-
-	for _, l := range lp.loaders {
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-
-		if err := l.Close(cctx); err != nil {
-			log.Logger.Error().Err(err).Msg("close loader error")
-		}
-	}
 }
 
 // loggersPoolCollector collect metric from active loggers in loggersPool.
@@ -207,7 +92,7 @@ func (l loggersPoolCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (l loggersPoolCollector) Collect(ch chan<- prometheus.Metric) {
-	stats := lp.loadersStats()
+	stats := DatabasesPool.loadersStats()
 
 	for _, s := range stats {
 		ch <- prometheus.MustNewConstMetric(

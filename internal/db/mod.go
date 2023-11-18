@@ -68,7 +68,7 @@ type dbLoader struct {
 }
 
 func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
-	loader, err := GetLoader(cfg)
+	loader, err := newLoader(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("get loader error: %w", err)
 	}
@@ -123,8 +123,14 @@ func (d *dbLoader) worker(idx int) {
 		select {
 		case <-d.stopCh:
 			wlog.Debug().Msg("stop worker")
-			if atomic.AddInt32(&d.numWorkers, -1) < 0 {
+			numWorkers := int(atomic.AddInt32(&d.numWorkers, -1))
+			switch {
+			case numWorkers < 0:
 				wlog.Error().Msg("num workers <0")
+			case numWorkers == 0:
+				if err := d.loader.Close(context.Background()); err != nil {
+					wlog.Error().Err(err).Msg("close loader error")
+				}
 			}
 			return
 
@@ -230,6 +236,9 @@ func (d *Databases) PutTask(task *DBTask) error {
 	return nil
 }
 
+// UpdateConf update configuration for existing loaders:
+// close not existing any more loaders and close loaders with changed
+// configuration so they can be create with new conf on next use.
 func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 	d.Lock()
 	defer d.Unlock()
@@ -256,6 +265,42 @@ func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 	}
 
 	d.cfg = cfg
+}
+
+func (d *Databases) Close() {
+	d.Lock()
+	defer d.Unlock()
+
+	d.log.Debug().Msg("update configuration")
+
+	for k, db := range d.dbs {
+		d.log.Info().Str("db", k).Msg("stopping db")
+		db.stop()
+	}
+}
+
+// loadersInPool return number or loaders in pool
+func (d *Databases) loadersInPool() float64 {
+	d.Lock()
+	defer d.Unlock()
+
+	return float64(len(d.dbs))
+}
+
+// loadersStats return stats for each loaders
+func (d *Databases) loadersStats() []*LoaderStats {
+	d.Lock()
+	defer d.Unlock()
+
+	var stats []*LoaderStats
+
+	for _, l := range d.dbs {
+		if s := l.loader.Stats(); s != nil {
+			stats = append(stats, s)
+		}
+	}
+
+	return stats
 }
 
 var DatabasesPool = NewDatabases()
