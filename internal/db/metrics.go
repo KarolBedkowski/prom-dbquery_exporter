@@ -51,37 +51,37 @@ var (
 		[]string{"loader"}, nil,
 	)
 	dbpoolConnWaitCntDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_connections_waitcount",
+		"dbquery_exporter_dbpool_connections_wait_total",
 		"Total number of connections waited for per loader",
 		[]string{"loader"}, nil,
 	)
 	dbpoolConnWaitTimeDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_connections_wait_second",
+		"dbquery_exporter_dbpool_connections_wait_second_total",
 		"The total time blocked waiting for a new connection per loader",
 		[]string{"loader"}, nil,
 	)
 	dbpoolConnIdleClosedDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_connections_idleclosed",
+		"dbquery_exporter_dbpool_connections_idleclosed_total",
 		"The total number of connections closed due to idle connection limit.",
 		[]string{"loader"}, nil,
 	)
 	dbpoolConnIdleTimeClosedDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_connections_idletimeclosed",
+		"dbquery_exporter_dbpool_connections_idletimeclosed_total",
 		"The total number of connections closed due to max idle time limit.",
 		[]string{"loader"}, nil,
 	)
 	dbpoolConnLifeTimeClosedDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_connections_lifetimeclosed",
+		"dbquery_exporter_dbpool_connections_lifetimeclosed_total",
 		"The total number of connections closed due to max life time limit.",
 		[]string{"loader"}, nil,
 	)
 	dbpoolConnTotalConnectedDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_connections_connected",
+		"dbquery_exporter_dbpool_connections_connected_total",
 		"Total number of connections created per loader",
 		[]string{"loader"}, nil,
 	)
 	dbpoolConnTotalFailedDesc = prometheus.NewDesc(
-		"dbquery_exporter_dbpool_connections_failed",
+		"dbquery_exporter_dbpool_connections_failed_total",
 		"Total number of failed connections per loader",
 		[]string{"loader"}, nil,
 	)
@@ -94,72 +94,72 @@ func (l loggersPoolCollector) Describe(ch chan<- *prometheus.Desc) {
 func (l loggersPoolCollector) Collect(ch chan<- prometheus.Metric) {
 	stats := DatabasesPool.loadersStats()
 
-	for _, s := range stats {
+	for _, stat := range stats {
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolOpenConnsDesc,
 			prometheus.GaugeValue,
-			float64(s.DBStats.OpenConnections),
-			s.Name,
+			float64(stat.DBStats.OpenConnections),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolActConnsDesc,
 			prometheus.GaugeValue,
-			float64(s.DBStats.InUse),
-			s.Name,
+			float64(stat.DBStats.InUse),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolIdleConnsDesc,
 			prometheus.GaugeValue,
-			float64(s.DBStats.Idle),
-			s.Name,
+			float64(stat.DBStats.Idle),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolconfMaxConnsDesc,
 			prometheus.GaugeValue,
-			float64(s.DBStats.MaxOpenConnections),
-			s.Name,
+			float64(stat.DBStats.MaxOpenConnections),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolConnWaitCntDesc,
 			prometheus.CounterValue,
-			float64(s.DBStats.WaitCount),
-			s.Name,
+			float64(stat.DBStats.WaitCount),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolConnIdleClosedDesc,
 			prometheus.CounterValue,
-			float64(s.DBStats.MaxIdleClosed),
-			s.Name,
+			float64(stat.DBStats.MaxIdleClosed),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolConnIdleTimeClosedDesc,
 			prometheus.CounterValue,
-			float64(s.DBStats.MaxIdleTimeClosed),
-			s.Name,
+			float64(stat.DBStats.MaxIdleTimeClosed),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolConnLifeTimeClosedDesc,
 			prometheus.CounterValue,
-			float64(s.DBStats.MaxLifetimeClosed),
-			s.Name,
+			float64(stat.DBStats.MaxLifetimeClosed),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolConnWaitTimeDesc,
 			prometheus.CounterValue,
-			float64(s.DBStats.WaitDuration.Seconds()),
-			s.Name,
+			stat.DBStats.WaitDuration.Seconds(),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolConnTotalConnectedDesc,
 			prometheus.CounterValue,
-			float64(s.TotalOpenedConnections),
-			s.Name,
+			float64(stat.TotalOpenedConnections),
+			stat.Name,
 		)
 		ch <- prometheus.MustNewConstMetric(
 			dbpoolConnTotalFailedDesc,
 			prometheus.CounterValue,
-			float64(s.TotalFailedConnections),
-			s.Name,
+			float64(stat.TotalFailedConnections),
+			stat.Name,
 		)
 	}
 }

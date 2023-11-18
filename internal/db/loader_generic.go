@@ -55,20 +55,20 @@ func (g *genericLoader) configureConnection(ctx context.Context) {
 	g.conn.SetMaxIdleConns(defaultMaxIdleConns)
 
 	if pool := g.dbConf.Pool; pool != nil {
-		l := log.Ctx(ctx)
+		llog := log.Ctx(ctx)
 
 		if pool.MaxConnections > 0 {
-			l.Debug().Int("max-conn", pool.MaxConnections).Msg("max connection set")
+			llog.Debug().Int("max-conn", pool.MaxConnections).Msg("max connection set")
 			g.conn.SetMaxOpenConns(pool.MaxConnections)
 		}
 
 		if pool.MaxIdleConnections > 0 {
-			l.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("max idle connection set")
+			llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("max idle connection set")
 			g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
 		}
 
 		if pool.ConnMaxLifeTime > 0 {
-			l.Debug().Int("conn-max-life-time", pool.ConnMaxLifeTime).
+			llog.Debug().Int("conn-max-life-time", pool.ConnMaxLifeTime).
 				Msg("connection max life time set")
 			g.conn.SetConnMaxLifetime(time.Duration(pool.ConnMaxLifeTime) * time.Second)
 		}
@@ -147,9 +147,11 @@ func (g *genericLoader) executeInitialQuery(ctx context.Context, sql string, con
 	rows, err := conn.QueryxContext(lctx, sql)
 	if rows != nil {
 		rows.Close()
+
+		return nil
 	}
 
-	return err
+	return fmt.Errorf("query error: %w", err)
 }
 
 // Query get data from database.

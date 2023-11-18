@@ -37,7 +37,7 @@ type resultTmplData struct {
 func FormatResult(ctx context.Context, qr *QueryResult, query *conf.Query,
 	db *conf.Database,
 ) ([]byte, error) {
-	r := &resultTmplData{
+	res := &resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,
 		R:              qr.Records,
@@ -50,8 +50,7 @@ func FormatResult(ctx context.Context, qr *QueryResult, query *conf.Query,
 
 	var output bytes.Buffer
 
-	err := query.MetricTpl.Execute(&output, r)
-	if err != nil {
+	if err := query.MetricTpl.Execute(&output, res); err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 

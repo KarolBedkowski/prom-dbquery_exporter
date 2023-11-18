@@ -77,6 +77,8 @@ type dbLoader struct {
 	active     bool
 }
 
+const tasksQueueSize = 10
+
 func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 	loader, err := newLoader(cfg)
 	if err != nil {
@@ -87,7 +89,7 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 		dbName: name,
 		loader: loader,
 
-		tasks:      make(chan *DBTask, 20),
+		tasks:      make(chan *DBTask, tasksQueueSize),
 		stopCh:     make(chan struct{}, 1),
 		numWorkers: 0,
 		cfg:        cfg,
@@ -117,6 +119,10 @@ func (d *dbLoader) start() error {
 }
 
 func (d *dbLoader) stop() error {
+	if !d.active {
+		return errors.New("already stopped")
+	}
+
 	numWorkers := int(d.numWorkers)
 	d.active = false
 
@@ -129,11 +135,14 @@ func (d *dbLoader) stop() error {
 func (d *dbLoader) worker(idx int) {
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
 	atomic.AddInt32(&d.numWorkers, 1)
+
 	for {
 		select {
 		case <-d.stopCh:
 			wlog.Debug().Msg("stop worker")
+
 			numWorkers := int(atomic.AddInt32(&d.numWorkers, -1))
+
 			switch {
 			case numWorkers < 0:
 				wlog.Error().Msg("num workers <0")
@@ -142,6 +151,7 @@ func (d *dbLoader) worker(idx int) {
 					wlog.Error().Err(err).Msg("close loader error")
 				}
 			}
+
 			return
 
 		case task := <-d.tasks:
@@ -150,12 +160,14 @@ func (d *dbLoader) worker(idx int) {
 			select {
 			case <-task.Ctx.Done():
 				wlog.Info().Msg("task cancelled")
+
 				continue
 			default:
 				result, err := d.loader.Query(task.Ctx, task.Query, task.Params)
 				if err != nil {
 					metrics.IncProcessErrorsCnt("query")
 					task.Output <- task.newResult(fmt.Errorf("query error: %w", err), nil)
+
 					continue
 				}
 
@@ -165,6 +177,7 @@ func (d *dbLoader) worker(idx int) {
 				if err != nil {
 					metrics.IncProcessErrorsCnt("format")
 					task.Output <- task.newResult(fmt.Errorf("format error: %w", err), nil)
+
 					continue
 				}
 
@@ -203,12 +216,14 @@ func (d *Databases) createLoader(dbName string) (*dbLoader, error) {
 	}
 
 	var err error
+
 	dl, err := newDBLoader(dbName, dconf)
 	if err != nil {
 		return nil, fmt.Errorf("create dbloader error: %w", err)
 	}
 
 	d.dbs[dbName] = dl
+
 	return dl, nil
 }
 
@@ -219,25 +234,28 @@ func (d *Databases) PutTask(task *DBTask) error {
 
 	dbName := task.DBName
 
-	dl, ok := d.dbs[dbName]
+	dbloader, ok := d.dbs[dbName]
 	if !ok {
 		var err error
-		dl, err = d.createLoader(dbName)
+
+		dbloader, err = d.createLoader(dbName)
+
 		if err != nil {
 			return err
 		}
 	}
 
-	if !dl.active {
-		if err := dl.start(); err != nil {
-			if errs := dl.stop(); errs != nil {
+	if !dbloader.active {
+		if err := dbloader.start(); err != nil {
+			if errs := dbloader.stop(); errs != nil {
 				err = errors.Join(err, errs)
 			}
+
 			return fmt.Errorf("start dbloader error: %w", err)
 		}
 	}
 
-	dl.tasks <- task
+	dbloader.tasks <- task
 
 	return nil
 }
@@ -256,8 +274,10 @@ func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 		if db, ok := d.dbs[k]; ok {
 			if db.loader.UpdateConf(dbConf) {
 				d.log.Info().Str("db", k).Msg("configuration changed")
+
 				db.cfg = dbConf
-				db.stop()
+
+				_ = db.stop()
 			}
 		}
 	}
@@ -266,7 +286,8 @@ func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 	for k, db := range d.dbs {
 		if _, ok := cfg.Database[k]; !ok {
 			d.log.Info().Str("db", k).Msg("stopping db")
-			db.stop()
+
+			_ = db.stop()
 		}
 	}
 
@@ -281,11 +302,12 @@ func (d *Databases) Close() {
 
 	for k, db := range d.dbs {
 		d.log.Info().Str("db", k).Msg("stopping db")
-		db.stop()
+
+		_ = db.stop()
 	}
 }
 
-// loadersInPool return number or loaders in pool
+// loadersInPool return number or loaders in pool.
 func (d *Databases) loadersInPool() float64 {
 	d.Lock()
 	defer d.Unlock()
@@ -293,7 +315,7 @@ func (d *Databases) loadersInPool() float64 {
 	return float64(len(d.dbs))
 }
 
-// loadersStats return stats for each loaders
+// loadersStats return stats for each loaders.
 func (d *Databases) loadersStats() []*LoaderStats {
 	d.Lock()
 	defer d.Unlock()
@@ -309,11 +331,12 @@ func (d *Databases) loadersStats() []*LoaderStats {
 	return stats
 }
 
-// DatabasesPool is global handler for all db queries
+// DatabasesPool is global handler for all db queries.
 var DatabasesPool *Databases
 
-// Init db subsystem
+// Init db subsystem.
 func Init() {
 	DatabasesPool = newDatabases()
+
 	initMetrics()
 }

@@ -1,5 +1,12 @@
 package db
 
+//
+// loaders.go
+// Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
+//
+// Distributed under terms of the GPLv3 license.
+//
+
 import (
 	"errors"
 	"fmt"
@@ -9,21 +16,18 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-//
-// loaders.go
-// Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
-//
-// Distributed under terms of the GPLv3 license.
-//
-
-func newPostgresLoader(d *conf.Database) (Loader, error) {
+func newPostgresLoader(cfg *conf.Database) (Loader, error) {
 	var connStr string
-	if val, ok := d.Connection["connstr"]; ok && val != "" {
-		connStr = val.(string)
-	} else {
-		p := make([]string, 0, len(d.Connection))
+	if val, ok := cfg.Connection["connstr"]; ok && val != "" {
+		connStr, ok = val.(string)
 
-		for k, v := range d.Connection {
+		if !ok {
+			return nil, fmt.Errorf("invalid 'connstr' value: %v", val)
+		}
+	} else {
+		p := make([]string, 0, len(cfg.Connection))
+
+		for k, v := range cfg.Connection {
 			if v != nil {
 				vstr := fmt.Sprintf("%v", v)
 				vstr = strings.ReplaceAll(vstr, "'", "\\'")
@@ -39,19 +43,19 @@ func newPostgresLoader(d *conf.Database) (Loader, error) {
 	l := &genericLoader{
 		connStr:    connStr,
 		driver:     "postgres",
-		initialSQL: d.InitialQuery,
-		dbConf:     d,
+		initialSQL: cfg.InitialQuery,
+		dbConf:     cfg,
 	}
 
 	return l, nil
 }
 
-func newSqliteLoader(d *conf.Database) (Loader, error) {
-	p := url.Values{}
+func newSqliteLoader(cfg *conf.Database) (Loader, error) {
+	params := url.Values{}
 
 	var dbname string
 
-	for k, v := range d.Connection {
+	for k, v := range cfg.Connection {
 		vstr := ""
 		if v != nil {
 			vstr = fmt.Sprintf("%v", v)
@@ -60,12 +64,12 @@ func newSqliteLoader(d *conf.Database) (Loader, error) {
 		if k == "database" {
 			dbname = vstr
 		} else {
-			p.Add(k, vstr)
+			params.Add(k, vstr)
 		}
 	}
 
 	if dbname == "" {
-		return nil, errors.New("missing database")
+		return nil, ErrNoDatabaseName
 	}
 
 	var connstr strings.Builder
@@ -73,37 +77,38 @@ func newSqliteLoader(d *conf.Database) (Loader, error) {
 	connstr.WriteString("file:")
 	connstr.WriteString(dbname)
 
-	if len(p) > 0 {
+	if len(params) > 0 {
 		connstr.WriteRune('?')
-		connstr.WriteString(p.Encode())
+		connstr.WriteString(params.Encode())
 	}
 
 	// glebarez/go-sqlite uses 'sqlite', mattn/go-sqlite3 - 'sqlite3'
 	l := &genericLoader{
-		connStr: connstr.String(), driver: "sqlite", initialSQL: d.InitialQuery,
-		dbConf: d,
+		connStr: connstr.String(), driver: "sqlite", initialSQL: cfg.InitialQuery,
+		dbConf: cfg,
 	}
-	if len(p) > 0 {
-		l.connStr += "?" + p.Encode()
+
+	if len(params) > 0 {
+		l.connStr += "?" + params.Encode()
 	}
 
 	return l, nil
 }
 
-func newMysqlLoader(d *conf.Database) (Loader, error) {
-	p := url.Values{}
+func newMysqlLoader(cfg *conf.Database) (Loader, error) {
+	params := url.Values{}
 	host := "localhost"
 	port := "3306"
 
 	var dbname, user, pass string
 
-	for k, v := range d.Connection {
+	for key, val := range cfg.Connection {
 		vstr := ""
-		if v != nil {
-			vstr = fmt.Sprintf("%v", v)
+		if val != nil {
+			vstr = fmt.Sprintf("%v", val)
 		}
 
-		switch k {
+		switch key {
 		case "database":
 			dbname = url.PathEscape(vstr)
 		case "host":
@@ -115,15 +120,16 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 		case "password":
 			pass = url.PathEscape(vstr)
 		default:
-			p.Add(k, vstr)
+			params.Add(key, vstr)
 		}
 	}
 
 	if dbname == "" {
-		return nil, errors.New("missing database")
+		return nil, ErrNoDatabaseName
 	}
 
 	var connstr strings.Builder
+
 	if user != "" {
 		connstr.WriteString(user)
 
@@ -142,31 +148,31 @@ func newMysqlLoader(d *conf.Database) (Loader, error) {
 	connstr.WriteString(")/")
 	connstr.WriteString(dbname)
 
-	if len(p) > 0 {
+	if len(params) > 0 {
 		connstr.WriteRune('?')
-		connstr.WriteString(p.Encode())
+		connstr.WriteString(params.Encode())
 	}
 
 	l := &genericLoader{
-		connStr: connstr.String(), driver: "mysql", initialSQL: d.InitialQuery,
-		dbConf: d,
+		connStr: connstr.String(), driver: "mysql", initialSQL: cfg.InitialQuery,
+		dbConf: cfg,
 	}
 
 	return l, nil
 }
 
-func newOracleLoader(d *conf.Database) (Loader, error) {
-	p := url.Values{}
+func newOracleLoader(cfg *conf.Database) (Loader, error) {
+	params := url.Values{}
 
 	var dbname, user, pass, host, port string
 
-	for k, v := range d.Connection {
+	for key, val := range cfg.Connection {
 		vstr := ""
-		if v != nil {
-			vstr = fmt.Sprintf("%v", v)
+		if val != nil {
+			vstr = fmt.Sprintf("%v", val)
 		}
 
-		switch k {
+		switch key {
 		case "database":
 			dbname = url.PathEscape(vstr)
 		case "host":
@@ -178,12 +184,12 @@ func newOracleLoader(d *conf.Database) (Loader, error) {
 		case "password":
 			pass = url.PathEscape(vstr)
 		default:
-			p.Add(k, vstr)
+			params.Add(key, vstr)
 		}
 	}
 
 	if dbname == "" {
-		return nil, errors.New("missing database")
+		return nil, ErrNoDatabaseName
 	}
 
 	var connstr strings.Builder
@@ -211,27 +217,27 @@ func newOracleLoader(d *conf.Database) (Loader, error) {
 	connstr.WriteRune('/')
 	connstr.WriteString(dbname)
 
-	if len(p) > 0 {
+	if len(params) > 0 {
 		connstr.WriteRune('?')
-		connstr.WriteString(p.Encode())
+		connstr.WriteString(params.Encode())
 	}
 
 	l := &genericLoader{
-		connStr: connstr.String(), driver: "oracle", initialSQL: d.InitialQuery,
-		dbConf: d,
+		connStr: connstr.String(), driver: "oracle", initialSQL: cfg.InitialQuery,
+		dbConf: cfg,
 	}
 
 	return l, nil
 }
 
-func newMssqlLoader(d *conf.Database) (Loader, error) {
-	p := url.Values{}
+func newMssqlLoader(cfg *conf.Database) (Loader, error) {
+	params := url.Values{}
 	databaseConfigured := false
 
-	for k, v := range d.Connection {
+	for k, v := range cfg.Connection {
 		if v != nil {
 			vstr := fmt.Sprintf("%v", v)
-			p.Add(k, vstr)
+			params.Add(k, vstr)
 
 			if k == "database" {
 				databaseConfigured = true
@@ -243,30 +249,30 @@ func newMssqlLoader(d *conf.Database) (Loader, error) {
 		return nil, errors.New("missing database")
 	}
 
-	connstr := p.Encode()
+	connstr := params.Encode()
 
 	l := &genericLoader{
-		connStr: connstr, driver: "mssql", initialSQL: d.InitialQuery,
-		dbConf: d,
+		connStr: connstr, driver: "mssql", initialSQL: cfg.InitialQuery,
+		dbConf: cfg,
 	}
 
 	return l, nil
 }
 
 // newLoader returns configured Loader for given configuration.
-func newLoader(d *conf.Database) (Loader, error) {
-	switch d.Driver {
+func newLoader(cfg *conf.Database) (Loader, error) {
+	switch cfg.Driver {
 	case "postgresql", "postgres", "cockroach", "cockroachdb":
-		return newPostgresLoader(d)
+		return newPostgresLoader(cfg)
 	case "sqlite3", "sqlite":
-		return newSqliteLoader(d)
+		return newSqliteLoader(cfg)
 	case "mysql", "mariadb", "tidb":
-		return newMysqlLoader(d)
+		return newMysqlLoader(cfg)
 	case "oracle", "oci8":
-		return newOracleLoader(d)
+		return newOracleLoader(cfg)
 	case "mssql":
-		return newMssqlLoader(d)
+		return newMssqlLoader(cfg)
 	}
 
-	return nil, fmt.Errorf("unsupported database type '%s'", d.Driver)
+	return nil, fmt.Errorf("unsupported database type '%s'", cfg.Driver)
 }
