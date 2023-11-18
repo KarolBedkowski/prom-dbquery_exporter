@@ -8,15 +8,12 @@ package handlers
 //
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"sync"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
@@ -68,6 +65,8 @@ type (
 
 		// runningQuery lock the same request for running twice
 		queryLocker locker
+
+		dbs *db.Databases
 	}
 )
 
@@ -80,6 +79,7 @@ func newQueryHandler(c *conf.Configuration, disableParallel bool,
 		disableParallel:       disableParallel,
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
+		dbs:                   db.NewDatabases(c),
 	}
 }
 
@@ -101,112 +101,112 @@ func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	queryResultCache.Clear()
 }
 
-func (q *queryHandler) query(ctx context.Context, loader db.Loader,
-	database *conf.Database, queryName string,
-	params map[string]string,
-) ([]byte, error) {
-	query, ok := (q.configuration.Query)[queryName]
-	if !ok {
-		return nil, fmt.Errorf("unknown query '%s'", queryName)
-	}
+// func (q *queryHandler) query(ctx context.Context, loader db.Loader,
+// 	database *conf.Database, queryName string,
+// 	params map[string]string,
+// ) ([]byte, error) {
+// 	query, ok := (q.configuration.Query)[queryName]
+// 	if !ok {
+// 		return nil, fmt.Errorf("unknown query '%s'", queryName)
+// 	}
 
-	logger := log.Ctx(ctx)
+// 	logger := log.Ctx(ctx)
 
-	metrics.IncQueryTotalCnt(queryName, database.Name)
-	queryKey := queryName + "@" + database.Name
+// 	metrics.IncQueryTotalCnt(queryName, database.Name)
+// 	queryKey := queryName + "@" + database.Name
 
-	logger.Debug().Msg("query start")
+// 	logger.Debug().Msg("query start")
 
-	// try to get item from cache
-	if query.CachingTime > 0 && !q.disableCache {
-		if data, ok := queryResultCache.Get(queryKey); ok {
-			metrics.IncQueryCacheHits()
-			logger.Debug().Msg("query result from cache")
+// 	// try to get item from cache
+// 	if query.CachingTime > 0 && !q.disableCache {
+// 		if data, ok := queryResultCache.Get(queryKey); ok {
+// 			metrics.IncQueryCacheHits()
+// 			logger.Debug().Msg("query result from cache")
 
-			return data, nil
-		}
-	}
+// 			return data, nil
+// 		}
+// 	}
 
-	result, err := loader.Query(ctx, query, params)
-	if err != nil {
-		metrics.IncProcessErrorsCnt("query")
-		return nil, fmt.Errorf("query error: %w", err)
-	}
+// 	result, err := loader.Query(ctx, query, params)
+// 	if err != nil {
+// 		metrics.IncProcessErrorsCnt("query")
+// 		return nil, fmt.Errorf("query error: %w", err)
+// 	}
 
-	logger.Debug().
-		Int("records", len(result.Records)).
-		Float64("duration", result.Duration).
-		Msg("query finished")
+// 	logger.Debug().
+// 		Int("records", len(result.Records)).
+// 		Float64("duration", result.Duration).
+// 		Msg("query finished")
 
-	// format metrics
-	output, err := db.FormatResult(ctx, result, query, database)
-	if err != nil {
-		metrics.IncProcessErrorsCnt("format")
-		return nil, fmt.Errorf("format result error: %w", err)
-	}
+// 	// format metrics
+// 	output, err := db.FormatResult(ctx, result, query, database)
+// 	if err != nil {
+// 		metrics.IncProcessErrorsCnt("format")
+// 		return nil, fmt.Errorf("format result error: %w", err)
+// 	}
 
-	if q.validateOutputEnabled {
-		var parser expfmt.TextParser
-		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
-			return nil, fmt.Errorf("validate result error: %w", err)
-		}
-	}
+// 	if q.validateOutputEnabled {
+// 		var parser expfmt.TextParser
+// 		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
+// 			return nil, fmt.Errorf("validate result error: %w", err)
+// 		}
+// 	}
 
-	if query.CachingTime > 0 && !q.disableCache {
-		// update cache
-		queryResultCache.Put(queryKey, query.CachingTime, output)
-	}
+// 	if query.CachingTime > 0 && !q.disableCache {
+// 		// update cache
+// 		queryResultCache.Put(queryKey, query.CachingTime, output)
+// 	}
 
-	metrics.ObserveQueryDuration(queryName, database.Name, result.Duration)
+// 	metrics.ObserveQueryDuration(queryName, database.Name, result.Duration)
 
-	return output, nil
-}
+// 	return output, nil
+// }
 
-func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
-	queryNames []string, params map[string]string, w chan []byte,
-) error {
-	d, ok := q.configuration.Database[dbName]
-	if !ok {
-		return fmt.Errorf("unknown database '%s'", dbName)
-	}
+// func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
+// 	queryNames []string, params map[string]string, w chan []byte,
+// ) error {
+// 	d, ok := q.configuration.Database[dbName]
+// 	if !ok {
+// 		return fmt.Errorf("unknown database '%s'", dbName)
+// 	}
 
-	logger := log.Ctx(ctx)
-	logger.Debug().Msg("start processing database")
+// 	logger := log.Ctx(ctx)
+// 	logger.Debug().Msg("start processing database")
 
-	loader, err := db.GetLoader(d)
-	if err != nil {
-		return fmt.Errorf("get loader error: %w", err)
-	}
+// 	loader, err := db.GetLoader(d)
+// 	if err != nil {
+// 		return fmt.Errorf("get loader error: %w", err)
+// 	}
 
-	logger.Debug().Str("loader", loader.String()).Msg("loader created")
+// 	logger.Debug().Str("loader", loader.String()).Msg("loader created")
 
-	for _, queryName := range queryNames {
-		loggerQ := logger.With().Str("query", queryName).Logger()
+// 	for _, queryName := range queryNames {
+// 		loggerQ := logger.With().Str("query", queryName).Logger()
 
-		ctxQuery := loggerQ.WithContext(ctx)
-		if output, err := q.query(ctxQuery, loader, d, queryName, params); err == nil {
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("client disconnected: %w", ctx.Err())
-			default:
-			}
+// 		ctxQuery := loggerQ.WithContext(ctx)
+// 		if output, err := q.query(ctxQuery, loader, d, queryName, params); err == nil {
+// 			select {
+// 			case <-ctx.Done():
+// 				return fmt.Errorf("client disconnected: %w", ctx.Err())
+// 			default:
+// 			}
 
-			w <- output
+// 			w <- output
 
-			if err != nil {
-				metrics.IncProcessErrorsCnt("write")
-				return fmt.Errorf("write result error: %w", err)
-			}
-		} else {
-			loggerQ.Error().Err(err).Msg("make query error")
-			// to not break processing other queries when query fail
-		}
-	}
+// 			if err != nil {
+// 				metrics.IncProcessErrorsCnt("write")
+// 				return fmt.Errorf("write result error: %w", err)
+// 			}
+// 		} else {
+// 			loggerQ.Error().Err(err).Msg("make query error")
+// 			// to not break processing other queries when query fail
+// 		}
+// 	}
 
-	logger.Debug().Msg("database processing finished")
+// 	logger.Debug().Msg("database processing finished")
 
-	return nil
-}
+// 	return nil
+// }
 
 // queryDatabasesSeq query all given databases sequentially.
 func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
@@ -215,56 +215,65 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
 
+	output := make(chan *db.DBTaskResult)
+
+	scheduled := 0
+
 	for _, dbName := range dbNames {
-		// check is client is still connected
-		select {
-		case <-ctx.Done():
-			logger.Info().Err(ctx.Err()).Msg("context closed")
-			return
-		default:
-		}
+		for _, queryName := range queryNames {
 
-		logger := logger.With().Str("db", dbName).Logger()
-		ctx := logger.WithContext(ctx)
+			queryKey := queryName + "@" + dbName
 
-		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
-			logger.Warn().Err(err).Msg("query database error")
-			metrics.IncQueryTotalErrCnt(dbName)
-		}
-	}
-
-	close(w)
-}
-
-// queryDatabasesPar query all databases in parallel.
-func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]string, w chan []byte,
-) {
-	logger := zerolog.Ctx(ctx)
-
-	logger.Debug().Msg("database parallel processing start")
-
-	// number of successful processes databases
-
-	var waitGroup sync.WaitGroup
-	// query databases parallel
-	for _, dbName := range dbNames {
-		waitGroup.Add(1)
-
-		logger := logger.With().Str("db", dbName).Logger()
-		ctx := logger.WithContext(ctx)
-
-		go func(ctx context.Context, dbName string) {
-			defer waitGroup.Done()
-
-			if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
-				zerolog.Ctx(ctx).Warn().Err(err).Msg("query database error")
-				metrics.IncQueryTotalErrCnt(dbName)
+			query, ok := (q.configuration.Query)[queryName]
+			if !ok {
+				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("unknown query")
 			}
-		}(ctx, dbName)
+
+			if query.CachingTime > 0 && !q.disableCache {
+				if data, ok := queryResultCache.Get(queryKey); ok {
+					logger.Debug().Msg("query result from cache")
+					w <- data
+					continue
+				}
+			}
+
+			task := db.DBTask{
+				Ctx:       ctx,
+				DBName:    dbName,
+				QueryName: queryName,
+				Params:    params,
+				Output:    output,
+				Query:     query,
+			}
+
+			if err := q.dbs.PutTask(&task); err != nil {
+				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).Msg("start task error")
+			} else {
+				scheduled++
+			}
+		}
 	}
 
-	waitGroup.Wait()
+loop:
+	for scheduled > 0 {
+		select {
+		case res := <-output:
+			scheduled--
+			if res.Error != nil {
+				logger.Error().Err(res.Error).Msg("result error")
+			} else {
+				w <- res.Result
+				if res.Query.CachingTime > 0 && !q.disableCache {
+					queryKey := res.QueryName + "@" + res.DBName
+					queryResultCache.Put(queryKey, res.Query.CachingTime, res.Result)
+				}
+			}
+		case <-ctx.Done():
+			logger.Error().Err(ctx.Err()).Msg("result error")
+			break loop
+		}
+	}
+
 	close(w)
 }
 
@@ -316,13 +325,7 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		finish <- cnt
 	}()
 
-	if q.disableParallel || len(dbNames) == 1 {
-		q.queryDatabasesSeq(ctx, dbNames, queryNames, params, outputChannel)
-	} else {
-		q.queryDatabasesPar(ctx, dbNames, queryNames, params, outputChannel)
-	}
-
-	time.Sleep(time.Duration(15) * time.Second)
+	q.queryDatabasesSeq(ctx, dbNames, queryNames, params, outputChannel)
 
 	successProcessed := 0
 
