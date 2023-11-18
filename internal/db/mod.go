@@ -9,7 +9,6 @@ package db
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -21,8 +20,8 @@ import (
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-// DBTask is query to perform.
-type DBTask struct {
+// Task is query to perform.
+type Task struct {
 	Ctx context.Context
 
 	DBName    string
@@ -31,11 +30,11 @@ type DBTask struct {
 	Query  *conf.Query
 	Params map[string]string
 
-	Output chan *DBTaskResult
+	Output chan *TaskResult
 }
 
-func (d *DBTask) newResult(err error, result []byte) *DBTaskResult {
-	return &DBTaskResult{
+func (d *Task) newResult(err error, result []byte) *TaskResult {
+	return &TaskResult{
 		Error:     err,
 		Result:    result,
 		DBName:    d.DBName,
@@ -44,7 +43,7 @@ func (d *DBTask) newResult(err error, result []byte) *DBTaskResult {
 	}
 }
 
-func (d DBTask) MarshalZerologObject(e *zerolog.Event) {
+func (d Task) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("db", d.DBName).
 		Str("query", d.QueryName).
 		Interface("params", d.Params)
@@ -54,8 +53,8 @@ func (d DBTask) MarshalZerologObject(e *zerolog.Event) {
 	}
 }
 
-// DBTaskResult is query result.
-type DBTaskResult struct {
+// TaskResult is query result.
+type TaskResult struct {
 	Error  error
 	Result []byte
 
@@ -68,7 +67,7 @@ type dbLoader struct {
 	dbName string
 
 	loader     Loader
-	tasks      chan *DBTask
+	tasks      chan *Task
 	stopCh     chan struct{}
 	newConfCh  chan *conf.Database
 	numWorkers int32
@@ -89,7 +88,7 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 		dbName: name,
 		loader: loader,
 
-		tasks:      make(chan *DBTask, tasksQueueSize),
+		tasks:      make(chan *Task, tasksQueueSize),
 		stopCh:     make(chan struct{}, 1),
 		numWorkers: 0,
 		cfg:        cfg,
@@ -99,7 +98,7 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 	return dbl, nil
 }
 
-func (d *dbLoader) start() error {
+func (d *dbLoader) start() {
 	d.log.Debug().Msg("starting")
 
 	numWorkers := 1
@@ -114,13 +113,11 @@ func (d *dbLoader) start() error {
 	for i := 0; i < numWorkers; i++ {
 		go d.worker(i)
 	}
-
-	return nil
 }
 
 func (d *dbLoader) stop() error {
 	if !d.active {
-		return errors.New("already stopped")
+		return ErrLoaderStopped
 	}
 
 	numWorkers := int(d.numWorkers)
@@ -163,31 +160,34 @@ func (d *dbLoader) worker(idx int) {
 
 				continue
 			default:
-				result, err := d.loader.Query(task.Ctx, task.Query, task.Params)
-				if err != nil {
-					metrics.IncProcessErrorsCnt("query")
-					task.Output <- task.newResult(fmt.Errorf("query error: %w", err), nil)
-
-					continue
-				}
-
-				wlog.Debug().Interface("task", task).Msg("result received")
-
-				output, err := FormatResult(task.Ctx, result, task.Query, d.cfg)
-				if err != nil {
-					metrics.IncProcessErrorsCnt("format")
-					task.Output <- task.newResult(fmt.Errorf("format error: %w", err), nil)
-
-					continue
-				}
-
-				wlog.Debug().Interface("task", task).Msg("result formatted")
-				metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
-
-				task.Output <- task.newResult(nil, output)
+				d.handleTask(wlog, task)
 			}
 		}
 	}
+}
+
+func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
+	result, err := d.loader.Query(task.Ctx, task.Query, task.Params)
+	if err != nil {
+		metrics.IncProcessErrorsCnt("query")
+		task.Output <- task.newResult(fmt.Errorf("query error: %w", err), nil)
+
+		return
+	}
+
+	wlog.Debug().Interface("task", task).Msg("result received")
+
+	output, err := FormatResult(task.Ctx, result, task.Query, d.cfg)
+	if err != nil {
+		metrics.IncProcessErrorsCnt("format")
+		task.Output <- task.newResult(fmt.Errorf("format error: %w", err), nil)
+
+		return
+	}
+
+	wlog.Debug().Interface("task", task).Msg("result formatted")
+	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
+	task.Output <- task.newResult(nil, output)
 }
 
 // Databases is collection of all configured databases.
@@ -212,7 +212,7 @@ func newDatabases() *Databases {
 func (d *Databases) createLoader(dbName string) (*dbLoader, error) {
 	dconf, ok := d.cfg.Database[dbName]
 	if !ok {
-		return nil, fmt.Errorf("unknown database '%s'", dbName)
+		return nil, ErrUnknownDatabase
 	}
 
 	var err error
@@ -228,7 +228,7 @@ func (d *Databases) createLoader(dbName string) (*dbLoader, error) {
 }
 
 // PutTask schedule new task.
-func (d *Databases) PutTask(task *DBTask) error {
+func (d *Databases) PutTask(task *Task) error {
 	d.Lock()
 	defer d.Unlock()
 
@@ -246,13 +246,7 @@ func (d *Databases) PutTask(task *DBTask) error {
 	}
 
 	if !dbloader.active {
-		if err := dbloader.start(); err != nil {
-			if errs := dbloader.stop(); errs != nil {
-				err = errors.Join(err, errs)
-			}
-
-			return fmt.Errorf("start dbloader error: %w", err)
-		}
+		dbloader.start()
 	}
 
 	dbloader.tasks <- task

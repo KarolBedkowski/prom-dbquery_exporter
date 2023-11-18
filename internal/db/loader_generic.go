@@ -146,12 +146,14 @@ func (g *genericLoader) executeInitialQuery(ctx context.Context, sql string, con
 
 	rows, err := conn.QueryxContext(lctx, sql)
 	if rows != nil {
-		rows.Close()
-
-		return nil
+		defer rows.Close()
 	}
 
-	return fmt.Errorf("query error: %w", err)
+	if err != nil {
+		return fmt.Errorf("query error: %w", err)
+	}
+
+	return nil
 }
 
 // Query get data from database.

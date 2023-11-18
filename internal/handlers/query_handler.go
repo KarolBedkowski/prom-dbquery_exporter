@@ -119,14 +119,14 @@ func (q *queryHandler) putInfoCache(query *conf.Query, dbName string, data []byt
 	}
 }
 
-// queryDatabasesSeq query all given databases sequentially.
-func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]string, w func([]byte),
-) {
+// queryDatabases query all given databases sequentially.
+func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
+	queryNames []string, params map[string]string,
+) (chan *db.TaskResult, int) {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
 
-	output := make(chan *db.DBTaskResult)
+	output := make(chan *db.TaskResult)
 
 	scheduled := 0
 
@@ -137,16 +137,18 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 			query, ok := (q.configuration.Query)[queryName]
 			if !ok {
 				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("unknown query")
+
 				continue
 			}
 
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Msg("query result from cache")
-				w(data)
+				output <- &db.TaskResult{Result: data}
+
 				continue
 			}
 
-			task := db.DBTask{
+			task := db.Task{
 				Ctx:       ctx,
 				DBName:    dbName,
 				QueryName: queryName,
@@ -164,6 +166,17 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 		}
 	}
 
+	return output, scheduled
+}
+
+func (q *queryHandler) writeResult(ctx context.Context, output chan *db.TaskResult, scheduled int,
+	writer http.ResponseWriter,
+) int {
+	logger := log.Ctx(ctx)
+	logger.Debug().Msg("database sequential processing start")
+
+	successProcessed := 0
+
 loop:
 	for scheduled > 0 {
 		select {
@@ -173,8 +186,16 @@ loop:
 			if res.Error != nil {
 				logger.Error().Err(res.Error).Msg("result error")
 			} else {
-				w(res.Result)
-				q.putInfoCache(res.Query, res.DBName, res.Result)
+				if _, err := writer.Write(res.Result); err != nil {
+					logger.Error().Err(err).Msg("write errror")
+					metrics.IncProcessErrorsCnt("write")
+				} else {
+					successProcessed++
+				}
+
+				if res.Query != nil {
+					q.putInfoCache(res.Query, res.DBName, res.Result)
+				}
 			}
 		case <-ctx.Done():
 			logger.Error().Err(ctx.Err()).Msg("result error")
@@ -184,9 +205,11 @@ loop:
 	}
 
 	close(output)
+
+	return successProcessed
 }
 
-func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	logger := log.Ctx(ctx)
 
@@ -203,14 +226,14 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(queryNames) == 0 || len(dbNames) == 0 {
-		http.Error(w, "missing required parameters", http.StatusBadRequest)
+		http.Error(writer, "missing required parameters", http.StatusBadRequest)
 
 		return
 	}
 
 	// prevent to run the same request twice
 	if err := q.queryLocker.tryLock(r.URL.RawQuery, requestID.String()); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(writer, err.Error(), http.StatusInternalServerError)
 
 		return
 	}
@@ -221,27 +244,17 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	queryNames = deduplicateStringList(queryNames)
 	dbNames = deduplicateStringList(dbNames)
 
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	successProcessed := 0
-
-	writer := func(data []byte) {
-		if _, err := w.Write(data); err != nil {
-			logger.Error().Err(err).Msg("write errror")
-			metrics.IncProcessErrorsCnt("write")
-		} else {
-			successProcessed++
-		}
-	}
-
-	q.queryDatabasesSeq(ctx, dbNames, queryNames, params, writer)
+	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params)
+	successProcessed := q.writeResult(ctx, out, scheduled, writer)
 
 	logger.Debug().Int("successProcessed", successProcessed).
 		Msg("all database queries finished")
 
 	if successProcessed == 0 {
 		metrics.IncProcessErrorsCnt("bad_requests")
-		http.Error(w, "error", http.StatusBadRequest)
+		http.Error(writer, "error", http.StatusBadRequest)
 	}
 }
 

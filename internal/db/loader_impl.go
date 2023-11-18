@@ -8,7 +8,6 @@ package db
 //
 
 import (
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -22,7 +21,7 @@ func newPostgresLoader(cfg *conf.Database) (Loader, error) {
 		connStr, ok = val.(string)
 
 		if !ok {
-			return nil, fmt.Errorf("invalid 'connstr' value: %v", val)
+			return nil, InvalidConfigrationError(fmt.Sprintf("invalid 'connstr' value: %v", val))
 		}
 	} else {
 		p := make([]string, 0, len(cfg.Connection))
@@ -246,7 +245,7 @@ func newMssqlLoader(cfg *conf.Database) (Loader, error) {
 	}
 
 	if !databaseConfigured {
-		return nil, errors.New("missing database")
+		return nil, InvalidConfigrationError("missing database")
 	}
 
 	connstr := params.Encode()
@@ -274,5 +273,5 @@ func newLoader(cfg *conf.Database) (Loader, error) {
 		return newMssqlLoader(cfg)
 	}
 
-	return nil, fmt.Errorf("unsupported database type '%s'", cfg.Driver)
+	return nil, InvalidConfigrationError(fmt.Sprintf("unsupported database type '%s'", cfg.Driver))
 }

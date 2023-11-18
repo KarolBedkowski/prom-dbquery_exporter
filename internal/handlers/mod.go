@@ -20,6 +20,12 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
+const (
+	rwTimeout       = 10 * time.Second
+	maxHeaderBytes  = 1 << 20
+	shutdownTimeout = time.Duration(10) * time.Second
+)
+
 // WebHandler manage http handlers.
 type WebHandler struct {
 	handler       *queryHandler
@@ -39,7 +45,7 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 	ih := newInfoHandler(c)
 	http.Handle("/info", ih.Handler())
 
-	wh := &WebHandler{
+	webHandler := &WebHandler{
 		handler:       qh,
 		infoHandler:   ih,
 		listenAddress: listenAddress,
@@ -62,14 +68,20 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 		_, _ = w.Write([]byte("ok"))
 	})
 
-	return wh
+	return webHandler
 }
 
 // Run webhandler.
 func (w *WebHandler) Run() error {
 	log.Logger.Info().Msgf("Listening on %s", w.listenAddress)
 
-	w.server = &http.Server{Addr: w.listenAddress}
+	w.server = &http.Server{
+		Addr:           w.listenAddress,
+		ReadTimeout:    rwTimeout,
+		WriteTimeout:   rwTimeout,
+		MaxHeaderBytes: maxHeaderBytes,
+	}
+
 	if err := listenAndServe(w.server, w.webConfig); err != nil {
 		return fmt.Errorf("listen and serve failed: %w", err)
 	}
@@ -79,12 +91,14 @@ func (w *WebHandler) Run() error {
 
 // Close stop listen webhandler.
 func (w *WebHandler) Close(err error) {
+	_ = err
+
 	log.Logger.Debug().Msg("web handler close")
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(10)*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	w.server.Shutdown(ctx)
+	_ = w.server.Shutdown(ctx)
 }
 
 // ReloadConf reload configuration in all handlers.

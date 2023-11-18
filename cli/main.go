@@ -72,12 +72,12 @@ func Main() {
 	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableParallel,
 		*disableCache, *validateOutput)
 
-	var g run.Group
+	var runGroup run.Group
 	{
 		// Termination handler.
 		term := make(chan os.Signal, 1)
 		signal.Notify(term, os.Interrupt, syscall.SIGTERM)
-		g.Add(
+		runGroup.Add(
 			func() error {
 				<-term
 				log.Logger.Warn().Msg("Received SIGTERM, exiting...")
@@ -94,7 +94,7 @@ func Main() {
 		// Reload handler.
 		hup := make(chan os.Signal, 1)
 		signal.Notify(hup, syscall.SIGHUP)
-		g.Add(
+		runGroup.Add(
 			func() error {
 				for range hup {
 					log.Info().Msg("reloading configuration")
@@ -118,9 +118,9 @@ func Main() {
 		)
 	}
 
-	g.Add(webHandler.Run, webHandler.Close)
+	runGroup.Add(webHandler.Run, webHandler.Close)
 
-	if err := g.Run(); err != nil {
+	if err := runGroup.Run(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}

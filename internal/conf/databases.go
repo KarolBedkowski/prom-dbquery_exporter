@@ -77,34 +77,7 @@ func (d *Database) validatePG() error {
 	return nil
 }
 
-func (d *Database) validate() error {
-	if d.Driver == "" {
-		return MissingFieldError{"driver"}
-	}
-
-	if d.Pool != nil {
-		if err := d.Pool.validate(); err != nil {
-			return err
-		}
-	}
-
-	switch d.Driver {
-	case "postgresql", "postgres", "cockroach", "cockroachdb":
-		if err := d.validatePG(); err != nil {
-			return err
-		}
-	case "mysql", "mariadb", "tidb", "oracle", "oci8":
-		if err := d.CheckConnectionParam("database", "host", "port", "user", "password"); err != nil {
-			return err
-		}
-	case "sqlite3", "sqlite", "mssql":
-		if err := d.CheckConnectionParam("database"); err != nil {
-			return err
-		}
-	default:
-		return NewInvalidFieldError("database", "d.Driver").WithMsg("unknown database")
-	}
-
+func (d *Database) validateCommon() error {
 	if port, ok := d.Connection["port"]; ok {
 		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
 			return NewInvalidFieldError("port", port)
@@ -112,6 +85,33 @@ func (d *Database) validate() error {
 	}
 
 	return nil
+}
+
+func (d *Database) validate() error {
+	var err error
+
+	switch d.Driver {
+	case "":
+		err = MissingFieldError{"driver"}
+	case "postgresql", "postgres", "cockroach", "cockroachdb":
+		err = d.validatePG()
+	case "mysql", "mariadb", "tidb", "oracle", "oci8":
+		err = d.CheckConnectionParam("database", "host", "port", "user", "password")
+	case "sqlite3", "sqlite", "mssql":
+		err = d.CheckConnectionParam("database")
+	default:
+		err = NewInvalidFieldError("database", "d.Driver").WithMsg("unknown database")
+	}
+
+	if err == nil && d.Pool != nil {
+		err = d.Pool.validate()
+	}
+
+	if err == nil {
+		err = d.validateCommon()
+	}
+
+	return err
 }
 
 // CheckConnectionParam return true when all keys exists

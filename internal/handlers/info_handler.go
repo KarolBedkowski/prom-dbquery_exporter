@@ -95,6 +95,7 @@ func (q *infoHandler) Handler() http.Handler {
 
 	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
 	h = hlog.NewHandler(log.Logger)(h)
+
 	return h
 }
 

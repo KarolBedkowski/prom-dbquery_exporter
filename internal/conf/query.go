@@ -49,7 +49,6 @@ func (q *Query) validate() error {
 	tmpl, err := support.TemplateCompile(q.Name, m)
 	if err != nil {
 		return NewInvalidFieldError("metrics template", "").WithMsg(err.Error())
-		// fmt.Errorf("parsing error: %w", err))
 	}
 
 	q.MetricTpl = tmpl
