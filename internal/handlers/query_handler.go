@@ -10,11 +10,10 @@ package handlers
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"sync"
-	"sync/atomic"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/expfmt"
@@ -52,22 +51,11 @@ func (l *locker) tryLock(queryKey, reqID string) error {
 	return nil
 }
 
-func (l *locker) unlock(queryKey, reqID string) error {
+func (l *locker) unlock(queryKey string) {
 	l.Lock()
 	defer l.Unlock()
 
-	var err error
-
-	// unlock only own locks;
-	if rid, ok := l.runningQuery[queryKey]; ok {
-		if rid != reqID {
-			err = fmt.Errorf("running query (%s) not match current reqID", rid)
-		}
-
-		delete(l.runningQuery, queryKey)
-	}
-
-	return err
+	delete(l.runningQuery, queryKey)
 }
 
 // queryHandler handle all request for metrics.
@@ -175,7 +163,7 @@ func (q *queryHandler) query(ctx context.Context, loader db.Loader,
 }
 
 func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
-	queryNames []string, params map[string]string, w http.ResponseWriter,
+	queryNames []string, params map[string]string, w chan []byte,
 ) error {
 	d, ok := q.configuration.Database[dbName]
 	if !ok {
@@ -192,9 +180,6 @@ func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
 
 	logger.Debug().Str("loader", loader.String()).Msg("loader created")
 
-	writeMutex := ctx.Value(support.CtxWriteMutexID).(*sync.Mutex)
-	anyProcessed := false
-
 	for _, queryName := range queryNames {
 		loggerQ := logger.With().Str("query", queryName).Logger()
 
@@ -206,11 +191,7 @@ func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
 			default:
 			}
 
-			anyProcessed = true
-
-			writeMutex.Lock()
-			_, err := w.Write(output)
-			writeMutex.Unlock()
+			w <- output
 
 			if err != nil {
 				metrics.IncProcessErrorsCnt("write")
@@ -224,60 +205,46 @@ func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
 
 	logger.Debug().Msg("database processing finished")
 
-	if !anyProcessed {
-		return errors.New("no queries successfully processed")
-	}
-
 	return nil
 }
 
 // queryDatabasesSeq query all given databases sequentially.
 func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]string, w http.ResponseWriter,
-) uint32 {
+	queryNames []string, params map[string]string, w chan []byte,
+) {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
-
-	writeMutex := sync.Mutex{}
-
-	var successProcessed uint32 = 0
 
 	for _, dbName := range dbNames {
 		// check is client is still connected
 		select {
 		case <-ctx.Done():
 			logger.Info().Err(ctx.Err()).Msg("context closed")
-			return successProcessed
+			return
 		default:
 		}
 
 		logger := logger.With().Str("db", dbName).Logger()
 		ctx := logger.WithContext(ctx)
-		ctx = context.WithValue(ctx, support.CtxWriteMutexID, &writeMutex)
 
 		if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 			logger.Warn().Err(err).Msg("query database error")
 			metrics.IncQueryTotalErrCnt(dbName)
-		} else {
-			successProcessed++
 		}
 	}
 
-	return successProcessed
+	close(w)
 }
 
 // queryDatabasesPar query all databases in parallel.
 func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]string, w http.ResponseWriter,
-) uint32 {
+	queryNames []string, params map[string]string, w chan []byte,
+) {
 	logger := zerolog.Ctx(ctx)
 
 	logger.Debug().Msg("database parallel processing start")
 
-	// writeMutex block parallel writes to Writer
-	writeMutex := sync.Mutex{}
 	// number of successful processes databases
-	var successProcessed uint32
 
 	var waitGroup sync.WaitGroup
 	// query databases parallel
@@ -286,23 +253,19 @@ func (q *queryHandler) queryDatabasesPar(ctx context.Context, dbNames []string,
 
 		logger := logger.With().Str("db", dbName).Logger()
 		ctx := logger.WithContext(ctx)
-		ctx = context.WithValue(ctx, support.CtxWriteMutexID, &writeMutex)
 
-		go func(ctx context.Context, dbName string, successProcessed *uint32) {
+		go func(ctx context.Context, dbName string) {
 			defer waitGroup.Done()
 
 			if err := q.queryDatabase(ctx, dbName, queryNames, params, w); err != nil {
 				zerolog.Ctx(ctx).Warn().Err(err).Msg("query database error")
 				metrics.IncQueryTotalErrCnt(dbName)
-			} else {
-				atomic.AddUint32(successProcessed, 1)
 			}
-		}(ctx, dbName, &successProcessed)
+		}(ctx, dbName)
 	}
 
 	waitGroup.Wait()
-
-	return successProcessed
+	close(w)
 }
 
 func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -332,39 +295,62 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	defer func() {
-		if err := q.queryLocker.unlock(r.URL.RawQuery, requestID.String()); err != nil {
-			logger.Warn().Err(err).Msg("unlock query error")
-		}
-	}()
+	defer q.queryLocker.unlock(r.URL.RawQuery)
 
-	params := make(map[string]string)
-
-	for k, v := range r.URL.Query() {
-		if k != "query" && k != "database" {
-			params[k] = v[0]
-		}
-	}
-
+	params := paramsFromQuery(r)
 	queryNames = deduplicateStringList(queryNames)
 	dbNames = deduplicateStringList(dbNames)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	var successProcessed uint32
+	outputChannel := make(chan []byte)
+	finish := make(chan int, 1)
+
+	go func() {
+		cnt := 0
+		for data := range outputChannel {
+			logger.Debug().Bytes("data", data).Msg("output")
+			_, _ = w.Write(data)
+			cnt++
+		}
+		finish <- cnt
+	}()
+
 	if q.disableParallel || len(dbNames) == 1 {
-		successProcessed = q.queryDatabasesSeq(ctx, dbNames, queryNames, params, w)
+		q.queryDatabasesSeq(ctx, dbNames, queryNames, params, outputChannel)
 	} else {
-		successProcessed = q.queryDatabasesPar(ctx, dbNames, queryNames, params, w)
+		q.queryDatabasesPar(ctx, dbNames, queryNames, params, outputChannel)
 	}
 
-	logger.Debug().Uint32("successProcessed", successProcessed).
+	time.Sleep(time.Duration(15) * time.Second)
+
+	successProcessed := 0
+
+	select {
+	case successProcessed = <-finish:
+	case <-ctx.Done():
+		logger.Info().Err(ctx.Err()).Msg("context done")
+	}
+
+	logger.Debug().Int("successProcessed", successProcessed).
 		Msg("all database queries finished")
 
 	if successProcessed == 0 {
 		metrics.IncProcessErrorsCnt("bad_requests")
 		http.Error(w, "error", http.StatusBadRequest)
 	}
+}
+
+func paramsFromQuery(req *http.Request) map[string]string {
+	params := make(map[string]string)
+
+	for k, v := range req.URL.Query() {
+		if k != "query" && k != "database" {
+			params[k] = v[0]
+		}
+	}
+
+	return params
 }
 
 func deduplicateStringList(inp []string) []string {
