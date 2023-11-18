@@ -118,6 +118,7 @@ func (d *Database) validate() error {
 // and is not empty.
 func (d *Database) CheckConnectionParam(keys ...string) error {
 	var missing []string
+
 	for _, key := range keys {
 		val, ok := d.Connection[key]
 		if !ok {

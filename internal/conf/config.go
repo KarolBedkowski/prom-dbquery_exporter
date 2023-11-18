@@ -26,6 +26,7 @@ outerloop:
 		for _, gr := range q.Groups {
 			if gr == group {
 				queries = append(queries, name)
+
 				continue outerloop
 			}
 		}

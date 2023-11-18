@@ -121,7 +121,7 @@ func (q *queryHandler) putInfoCache(query *conf.Query, dbName string, data []byt
 
 // queryDatabasesSeq query all given databases sequentially.
 func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]string, w chan []byte,
+	queryNames []string, params map[string]string, w func([]byte),
 ) {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
@@ -142,8 +142,7 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Msg("query result from cache")
-				w <- data
-
+				w(data)
 				continue
 			}
 
@@ -174,7 +173,7 @@ loop:
 			if res.Error != nil {
 				logger.Error().Err(res.Error).Msg("result error")
 			} else {
-				w <- res.Result
+				w(res.Result)
 				q.putInfoCache(res.Query, res.DBName, res.Result)
 			}
 		case <-ctx.Done():
@@ -184,7 +183,7 @@ loop:
 		}
 	}
 
-	close(w)
+	close(output)
 }
 
 func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -224,33 +223,18 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	outputChannel := make(chan []byte)
-	finish := make(chan int, 1)
-
-	go func() {
-		cnt := 0
-
-		for data := range outputChannel {
-			if _, err := w.Write(data); err != nil {
-				logger.Error().Err(err).Msg("write errror")
-				metrics.IncProcessErrorsCnt("write")
-			}
-
-			cnt++
-		}
-
-		finish <- cnt
-	}()
-
-	q.queryDatabasesSeq(ctx, dbNames, queryNames, params, outputChannel)
-
 	successProcessed := 0
 
-	select {
-	case successProcessed = <-finish:
-	case <-ctx.Done():
-		logger.Info().Err(ctx.Err()).Msg("context done")
+	writer := func(data []byte) {
+		if _, err := w.Write(data); err != nil {
+			logger.Error().Err(err).Msg("write errror")
+			metrics.IncProcessErrorsCnt("write")
+		} else {
+			successProcessed++
+		}
 	}
+
+	q.queryDatabasesSeq(ctx, dbNames, queryNames, params, writer)
 
 	logger.Debug().Int("successProcessed", successProcessed).
 		Msg("all database queries finished")

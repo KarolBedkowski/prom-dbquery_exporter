@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
@@ -153,12 +152,9 @@ func (d *dbLoader) worker(idx int) {
 				wlog.Info().Msg("task cancelled")
 				continue
 			default:
-				start := time.Now()
-
 				result, err := d.loader.Query(task.Ctx, task.Query, task.Params)
 				if err != nil {
 					metrics.IncProcessErrorsCnt("query")
-					wlog.Error().Err(err).Msg("query error")
 					task.Output <- task.newResult(fmt.Errorf("query error: %w", err), nil)
 					continue
 				}
@@ -173,8 +169,7 @@ func (d *dbLoader) worker(idx int) {
 				}
 
 				wlog.Debug().Interface("task", task).Msg("result formatted")
-				metrics.ObserveQueryDuration(task.QueryName, task.DBName,
-					float64(time.Now().Sub(start)))
+				metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
 
 				task.Output <- task.newResult(nil, output)
 			}

@@ -66,6 +66,7 @@ func Main() {
 	}
 
 	metrics.UpdateConfLoadTime()
+	db.Init()
 	db.DatabasesPool.UpdateConf(c)
 
 	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableParallel,

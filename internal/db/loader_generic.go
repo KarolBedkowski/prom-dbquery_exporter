@@ -25,7 +25,6 @@ const (
 	defaultMaxIdleConns         = 2
 )
 
-
 type genericLoader struct {
 	connStr                string
 	driver                 string
@@ -36,7 +35,6 @@ type genericLoader struct {
 	totalOpenedConnections uint32
 	totalFailedConnections uint32
 }
-
 
 func (g *genericLoader) Stats() *LoaderStats {
 	if g.conn != nil {
