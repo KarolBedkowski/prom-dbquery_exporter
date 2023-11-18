@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
@@ -41,6 +42,16 @@ func (d *DBTask) newResult(err error, result []byte) *DBTaskResult {
 		DBName:    d.DBName,
 		QueryName: d.QueryName,
 		Query:     d.Query,
+	}
+}
+
+func (d DBTask) MarshalZerologObject(e *zerolog.Event) {
+	e.Str("db", d.DBName).
+		Str("query", d.QueryName).
+		Interface("params", d.Params)
+
+	if rid, ok := hlog.IDFromCtx(d.Ctx); ok {
+		e.Str("req_id", rid.String())
 	}
 }
 
@@ -181,8 +192,8 @@ type Databases struct {
 	log zerolog.Logger
 }
 
-// NewDatabases create new Databases object.
-func NewDatabases() *Databases {
+// newDatabases create new Databases object.
+func newDatabases() *Databases {
 	return &Databases{
 		dbs: make(map[string]*dbLoader),
 		cfg: nil,
@@ -248,7 +259,7 @@ func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 	// update existing
 	for k, dbConf := range cfg.Database {
 		if db, ok := d.dbs[k]; ok {
-			if db.loader.ConfChanged(dbConf) {
+			if db.loader.UpdateConf(dbConf) {
 				d.log.Info().Str("db", k).Msg("configuration changed")
 				db.cfg = dbConf
 				db.stop()
@@ -303,4 +314,11 @@ func (d *Databases) loadersStats() []*LoaderStats {
 	return stats
 }
 
-var DatabasesPool = NewDatabases()
+// DatabasesPool is global handler for all db queries
+var DatabasesPool *Databases
+
+// Init db subsystem
+func Init() {
+	DatabasesPool = newDatabases()
+	initMetrics()
+}

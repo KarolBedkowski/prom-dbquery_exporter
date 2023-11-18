@@ -12,7 +12,7 @@ import (
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-func init() {
+func initMetrics() {
 	prometheus.MustRegister(
 		prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
