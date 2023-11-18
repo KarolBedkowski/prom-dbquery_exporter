@@ -101,112 +101,24 @@ func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	queryResultCache.Clear()
 }
 
-// func (q *queryHandler) query(ctx context.Context, loader db.Loader,
-// 	database *conf.Database, queryName string,
-// 	params map[string]string,
-// ) ([]byte, error) {
-// 	query, ok := (q.configuration.Query)[queryName]
-// 	if !ok {
-// 		return nil, fmt.Errorf("unknown query '%s'", queryName)
-// 	}
+func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, bool) {
+	if query.CachingTime > 0 && !q.disableCache {
+		queryKey := query.Name + "@" + dbName
+		if data, ok := queryResultCache.Get(queryKey); ok {
+			metrics.IncQueryCacheHits()
+			return data, ok
+		}
+	}
 
-// 	logger := log.Ctx(ctx)
+	return nil, false
+}
 
-// 	metrics.IncQueryTotalCnt(queryName, database.Name)
-// 	queryKey := queryName + "@" + database.Name
-
-// 	logger.Debug().Msg("query start")
-
-// 	// try to get item from cache
-// 	if query.CachingTime > 0 && !q.disableCache {
-// 		if data, ok := queryResultCache.Get(queryKey); ok {
-// 			metrics.IncQueryCacheHits()
-// 			logger.Debug().Msg("query result from cache")
-
-// 			return data, nil
-// 		}
-// 	}
-
-// 	result, err := loader.Query(ctx, query, params)
-// 	if err != nil {
-// 		metrics.IncProcessErrorsCnt("query")
-// 		return nil, fmt.Errorf("query error: %w", err)
-// 	}
-
-// 	logger.Debug().
-// 		Int("records", len(result.Records)).
-// 		Float64("duration", result.Duration).
-// 		Msg("query finished")
-
-// 	// format metrics
-// 	output, err := db.FormatResult(ctx, result, query, database)
-// 	if err != nil {
-// 		metrics.IncProcessErrorsCnt("format")
-// 		return nil, fmt.Errorf("format result error: %w", err)
-// 	}
-
-// 	if q.validateOutputEnabled {
-// 		var parser expfmt.TextParser
-// 		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
-// 			return nil, fmt.Errorf("validate result error: %w", err)
-// 		}
-// 	}
-
-// 	if query.CachingTime > 0 && !q.disableCache {
-// 		// update cache
-// 		queryResultCache.Put(queryKey, query.CachingTime, output)
-// 	}
-
-// 	metrics.ObserveQueryDuration(queryName, database.Name, result.Duration)
-
-// 	return output, nil
-// }
-
-// func (q *queryHandler) queryDatabase(ctx context.Context, dbName string,
-// 	queryNames []string, params map[string]string, w chan []byte,
-// ) error {
-// 	d, ok := q.configuration.Database[dbName]
-// 	if !ok {
-// 		return fmt.Errorf("unknown database '%s'", dbName)
-// 	}
-
-// 	logger := log.Ctx(ctx)
-// 	logger.Debug().Msg("start processing database")
-
-// 	loader, err := db.GetLoader(d)
-// 	if err != nil {
-// 		return fmt.Errorf("get loader error: %w", err)
-// 	}
-
-// 	logger.Debug().Str("loader", loader.String()).Msg("loader created")
-
-// 	for _, queryName := range queryNames {
-// 		loggerQ := logger.With().Str("query", queryName).Logger()
-
-// 		ctxQuery := loggerQ.WithContext(ctx)
-// 		if output, err := q.query(ctxQuery, loader, d, queryName, params); err == nil {
-// 			select {
-// 			case <-ctx.Done():
-// 				return fmt.Errorf("client disconnected: %w", ctx.Err())
-// 			default:
-// 			}
-
-// 			w <- output
-
-// 			if err != nil {
-// 				metrics.IncProcessErrorsCnt("write")
-// 				return fmt.Errorf("write result error: %w", err)
-// 			}
-// 		} else {
-// 			loggerQ.Error().Err(err).Msg("make query error")
-// 			// to not break processing other queries when query fail
-// 		}
-// 	}
-
-// 	logger.Debug().Msg("database processing finished")
-
-// 	return nil
-// }
+func (q *queryHandler) putInfoCache(query *conf.Query, dbName string, data []byte) {
+	if query.CachingTime > 0 && !q.disableCache {
+		queryKey := query.Name + "@" + dbName
+		queryResultCache.Put(queryKey, query.CachingTime, data)
+	}
+}
 
 // queryDatabasesSeq query all given databases sequentially.
 func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
@@ -221,20 +133,19 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 
 	for _, dbName := range dbNames {
 		for _, queryName := range queryNames {
-
-			queryKey := queryName + "@" + dbName
+			metrics.IncQueryTotalCnt(queryName, dbName)
 
 			query, ok := (q.configuration.Query)[queryName]
 			if !ok {
-				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("unknown query")
+				logger.Error().Str("dbname", dbName).Str("query", queryName).
+					Msg("unknown query")
+				continue
 			}
 
-			if query.CachingTime > 0 && !q.disableCache {
-				if data, ok := queryResultCache.Get(queryKey); ok {
-					logger.Debug().Msg("query result from cache")
-					w <- data
-					continue
-				}
+			if data, ok := q.getFromCache(query, dbName); ok {
+				logger.Debug().Msg("query result from cache")
+				w <- data
+				continue
 			}
 
 			task := db.DBTask{
@@ -247,7 +158,8 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 			}
 
 			if err := q.dbs.PutTask(&task); err != nil {
-				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).Msg("start task error")
+				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
+					Msg("start task error")
 			} else {
 				scheduled++
 			}
@@ -263,10 +175,7 @@ loop:
 				logger.Error().Err(res.Error).Msg("result error")
 			} else {
 				w <- res.Result
-				if res.Query.CachingTime > 0 && !q.disableCache {
-					queryKey := res.QueryName + "@" + res.DBName
-					queryResultCache.Put(queryKey, res.Query.CachingTime, res.Result)
-				}
+				q.putInfoCache(res.Query, res.DBName, res.Result)
 			}
 		case <-ctx.Done():
 			logger.Error().Err(ctx.Err()).Msg("result error")
@@ -319,7 +228,10 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		cnt := 0
 		for data := range outputChannel {
 			logger.Debug().Bytes("data", data).Msg("output")
-			_, _ = w.Write(data)
+			if _, err := w.Write(data); err != nil {
+				logger.Error().Err(err).Msg("write errror")
+				metrics.IncProcessErrorsCnt("write")
+			}
 			cnt++
 		}
 		finish <- cnt

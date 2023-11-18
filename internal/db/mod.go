@@ -12,12 +12,15 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-// DBTask is query to perform
+// DBTask is query to perform.
 type DBTask struct {
 	Ctx context.Context
 
@@ -51,15 +54,14 @@ type DBTaskResult struct {
 }
 
 type dbLoader struct {
-	DBName string
+	dbName string
 
-	loader Loader
-
+	loader     Loader
 	tasks      chan *DBTask
 	stopCh     chan struct{}
 	numWorkers int
-
-	cfg *conf.Database
+	cfg        *conf.Database
+	log        zerolog.Logger
 }
 
 func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
@@ -69,12 +71,13 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 	}
 
 	dbl := &dbLoader{
-		DBName: name,
+		dbName: name,
 		loader: loader,
 
 		tasks:  make(chan *DBTask, 20),
 		stopCh: make(chan struct{}, 1),
 		cfg:    cfg,
+		log:    log.Logger.With().Str("dbname", name).Logger(),
 	}
 
 	return dbl, nil
@@ -85,6 +88,8 @@ func (d *dbLoader) start() error {
 	if d.cfg.Pool != nil {
 		d.numWorkers = d.cfg.Pool.MaxConnections
 	}
+
+	d.log.Debug().Msgf("start %d workers", d.numWorkers)
 
 	for i := 0; i < d.numWorkers; i++ {
 		go d.worker(i)
@@ -99,7 +104,7 @@ func (d *dbLoader) stop() error {
 }
 
 func (d *dbLoader) worker(idx int) {
-	wlog := log.With().Int("worker_idx", idx).Logger()
+	wlog := d.log.With().Int("worker_idx", idx).Logger()
 
 	for {
 		select {
@@ -110,34 +115,41 @@ func (d *dbLoader) worker(idx int) {
 		case task := <-d.tasks:
 			wlog.Debug().Interface("task", task).Msg("handle task")
 
-			if task.Ctx.Err() != nil {
+			select {
+			case <-task.Ctx.Done():
 				wlog.Info().Msg("task cancelled")
 				continue
+			default:
+				start := time.Now()
+
+				result, err := d.loader.Query(task.Ctx, task.Query, task.Params)
+				if err != nil {
+					metrics.IncProcessErrorsCnt("query")
+					wlog.Error().Err(err).Msg("query error")
+					task.Output <- task.newResult(fmt.Errorf("query error: %w", err), nil)
+					continue
+				}
+
+				wlog.Debug().Interface("task", task).Msg("result received")
+
+				output, err := FormatResult(task.Ctx, result, task.Query, d.cfg)
+				if err != nil {
+					metrics.IncProcessErrorsCnt("format")
+					task.Output <- task.newResult(fmt.Errorf("format error: %w", err), nil)
+					continue
+				}
+
+				wlog.Debug().Interface("task", task).Msg("result formatted")
+				metrics.ObserveQueryDuration(task.QueryName, task.DBName,
+					float64(time.Now().Sub(start)))
+
+				task.Output <- task.newResult(nil, output)
 			}
-
-			result, err := d.loader.Query(task.Ctx, task.Query, task.Params)
-			if err != nil {
-				wlog.Error().Err(err).Msg("query error")
-				task.Output <- task.newResult(fmt.Errorf("query error: %w", err), nil)
-				continue
-			}
-
-			wlog.Debug().Interface("task", task).Msg("result received")
-
-			output, err := FormatResult(task.Ctx, result, task.Query, d.cfg)
-			if err != nil {
-				task.Output <- task.newResult(fmt.Errorf("format error: %w", err), nil)
-				continue
-			}
-
-			wlog.Debug().Interface("task", task).Msg("result formatted")
-
-			task.Output <- task.newResult(nil, output)
 		}
 	}
 }
 
-// Databases is collection of all configured databases
+// Databases is collection of all configured databases.
 type Databases struct {
 	sync.Mutex
 
