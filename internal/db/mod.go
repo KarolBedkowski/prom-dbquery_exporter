@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -59,9 +60,11 @@ type dbLoader struct {
 	loader     Loader
 	tasks      chan *DBTask
 	stopCh     chan struct{}
-	numWorkers int
+	newConfCh  chan *conf.Database
+	numWorkers int32
 	cfg        *conf.Database
 	log        zerolog.Logger
+	active     bool
 }
 
 func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
@@ -74,24 +77,29 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 		dbName: name,
 		loader: loader,
 
-		tasks:  make(chan *DBTask, 20),
-		stopCh: make(chan struct{}, 1),
-		cfg:    cfg,
-		log:    log.Logger.With().Str("dbname", name).Logger(),
+		tasks:      make(chan *DBTask, 20),
+		stopCh:     make(chan struct{}, 1),
+		numWorkers: 0,
+		cfg:        cfg,
+		log:        log.Logger.With().Str("dbname", name).Logger(),
 	}
 
 	return dbl, nil
 }
 
 func (d *dbLoader) start() error {
-	d.numWorkers = 1
+	d.log.Debug().Msg("starting")
+
+	numWorkers := 1
 	if d.cfg.Pool != nil {
-		d.numWorkers = d.cfg.Pool.MaxConnections
+		numWorkers = d.cfg.Pool.MaxConnections
 	}
 
-	d.log.Debug().Msgf("start %d workers", d.numWorkers)
+	d.log.Debug().Msgf("start %d workers", numWorkers)
+	d.stopCh = make(chan struct{}, 1)
+	d.active = true
 
-	for i := 0; i < d.numWorkers; i++ {
+	for i := 0; i < numWorkers; i++ {
 		go d.worker(i)
 	}
 
@@ -99,17 +107,25 @@ func (d *dbLoader) start() error {
 }
 
 func (d *dbLoader) stop() error {
-	// TODO
+	numWorkers := int(d.numWorkers)
+	d.active = false
+
+	d.log.Debug().Msgf("stopping %d workers", numWorkers)
+	close(d.stopCh)
+
 	return nil
 }
 
 func (d *dbLoader) worker(idx int) {
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
-
+	atomic.AddInt32(&d.numWorkers, 1)
 	for {
 		select {
 		case <-d.stopCh:
 			wlog.Debug().Msg("stop worker")
+			if atomic.AddInt32(&d.numWorkers, -1) < 0 {
+				wlog.Error().Msg("num workers <0")
+			}
 			return
 
 		case task := <-d.tasks:
@@ -155,14 +171,33 @@ type Databases struct {
 
 	cfg *conf.Configuration
 	dbs map[string]*dbLoader
+
+	log zerolog.Logger
 }
 
 // NewDatabases create new Databases object.
-func NewDatabases(cfg *conf.Configuration) *Databases {
+func NewDatabases() *Databases {
 	return &Databases{
 		dbs: make(map[string]*dbLoader),
-		cfg: cfg,
+		cfg: nil,
+		log: log.Logger.With().Str("module", "databases").Logger(),
 	}
+}
+
+func (d *Databases) createLoader(dbName string) (*dbLoader, error) {
+	dconf, ok := d.cfg.Database[dbName]
+	if !ok {
+		return nil, fmt.Errorf("unknown database '%s'", dbName)
+	}
+
+	var err error
+	dl, err := newDBLoader(dbName, dconf)
+	if err != nil {
+		return nil, fmt.Errorf("create dbloader error: %w", err)
+	}
+
+	d.dbs[dbName] = dl
+	return dl, nil
 }
 
 // PutTask schedule new task.
@@ -174,28 +209,53 @@ func (d *Databases) PutTask(task *DBTask) error {
 
 	dl, ok := d.dbs[dbName]
 	if !ok {
-		dconf, ok := d.cfg.Database[dbName]
-		if !ok {
-			return fmt.Errorf("unknown database '%s'", dbName)
-		}
-
 		var err error
-		dl, err = newDBLoader(task.DBName, dconf)
+		dl, err = d.createLoader(dbName)
 		if err != nil {
-			return fmt.Errorf("create dbloader error: %w", err)
+			return err
 		}
+	}
 
+	if !dl.active {
 		if err := dl.start(); err != nil {
 			if errs := dl.stop(); errs != nil {
 				err = errors.Join(err, errs)
 			}
 			return fmt.Errorf("start dbloader error: %w", err)
 		}
-
-		d.dbs[task.DBName] = dl
 	}
 
 	dl.tasks <- task
 
 	return nil
 }
+
+func (d *Databases) UpdateConf(cfg *conf.Configuration) {
+	d.Lock()
+	defer d.Unlock()
+
+	d.log.Debug().Msg("update configuration")
+
+	// update existing
+	for k, dbConf := range cfg.Database {
+		if db, ok := d.dbs[k]; ok {
+			if db.loader.ConfChanged(dbConf) {
+				d.log.Info().Str("db", k).Msg("configuration changed")
+				db.cfg = dbConf
+				db.stop()
+			}
+		}
+	}
+
+	// stop not existing anymore
+	for k, db := range d.dbs {
+		if _, ok := cfg.Database[k]; !ok {
+			d.log.Info().Str("db", k).Msg("stopping db")
+			db.stop()
+		}
+	}
+
+	d.cfg = cfg
+}
+
+var DatabasesPool = NewDatabases()

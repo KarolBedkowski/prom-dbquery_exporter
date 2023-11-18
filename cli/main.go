@@ -66,6 +66,7 @@ func Main() {
 	}
 
 	metrics.UpdateConfLoadTime()
+	db.DatabasesPool.UpdateConf(c)
 
 	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableParallel,
 		*disableCache, *validateOutput)
@@ -99,7 +100,7 @@ func Main() {
 
 					if newConf, err := conf.LoadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
-						db.UpdateConfiguration(newConf)
+						db.DatabasesPool.UpdateConf(newConf)
 						metrics.UpdateConfLoadTime()
 						log.Info().Msg("configuration reloaded")
 					} else {

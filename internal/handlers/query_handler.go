@@ -65,8 +65,6 @@ type (
 
 		// runningQuery lock the same request for running twice
 		queryLocker locker
-
-		dbs *db.Databases
 	}
 )
 
@@ -79,7 +77,6 @@ func newQueryHandler(c *conf.Configuration, disableParallel bool,
 		disableParallel:       disableParallel,
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
-		dbs:                   db.NewDatabases(c),
 	}
 }
 
@@ -91,6 +88,7 @@ func (q *queryHandler) Handler() http.Handler {
 
 	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
 	h = hlog.NewHandler(log.Logger)(h)
+
 	return h
 }
 
@@ -106,6 +104,7 @@ func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, b
 		queryKey := query.Name + "@" + dbName
 		if data, ok := queryResultCache.Get(queryKey); ok {
 			metrics.IncQueryCacheHits()
+
 			return data, ok
 		}
 	}
@@ -137,14 +136,14 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 
 			query, ok := (q.configuration.Query)[queryName]
 			if !ok {
-				logger.Error().Str("dbname", dbName).Str("query", queryName).
-					Msg("unknown query")
+				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("unknown query")
 				continue
 			}
 
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Msg("query result from cache")
 				w <- data
+
 				continue
 			}
 
@@ -157,7 +156,7 @@ func (q *queryHandler) queryDatabasesSeq(ctx context.Context, dbNames []string,
 				Query:     query,
 			}
 
-			if err := q.dbs.PutTask(&task); err != nil {
+			if err := db.DatabasesPool.PutTask(&task); err != nil {
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
 			} else {
@@ -171,6 +170,7 @@ loop:
 		select {
 		case res := <-output:
 			scheduled--
+
 			if res.Error != nil {
 				logger.Error().Err(res.Error).Msg("result error")
 			} else {
@@ -179,6 +179,7 @@ loop:
 			}
 		case <-ctx.Done():
 			logger.Error().Err(ctx.Err()).Msg("result error")
+
 			break loop
 		}
 	}
@@ -204,12 +205,14 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if len(queryNames) == 0 || len(dbNames) == 0 {
 		http.Error(w, "missing required parameters", http.StatusBadRequest)
+
 		return
 	}
 
 	// prevent to run the same request twice
 	if err := q.queryLocker.tryLock(r.URL.RawQuery, requestID.String()); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+
 		return
 	}
 
@@ -226,14 +229,16 @@ func (q *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		cnt := 0
+
 		for data := range outputChannel {
-			logger.Debug().Bytes("data", data).Msg("output")
 			if _, err := w.Write(data); err != nil {
 				logger.Error().Err(err).Msg("write errror")
 				metrics.IncProcessErrorsCnt("write")
 			}
+
 			cnt++
 		}
+
 		finish <- cnt
 	}()
 
