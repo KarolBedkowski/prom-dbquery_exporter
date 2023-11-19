@@ -80,6 +80,10 @@ func (g *genericLoader) openConnection(ctx context.Context) error {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
+	if g.conn != nil {
+		return nil
+	}
+
 	llog := log.Ctx(ctx)
 	llog.Debug().Str("connstr", g.connStr).Str("driver", g.driver).
 		Msg("genericQuery connecting")
@@ -108,13 +112,11 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	llog := log.Ctx(ctx)
 	llog.Debug().Interface("conn", g.conn).Msg("conn")
 
-	if g.conn == nil {
-		// connect to database if not connected
-		if err := g.openConnection(ctx); err != nil {
-			atomic.AddUint32(&g.totalFailedConnections, 1)
+	// connect to database if not connected
+	if err := g.openConnection(ctx); err != nil {
+		atomic.AddUint32(&g.totalFailedConnections, 1)
 
-			return nil, fmt.Errorf("open connection error: %w", err)
-		}
+		return nil, fmt.Errorf("open connection error: %w", err)
 	}
 
 	conn, err := g.conn.Connx(ctx)
@@ -221,16 +223,16 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 
 // Close database connection.
 func (g *genericLoader) Close(ctx context.Context) error {
-	if g.conn == nil {
-		return nil
-	}
-
 	// lock loader for write
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
 	log.Ctx(ctx).Debug().Interface("conn", g.conn).
 		Str("db", g.dbConf.Name).Msg("genericQuery close conn")
+
+	if g.conn == nil {
+		return nil
+	}
 
 	err := g.conn.Close()
 	g.conn = nil

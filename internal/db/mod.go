@@ -138,6 +138,7 @@ func (d *dbLoader) stop() error {
 
 func (d *dbLoader) worker(idx int) {
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
+	ctx := wlog.WithContext(context.Background())
 	atomic.AddInt32(&d.numWorkers, 1)
 
 	for {
@@ -146,12 +147,13 @@ func (d *dbLoader) worker(idx int) {
 			wlog.Debug().Msg("stop worker")
 
 			numWorkers := int(atomic.AddInt32(&d.numWorkers, -1))
+			wlog.Debug().Msgf("num workers: %d", numWorkers)
 
 			switch {
 			case numWorkers < 0:
 				wlog.Error().Msg("num workers <0")
 			case numWorkers == 0:
-				if err := d.loader.Close(context.Background()); err != nil {
+				if err := d.loader.Close(ctx); err != nil {
 					wlog.Error().Err(err).Msg("close loader error")
 				}
 			}
