@@ -76,6 +76,7 @@ type dbLoader struct {
 	loader    Loader
 	tasks     chan *Task
 	workQueue chan *Task
+	// stop chan, if nil - dbloader is not running
 	stopCh    chan struct{}
 	newConfCh chan *conf.Database
 	cfg       *conf.Database
@@ -111,6 +112,9 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 
 func (d *dbLoader) start() {
 	d.log.Debug().Msg("starting")
+
+	d.active = true
+
 	go d.mainWorker()
 }
 
@@ -140,7 +144,6 @@ func (d *dbLoader) updateConf(cfg *conf.Database) bool {
 func (d *dbLoader) mainWorker() {
 	var group sync.WaitGroup
 
-	d.active = true
 	wlog := d.log.With().Str("db_loader", d.dbName).Logger()
 
 	for d.active {
@@ -169,6 +172,8 @@ func (d *dbLoader) mainWorker() {
 			}
 
 			d.workQueue <- task
+
+		case <-d.stopCh:
 		}
 	}
 
@@ -188,14 +193,12 @@ func (d *dbLoader) spinWorkers(group *sync.WaitGroup) {
 	d.active = true
 
 	for i := 0; i < numWorkers; i++ {
-		i := i
-
 		group.Add(1)
 
-		go func() {
-			d.worker(i)
+		go func(idx int) {
+			d.worker(idx)
 			group.Done()
-		}()
+		}(i)
 	}
 }
 
@@ -297,7 +300,6 @@ func (d *Databases) PutTask(task *Task) error {
 		var err error
 
 		dbloader, err = d.createLoader(dbName)
-
 		if err != nil {
 			return err
 		}
@@ -330,13 +332,21 @@ func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 		}
 	}
 
+	var toDel []string
+
 	// stop not existing anymore
 	for k, db := range d.dbs {
 		if _, ok := cfg.Database[k]; !ok {
-			d.log.Info().Str("db", k).Msg("stopping db")
+			d.log.Info().Str("db", k).Msgf("db %s not found in new conf; removing", k)
 
 			_ = db.stop()
+
+			toDel = append(toDel, k)
 		}
+	}
+
+	for _, k := range toDel {
+		delete(d.dbs, k)
 	}
 
 	d.cfg = cfg
@@ -346,7 +356,7 @@ func (d *Databases) Close() {
 	d.Lock()
 	defer d.Unlock()
 
-	d.log.Debug().Msg("update configuration")
+	d.log.Debug().Msg("closing databases")
 
 	for k, db := range d.dbs {
 		d.log.Info().Str("db", k).Msg("stopping db")
