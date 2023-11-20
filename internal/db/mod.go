@@ -10,8 +10,8 @@ package db
 import (
 	"context"
 	"fmt"
+	"reflect"
 	"sync"
-	"sync/atomic"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
@@ -73,14 +73,14 @@ func (t TaskResult) MarshalZerologObject(e *zerolog.Event) {
 type dbLoader struct {
 	dbName string
 
-	loader     Loader
-	tasks      chan *Task
-	stopCh     chan struct{}
-	newConfCh  chan *conf.Database
-	numWorkers int32
-	cfg        *conf.Database
-	log        zerolog.Logger
-	active     bool
+	loader    Loader
+	tasks     chan *Task
+	workQueue chan *Task
+	stopCh    chan struct{}
+	newConfCh chan *conf.Database
+	cfg       *conf.Database
+	log       zerolog.Logger
+	active    bool
 }
 
 const tasksQueueSize = 10
@@ -95,11 +95,15 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 		dbName: name,
 		loader: loader,
 
-		tasks:      make(chan *Task, tasksQueueSize),
-		stopCh:     make(chan struct{}, 1),
-		numWorkers: 0,
-		cfg:        cfg,
-		log:        log.Logger.With().Str("dbname", name).Logger(),
+		// tasks is queue task to schedule
+		tasks: make(chan *Task, 1),
+		// workQueue is chan that distribute task to workers
+		workQueue: make(chan *Task, tasksQueueSize),
+		// newConfCh bring new configuration
+		newConfCh: make(chan *conf.Database, 1),
+		stopCh:    nil,
+		cfg:       cfg,
+		log:       log.Logger.With().Str("dbname", name).Logger(),
 	}
 
 	return dbl, nil
@@ -107,6 +111,72 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 
 func (d *dbLoader) start() {
 	d.log.Debug().Msg("starting")
+	go d.mainWorker()
+}
+
+func (d *dbLoader) stop() error {
+	if !d.active {
+		return ErrLoaderStopped
+	}
+
+	d.active = false
+
+	d.log.Debug().Msgf("stopping workers")
+	close(d.stopCh)
+
+	return nil
+}
+
+func (d *dbLoader) updateConf(cfg *conf.Database) bool {
+	if reflect.DeepEqual(d.cfg, cfg) {
+		return false
+	}
+
+	d.newConfCh <- cfg
+
+	return true
+}
+
+func (d *dbLoader) mainWorker() {
+	var group sync.WaitGroup
+
+	d.active = true
+	wlog := d.log.With().Str("db_loader", d.dbName).Logger()
+
+	for d.active {
+		select {
+		case conf := <-d.newConfCh:
+			if d.stopCh != nil {
+				wlog.Debug().Msg("stopping...")
+				close(d.stopCh)
+				group.Wait()
+				wlog.Debug().Msg("stopped workers")
+
+				d.stopCh = nil
+			}
+
+			ctx := wlog.WithContext(context.Background())
+			d.loader.Close(ctx)
+			d.loader.UpdateConf(conf)
+
+			d.cfg = conf
+
+			wlog.Debug().Msg("conf updated")
+
+		case task := <-d.tasks:
+			if d.stopCh == nil {
+				d.spinWorkers(&group)
+			}
+
+			d.workQueue <- task
+		}
+	}
+
+	wlog.Debug().Msg("main worker exit")
+}
+
+func (d *dbLoader) spinWorkers(group *sync.WaitGroup) {
+	d.stopCh = make(chan struct{}, 1)
 
 	numWorkers := 1
 	if d.cfg.Pool != nil {
@@ -118,49 +188,28 @@ func (d *dbLoader) start() {
 	d.active = true
 
 	for i := 0; i < numWorkers; i++ {
-		go d.worker(i)
+		i := i
+
+		group.Add(1)
+
+		go func() {
+			d.worker(i)
+			group.Done()
+		}()
 	}
-}
-
-func (d *dbLoader) stop() error {
-	if !d.active {
-		return ErrLoaderStopped
-	}
-
-	numWorkers := int(d.numWorkers)
-	d.active = false
-
-	d.log.Debug().Msgf("stopping %d workers", numWorkers)
-	close(d.stopCh)
-
-	return nil
 }
 
 func (d *dbLoader) worker(idx int) {
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
-	ctx := wlog.WithContext(context.Background())
-	atomic.AddInt32(&d.numWorkers, 1)
 
 	for {
 		select {
 		case <-d.stopCh:
 			wlog.Debug().Msg("stop worker")
 
-			numWorkers := int(atomic.AddInt32(&d.numWorkers, -1))
-			wlog.Debug().Msgf("num workers: %d", numWorkers)
-
-			switch {
-			case numWorkers < 0:
-				wlog.Error().Msg("num workers <0")
-			case numWorkers == 0:
-				if err := d.loader.Close(ctx); err != nil {
-					wlog.Error().Err(err).Msg("close loader error")
-				}
-			}
-
 			return
 
-		case task := <-d.tasks:
+		case task := <-d.workQueue:
 			wlog.Debug().Interface("task", task).Msg("handle task")
 
 			select {
@@ -275,12 +324,8 @@ func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 	// update existing
 	for k, dbConf := range cfg.Database {
 		if db, ok := d.dbs[k]; ok {
-			if db.loader.UpdateConf(dbConf) {
+			if db.updateConf(dbConf) {
 				d.log.Info().Str("db", k).Msg("configuration changed")
-
-				db.cfg = dbConf
-
-				_ = db.stop()
 			}
 		}
 	}

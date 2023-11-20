@@ -8,7 +8,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -245,7 +244,9 @@ func (g *genericLoader) Close(ctx context.Context) error {
 }
 
 func (g *genericLoader) UpdateConf(db *conf.Database) bool {
-	return !reflect.DeepEqual(g.dbConf, db)
+	g.dbConf = db
+
+	return true
 }
 
 func (g *genericLoader) String() string {
