@@ -3,9 +3,9 @@ testdata_dir = "testdata"
 tmp_dir = "tmp"
 
 [build]
-  bin = "./main -log.level debug -no-cache"
+  bin = "./dbquery_exporter -log.level debug"
 #"-web.config web-config.yaml"
-  cmd = "go build -o ./main "
+  cmd = "go build -o ./dbquery_exporter cli/main.go"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata"]
   exclude_file = []

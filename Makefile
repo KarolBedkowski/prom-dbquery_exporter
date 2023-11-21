@@ -16,9 +16,11 @@ LDFLAGS=" -w -s \
 .PHONY: build
 
 build:
-	CGO_ENABLED=0 \
-		go build -v -o dbquery_exporter  --ldflags $(LDFLAGS)
+	go build -v -o dbquery_exporter cli/main.go
 
+build_release:
+	CGO_ENABLED=0 \
+		go build -v -o dbquery_exporter  --ldflags $(LDFLAGS) cli/main.go
 
 .PHONY: build_arm64
 
@@ -26,7 +28,7 @@ build_arm64:
 	CGO_ENABLED=0 \
 		GOARCH=arm64 \
 		GOOS=linux \
-		go build -v -o dbquery_exporter_arm64  --ldflags $(LDFLAGS)
+		go build -v -o dbquery_exporter_arm64  --ldflags $(LDFLAGS) cli/main.go
 
 .PHONY: run
 
@@ -35,7 +37,13 @@ run:
 
 
 .PHONY: check
-check:
-	golangci-lint run
+lint:
+	golangci-lint run --fix
+
+
+.PHONY: format
+format:
+	find . -name '*.go' -type f -exec wsl -fix {} ';'
+	find . -name '*.go' -type f -exec gofumpt -w {} ';'
 
 # vim:ft=make

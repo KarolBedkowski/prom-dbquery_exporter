@@ -1,4 +1,4 @@
-package cli
+package main
 
 import (
 	"flag"
@@ -8,16 +8,23 @@ import (
 	"runtime"
 	"syscall"
 
+	//	_ "net/http/pprof"
+
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/handlers"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/support"
 
+	// _ "github.com/denisenkom/go-mssqldb"
+	// _ "github.com/go-sql-driver/mysql".
+	_ "github.com/glebarez/go-sqlite"
+	_ "github.com/lib/pq"
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
 	"github.com/rs/zerolog/log"
+	_ "github.com/sijms/go-ora/v2"
 )
 
 func init() {
@@ -25,7 +32,7 @@ func init() {
 }
 
 // Main is main function for cli.
-func Main() {
+func main() {
 	var (
 		showVersion = flag.Bool("version", false, "Print version information.")
 		configFile  = flag.String("config.file", "dbquery.yaml",
