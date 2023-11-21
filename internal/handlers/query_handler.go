@@ -122,11 +122,13 @@ func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byt
 // queryDatabases query all given databases sequentially.
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]string,
-) chan *db.TaskResult {
+) (chan *db.TaskResult, int) {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
 
 	output := make(chan *db.TaskResult, len(dbNames)*len(queryNames))
+
+	scheduled := 0
 
 	for _, dbName := range dbNames {
 		for _, queryName := range queryNames {
@@ -142,6 +144,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Msg("query result from cache")
 				output <- &db.TaskResult{Result: data}
+				scheduled++
 
 				continue
 			}
@@ -158,12 +161,13 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			if err := db.DatabasesPool.PutTask(&task); err != nil {
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
-				output <- &db.TaskResult{Error: err}
+			} else {
+				scheduled++
 			}
 		}
 	}
 
-	return output
+	return output, scheduled
 }
 
 func (q *queryHandler) writeResult(ctx context.Context, output chan *db.TaskResult, scheduled int,
@@ -243,8 +247,8 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	out := q.queryDatabases(ctx, dbNames, queryNames, params)
-	successProcessed := q.writeResult(ctx, out, len(dbNames)*len(queryNames), writer)
+	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params)
+	successProcessed := q.writeResult(ctx, out, scheduled, writer)
 
 	logger.Debug().Int("successProcessed", successProcessed).
 		Msg("all database queries finished")
