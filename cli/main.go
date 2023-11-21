@@ -45,9 +45,8 @@ func main() {
 			"Logging log format (logfmt, json).")
 		webConfig = flag.String("web.config", "",
 			"Path to config yaml file that can enable TLS or authentication.")
-		disableParallel = flag.Bool("no-parallel-query", false, "Disable parallel queries")
-		disableCache    = flag.Bool("no-cache", false, "Disable query result caching")
-		validateOutput  = flag.Bool("validate-output", false, "Enable output validation")
+		disableCache   = flag.Bool("no-cache", false, "Disable query result caching")
+		validateOutput = flag.Bool("validate-output", false, "Enable output validation")
 	)
 
 	flag.Parse()
@@ -76,8 +75,7 @@ func main() {
 	db.Init()
 	db.DatabasesPool.UpdateConf(c)
 
-	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableParallel,
-		*disableCache, *validateOutput)
+	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableCache, *validateOutput)
 
 	var runGroup run.Group
 	{

@@ -55,7 +55,6 @@ func (l *locker) unlock(queryKey string) {
 // queryHandler handle all request for metrics.
 type queryHandler struct {
 	configuration         *conf.Configuration
-	disableParallel       bool
 	disableCache          bool
 	validateOutputEnabled bool
 
@@ -64,13 +63,11 @@ type queryHandler struct {
 	queryResultCache *support.Cache[[]byte]
 }
 
-func newQueryHandler(c *conf.Configuration, disableParallel bool,
-	disableCache bool, validateOutput bool,
+func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bool,
 ) *queryHandler {
 	return &queryHandler{
 		configuration:         c,
 		queryLocker:           newLocker(),
-		disableParallel:       disableParallel,
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
 		queryResultCache:      support.NewCache[[]byte](),

@@ -37,9 +37,9 @@ type WebHandler struct {
 
 // NewWebHandler create new WebHandler.
 func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string,
-	disableParallel bool, disableCache bool, validateOutput bool,
+	disableCache bool, validateOutput bool,
 ) *WebHandler {
-	qh := newQueryHandler(c, disableParallel, disableCache, validateOutput)
+	qh := newQueryHandler(c, disableCache, validateOutput)
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(c)
