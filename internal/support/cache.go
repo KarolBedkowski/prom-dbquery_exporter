@@ -54,19 +54,20 @@ func (r *Cache[T]) Get(key string) (T, bool) {
 // Put data into cache.
 func (r *Cache[T]) Put(key string, ttl uint, data T) {
 	r.cacheLock.Lock()
+	defer r.cacheLock.Unlock()
+
 	r.cache[key] = &cacheItem[T]{
 		expireTS: time.Now().Add(time.Duration(ttl) * time.Second),
 		content:  data,
 	}
-	r.cacheLock.Unlock()
 }
 
 // Clear whole cache.
 func (r *Cache[T]) Clear() {
 	r.cacheLock.Lock()
-	// create new cache using last size as default
+	defer r.cacheLock.Unlock()
+
 	clear(r.cache)
-	r.cacheLock.Unlock()
 }
 
 // func (r *Cache) purgeExpired() {

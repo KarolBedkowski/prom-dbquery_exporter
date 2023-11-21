@@ -41,7 +41,7 @@ type Loader interface {
 	Close(ctx context.Context) error
 	// Human-friendly info
 	String() string
-	// UpdateConf return true when given configuration is differ than used
+	// UpdateConf return true when configuration was updated
 	UpdateConf(db *conf.Database) bool
 
 	// Stats return database stats if available

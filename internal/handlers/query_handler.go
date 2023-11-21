@@ -205,15 +205,15 @@ loop:
 	return successProcessed
 }
 
-func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
+	ctx := req.Context()
 	logger := log.Ctx(ctx)
 
-	queryNames := r.URL.Query()["query"]
-	dbNames := r.URL.Query()["database"]
+	queryNames := req.URL.Query()["query"]
+	dbNames := req.URL.Query()["database"]
 	requestID, _ := hlog.IDFromCtx(ctx)
 
-	for _, g := range r.URL.Query()["group"] {
+	for _, g := range req.URL.Query()["group"] {
 		q := q.configuration.GroupQueries(g)
 		if len(q) > 0 {
 			logger.Debug().Str("group", g).Interface("queries", q).Msg("add queries from group")
@@ -228,15 +228,15 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	}
 
 	// prevent to run the same request twice
-	if locker, ok := q.queryLocker.tryLock(r.URL.RawQuery, requestID.String()); !ok {
+	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
 		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
 
 		return
 	}
 
-	defer q.queryLocker.unlock(r.URL.RawQuery)
+	defer q.queryLocker.unlock(req.URL.RawQuery)
 
-	params := paramsFromQuery(r)
+	params := paramsFromQuery(req)
 	queryNames = deduplicateStringList(queryNames)
 	dbNames = deduplicateStringList(dbNames)
 
