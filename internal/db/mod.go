@@ -73,11 +73,14 @@ func (t TaskResult) MarshalZerologObject(e *zerolog.Event) {
 type dbLoader struct {
 	dbName string
 
-	loader    Loader
-	tasks     chan *Task
+	loader Loader
+	// tasks is queue task to schedule
+	tasks chan *Task
+	// workQueue is chan that distribute task to workers
 	workQueue chan *Task
 	// stop chan, if nil - dbloader is not running
-	stopCh    chan struct{}
+	stopCh chan struct{}
+	// newConfCh bring new configuration
 	newConfCh chan *conf.Database
 	cfg       *conf.Database
 	log       zerolog.Logger
@@ -96,11 +99,8 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 		dbName: name,
 		loader: loader,
 
-		// tasks is queue task to schedule
-		tasks: make(chan *Task, 1),
-		// workQueue is chan that distribute task to workers
+		tasks:     make(chan *Task, 1),
 		workQueue: make(chan *Task, tasksQueueSize),
-		// newConfCh bring new configuration
 		newConfCh: make(chan *conf.Database, 1),
 		stopCh:    nil,
 		cfg:       cfg,

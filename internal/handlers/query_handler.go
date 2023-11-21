@@ -9,7 +9,6 @@ package handlers
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"sync"
 
@@ -23,8 +22,6 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
-var queryResultCache = support.NewCache[[]byte]()
-
 type locker struct {
 	sync.Mutex
 
@@ -35,17 +32,17 @@ func newLocker() locker {
 	return locker{runningQuery: make(map[string]string)}
 }
 
-func (l *locker) tryLock(queryKey, reqID string) error {
+func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
 	l.Lock()
 	defer l.Unlock()
 
 	if rid, ok := l.runningQuery[queryKey]; ok {
-		return fmt.Errorf("query already running, started by %s", rid)
+		return rid, false
 	}
 
 	l.runningQuery[queryKey] = reqID
 
-	return nil
+	return "", true
 }
 
 func (l *locker) unlock(queryKey string) {
@@ -56,17 +53,16 @@ func (l *locker) unlock(queryKey string) {
 }
 
 // queryHandler handle all request for metrics.
-type (
-	queryHandler struct {
-		configuration         *conf.Configuration
-		disableParallel       bool
-		disableCache          bool
-		validateOutputEnabled bool
+type queryHandler struct {
+	configuration         *conf.Configuration
+	disableParallel       bool
+	disableCache          bool
+	validateOutputEnabled bool
 
-		// runningQuery lock the same request for running twice
-		queryLocker locker
-	}
-)
+	// runningQuery lock the same request for running twice
+	queryLocker      locker
+	queryResultCache *support.Cache[[]byte]
+}
 
 func newQueryHandler(c *conf.Configuration, disableParallel bool,
 	disableCache bool, validateOutput bool,
@@ -77,6 +73,7 @@ func newQueryHandler(c *conf.Configuration, disableParallel bool,
 		disableParallel:       disableParallel,
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
+		queryResultCache:      support.NewCache[[]byte](),
 	}
 }
 
@@ -96,13 +93,13 @@ func (q *queryHandler) Handler() http.Handler {
 func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	q.configuration = c
 
-	queryResultCache.Clear()
+	q.queryResultCache.Clear()
 }
 
 func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, bool) {
 	if query.CachingTime > 0 && !q.disableCache {
 		queryKey := query.Name + "@" + dbName
-		if data, ok := queryResultCache.Get(queryKey); ok {
+		if data, ok := q.queryResultCache.Get(queryKey); ok {
 			metrics.IncQueryCacheHits()
 
 			return data, ok
@@ -115,7 +112,8 @@ func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, b
 func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byte) {
 	if query.CachingTime > 0 && !q.disableCache {
 		queryKey := query.Name + "@" + dbName
-		queryResultCache.Put(queryKey, query.CachingTime, data)
+
+		q.queryResultCache.Put(queryKey, query.CachingTime, data)
 	}
 }
 
@@ -188,7 +186,7 @@ loop:
 				logger.Debug().Object("res", res).Msg("write result")
 
 				if _, err := writer.Write(res.Result); err != nil {
-					logger.Error().Err(err).Msg("write errror")
+					logger.Error().Err(err).Msg("write error")
 					metrics.IncProcessErrorsCnt("write")
 				} else {
 					successProcessed++
@@ -233,8 +231,8 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, r *http.Request) {
 	}
 
 	// prevent to run the same request twice
-	if err := q.queryLocker.tryLock(r.URL.RawQuery, requestID.String()); err != nil {
-		http.Error(writer, err.Error(), http.StatusInternalServerError)
+	if locker, ok := q.queryLocker.tryLock(r.URL.RawQuery, requestID.String()); !ok {
+		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
 
 		return
 	}
