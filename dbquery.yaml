@@ -1,3 +1,5 @@
+global:
+  request_timeout: 600
 # sample database databases configuration
 database:
   testdb:

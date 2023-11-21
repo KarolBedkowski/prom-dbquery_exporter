@@ -11,6 +11,7 @@ import (
 	"context"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
@@ -241,6 +242,15 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	dbNames = deduplicateStringList(dbNames)
 
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+	if t := q.configuration.Global.RequestTimeout; t > 0 {
+		logger.Debug().Msgf("set request timeout %d", t)
+
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(t)*time.Second)
+
+		defer cancel()
+	}
 
 	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params)
 	successProcessed := q.writeResult(ctx, out, scheduled, writer)

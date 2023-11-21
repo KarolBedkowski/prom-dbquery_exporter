@@ -12,6 +12,8 @@ import (
 
 // Configuration keep application configuration.
 type Configuration struct {
+	// Global application settings
+	Global GlobalConf
 	// Databases
 	Database map[string]*Database
 	// Queries
@@ -38,6 +40,10 @@ outerloop:
 func (c *Configuration) validate() error {
 	if len(c.Database) == 0 {
 		return newConfigurationError("no database configured")
+	}
+
+	if err := c.Global.validate(); err != nil {
+		return newConfigurationError("validate global settings error").Wrap(err)
 	}
 
 	if len(c.Query) == 0 {
