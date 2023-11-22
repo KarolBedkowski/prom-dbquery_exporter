@@ -4,6 +4,8 @@
 // Distributed under terms of the GPLv3 license.
 package db
 
+import "errors"
+
 // InvalidConfigrationError is error generated when database configuration is invalid.
 type InvalidConfigrationError string
 
@@ -12,7 +14,8 @@ func (i InvalidConfigrationError) Error() string {
 }
 
 var (
-	ErrUnknownDatabase = InvalidConfigrationError("unknown database")
-	ErrLoaderStopped   = InvalidConfigrationError("loader stopped")
-	ErrNoDatabaseName  = InvalidConfigrationError("no database name")
+	ErrUnknownDatabase  = InvalidConfigrationError("unknown database")
+	ErrLoaderStopped    = InvalidConfigrationError("loader stopped")
+	ErrNoDatabaseName   = InvalidConfigrationError("no database name")
+	ErrAppNotConfigured = errors.New("app not configured")
 )

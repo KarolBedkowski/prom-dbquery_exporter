@@ -268,7 +268,7 @@ func paramsFromQuery(req *http.Request) map[string]string {
 	params := make(map[string]string)
 
 	for k, v := range req.URL.Query() {
-		if k != "query" && k != "database" {
+		if k != "query" && k != "database" && len(v) > 0 {
 			params[k] = v[0]
 		}
 	}

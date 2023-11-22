@@ -172,8 +172,6 @@ func (d *dbLoader) mainWorker() {
 			}
 
 			d.workQueue <- task
-
-		case <-d.stopCh:
 		}
 	}
 
@@ -181,8 +179,6 @@ func (d *dbLoader) mainWorker() {
 }
 
 func (d *dbLoader) spinWorkers(group *sync.WaitGroup) {
-	d.stopCh = make(chan struct{}, 1)
-
 	numWorkers := 1
 	if d.cfg.Pool != nil {
 		numWorkers = d.cfg.Pool.MaxConnections
@@ -214,6 +210,12 @@ func (d *dbLoader) worker(idx int) {
 
 		case task := <-d.workQueue:
 			wlog.Debug().Interface("task", task).Msg("handle task")
+
+			if task.Ctx == nil {
+				wlog.Error().Interface("task", task).Msg("missing context")
+
+				continue
+			}
 
 			select {
 			case <-task.Ctx.Done():
@@ -271,6 +273,10 @@ func newDatabases() *Databases {
 }
 
 func (d *Databases) createLoader(dbName string) (*dbLoader, error) {
+	if d.cfg == nil {
+		return nil, ErrAppNotConfigured
+	}
+
 	dconf, ok := d.cfg.Database[dbName]
 	if !ok {
 		return nil, ErrUnknownDatabase
@@ -303,6 +309,10 @@ func (d *Databases) PutTask(task *Task) error {
 		if err != nil {
 			return err
 		}
+
+		if dbloader == nil {
+			return ErrAppNotConfigured
+		}
 	}
 
 	if !dbloader.active {
@@ -320,6 +330,10 @@ func (d *Databases) PutTask(task *Task) error {
 func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 	d.Lock()
 	defer d.Unlock()
+
+	if cfg == nil {
+		return
+	}
 
 	d.log.Debug().Msg("update configuration")
 
@@ -369,6 +383,10 @@ func (d *Databases) Close() {
 func (d *Databases) loadersInPool() float64 {
 	d.Lock()
 	defer d.Unlock()
+
+	if d == nil {
+		return 0
+	}
 
 	return float64(len(d.dbs))
 }

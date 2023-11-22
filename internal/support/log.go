@@ -61,5 +61,5 @@ func InitializeLogger(level string, format string) {
 func outputIsConsole() bool {
 	fileInfo, _ := os.Stdout.Stat()
 
-	return (fileInfo.Mode() & os.ModeCharDevice) != 0
+	return fileInfo != nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
 }
