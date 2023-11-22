@@ -85,6 +85,11 @@ var (
 		"Total number of failed connections per loader",
 		[]string{"loader"}, nil,
 	)
+	runningWorkersDesc = prometheus.NewDesc(
+		"dbquery_exporter_active_workers",
+		"Number of active workes",
+		[]string{"loader"}, nil,
+	)
 )
 
 func (l loggersPoolCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -159,6 +164,12 @@ func (l loggersPoolCollector) Collect(ch chan<- prometheus.Metric) {
 			dbpoolConnTotalFailedDesc,
 			prometheus.CounterValue,
 			float64(stat.TotalFailedConnections),
+			stat.Name,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			runningWorkersDesc,
+			prometheus.GaugeValue,
+			float64(stat.RunningWorkers),
 			stat.Name,
 		)
 	}

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
@@ -78,13 +79,13 @@ type dbLoader struct {
 	tasks chan *Task
 	// workQueue is chan that distribute task to workers
 	workQueue chan *Task
-	// stop chan, if nil - dbloader is not running
-	stopCh chan struct{}
 	// newConfCh bring new configuration
-	newConfCh chan *conf.Database
-	cfg       *conf.Database
-	log       zerolog.Logger
-	active    bool
+	newConfCh      chan *conf.Database
+	stopCh         chan struct{}
+	cfg            *conf.Database
+	log            zerolog.Logger
+	active         bool
+	runningWorkers int32
 }
 
 const tasksQueueSize = 10
@@ -99,12 +100,13 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 		dbName: name,
 		loader: loader,
 
-		tasks:     make(chan *Task, 1),
-		workQueue: make(chan *Task, tasksQueueSize),
-		newConfCh: make(chan *conf.Database, 1),
-		stopCh:    nil,
-		cfg:       cfg,
-		log:       log.Logger.With().Str("dbname", name).Logger(),
+		tasks:          make(chan *Task, 1),
+		workQueue:      make(chan *Task, tasksQueueSize),
+		newConfCh:      make(chan *conf.Database, 1),
+		stopCh:         make(chan struct{}, 1),
+		cfg:            cfg,
+		log:            log.Logger.With().Str("dbname", name).Logger(),
+		runningWorkers: 0,
 	}
 
 	return dbl, nil
@@ -123,10 +125,8 @@ func (d *dbLoader) stop() error {
 		return ErrLoaderStopped
 	}
 
-	d.active = false
-
-	d.log.Debug().Msgf("stopping workers")
-	close(d.stopCh)
+	d.log.Debug().Msgf("stopping...")
+	d.stopCh <- struct{}{}
 
 	return nil
 }
@@ -146,17 +146,13 @@ func (d *dbLoader) mainWorker() {
 
 	wlog := d.log.With().Str("db_loader", d.dbName).Logger()
 
+loop:
 	for d.active {
 		select {
 		case conf := <-d.newConfCh:
-			if d.stopCh != nil {
-				wlog.Debug().Msg("stopping...")
-				close(d.stopCh)
-				group.Wait()
-				wlog.Debug().Msg("stopped workers")
-
-				d.stopCh = nil
-			}
+			wlog.Debug().Msg("wait for workers finish its current task...")
+			group.Wait()
+			wlog.Debug().Msg("stopped workers")
 
 			ctx := wlog.WithContext(context.Background())
 			d.loader.Close(ctx)
@@ -166,9 +162,23 @@ func (d *dbLoader) mainWorker() {
 
 			wlog.Debug().Msg("conf updated")
 
+		case <-d.stopCh:
+			d.log.Debug().Msgf("stopping workers...")
+			d.active = false
+			close(d.tasks)
+			group.Wait()
+			d.log.Debug().Msgf("stoppped")
+
+			break loop
+
 		case task := <-d.tasks:
-			if d.stopCh == nil {
-				d.spinWorkers(&group)
+			if d.runningWorkers < int32(d.cfg.Pool.MaxConnections) {
+				group.Add(1)
+
+				go func() {
+					d.worker()
+					group.Done()
+				}()
 			}
 
 			d.workQueue <- task
@@ -178,36 +188,17 @@ func (d *dbLoader) mainWorker() {
 	wlog.Debug().Msg("main worker exit")
 }
 
-func (d *dbLoader) spinWorkers(group *sync.WaitGroup) {
-	numWorkers := 1
-	if d.cfg.Pool != nil {
-		numWorkers = d.cfg.Pool.MaxConnections
-	}
+func (d *dbLoader) worker() {
+	running := atomic.AddInt32(&d.runningWorkers, 1)
+	idx := int(running)
 
-	d.log.Debug().Msgf("start %d workers", numWorkers)
-	d.stopCh = make(chan struct{}, 1)
-	d.active = true
+	d.log.Debug().Msgf("start worker %d, running: %d", idx, running)
 
-	for i := 0; i < numWorkers; i++ {
-		group.Add(1)
-
-		go func(idx int) {
-			d.worker(idx)
-			group.Done()
-		}(i)
-	}
-}
-
-func (d *dbLoader) worker(idx int) {
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
 
-	for {
+loop:
+	for d.active {
 		select {
-		case <-d.stopCh:
-			wlog.Debug().Msg("stop worker")
-
-			return
-
 		case task := <-d.workQueue:
 			wlog.Debug().Interface("task", task).Msg("handle task")
 
@@ -225,8 +216,16 @@ func (d *dbLoader) worker(idx int) {
 			default:
 				d.handleTask(wlog, task)
 			}
+
+			continue
+
+		default:
+			break loop
 		}
 	}
+
+	running = atomic.AddInt32(&d.runningWorkers, -1)
+	wlog.Debug().Msgf("worker stopped; running: %d", running)
 }
 
 func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
@@ -251,6 +250,15 @@ func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
 	wlog.Debug().Interface("task", task).Msg("result formatted")
 	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
 	task.Output <- task.newResult(nil, output)
+}
+
+func (d *dbLoader) stats() *LoaderStats {
+	s := d.loader.Stats()
+	if s != nil {
+		s.RunningWorkers = uint32(d.runningWorkers)
+	}
+
+	return s
 }
 
 // Databases is collection of all configured databases.
@@ -399,7 +407,7 @@ func (d *Databases) loadersStats() []*LoaderStats {
 	var stats []*LoaderStats
 
 	for _, l := range d.dbs {
-		if s := l.loader.Stats(); s != nil {
+		if s := l.stats(); s != nil {
 			stats = append(stats, s)
 		}
 	}
