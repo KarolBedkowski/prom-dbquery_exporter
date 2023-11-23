@@ -11,6 +11,8 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"runtime/pprof"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -146,6 +148,8 @@ func (d *dbLoader) mainWorker() {
 
 	wlog := d.log.With().Str("db_loader", d.dbName).Logger()
 
+	pprof.SetGoroutineLabels(pprof.WithLabels(context.Background(), pprof.Labels("main_worker", d.dbName)))
+
 loop:
 	for d.active {
 		select {
@@ -196,6 +200,9 @@ func (d *dbLoader) worker() {
 
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
 
+	pprof.SetGoroutineLabels(pprof.WithLabels(context.Background(),
+		pprof.Labels("worker", strconv.Itoa(idx), "db", d.dbName)))
+
 loop:
 	for d.active {
 		select {
@@ -209,6 +216,9 @@ loop:
 
 				continue
 			}
+
+			pprof.SetGoroutineLabels(pprof.WithLabels(task.Ctx,
+				pprof.Labels("query", task.QueryName, "worker", strconv.Itoa(idx), "db", d.dbName)))
 
 			select {
 			case <-task.Ctx.Done():
