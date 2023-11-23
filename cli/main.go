@@ -8,8 +8,6 @@ import (
 	"runtime"
 	"syscall"
 
-	//	_ "net/http/pprof"
-
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/handlers"

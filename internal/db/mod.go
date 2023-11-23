@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"reflect"
-	"runtime/pprof"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -21,6 +20,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 // Task is query to perform.
@@ -148,7 +148,7 @@ func (d *dbLoader) mainWorker() {
 
 	wlog := d.log.With().Str("db_loader", d.dbName).Logger()
 
-	pprof.SetGoroutineLabels(pprof.WithLabels(context.Background(), pprof.Labels("main_worker", d.dbName)))
+	support.SetGoroutineLabels(context.Background(), "main_worker", d.dbName)
 
 loop:
 	for d.active {
@@ -200,8 +200,7 @@ func (d *dbLoader) worker() {
 
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
 
-	pprof.SetGoroutineLabels(pprof.WithLabels(context.Background(),
-		pprof.Labels("worker", strconv.Itoa(idx), "db", d.dbName)))
+	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx), "db", d.dbName)
 
 loop:
 	for d.active {
@@ -217,8 +216,7 @@ loop:
 				continue
 			}
 
-			pprof.SetGoroutineLabels(pprof.WithLabels(task.Ctx,
-				pprof.Labels("query", task.QueryName, "worker", strconv.Itoa(idx), "db", d.dbName)))
+			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", strconv.Itoa(idx), "db", d.dbName)
 
 			select {
 			case <-task.Ctx.Done():

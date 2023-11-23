@@ -16,7 +16,7 @@ LDFLAGS=" -w -s \
 .PHONY: build
 
 build:
-	go build -v -o dbquery_exporter cli/main.go
+	go build -v -o dbquery_exporter --tags debug cli/main.go
 
 build_release:
 	CGO_ENABLED=0 \
@@ -39,6 +39,8 @@ run:
 .PHONY: check
 lint:
 	golangci-lint run --fix
+	# go install go.uber.org/nilaway/cmd/nilaway@latest
+	nilaway ./...
 
 
 .PHONY: format

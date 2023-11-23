@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"runtime/pprof"
 	"sync"
 	"time"
 
@@ -228,7 +227,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	dbNames := req.URL.Query()["database"]
 	requestID, _ := hlog.IDFromCtx(ctx)
 
-	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels("requestID", requestID.String(), "req", req.URL.String())))
+	support.SetGoroutineLabels(ctx, "requestID", requestID.String(), "req", req.URL.String())
 
 	for _, g := range req.URL.Query()["group"] {
 		q := q.configuration.GroupQueries(g)

@@ -5,7 +5,7 @@ tmp_dir = "tmp"
 [build]
   bin = "./dbquery_exporter -log.level debug"
 #"-web.config web-config.yaml"
-  cmd = "go build -o ./dbquery_exporter cli/main.go"
+  cmd = "go build -o ./dbquery_exporter -tags debug cli/main.go"
   delay = 1000
   exclude_dir = ["assets", "tmp", "vendor", "testdata"]
   exclude_file = []
