@@ -9,6 +9,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -180,20 +181,32 @@ loop:
 		case res := <-output:
 			scheduled--
 
-			if res.Error == nil {
-				logger.Debug().Object("res", res).Msg("write result")
+			if res.Error != nil {
+				logger.Error().Err(res.Error).Msg("processing query error")
 
-				if _, err := writer.Write(res.Result); err != nil {
+				msg := fmt.Sprintf("# query %q in %q processing error: %q",
+					res.QueryName, res.DBName, res.Error.Error())
+				if _, err := writer.Write([]byte(msg)); err != nil {
 					logger.Error().Err(err).Msg("write error")
 					metrics.IncProcessErrorsCnt("write")
-				} else {
-					successProcessed++
 				}
 
-				if res.Query != nil {
-					q.putIntoCache(res.Query, res.DBName, res.Result)
-				}
+				continue
 			}
+
+			logger.Debug().Object("res", res).Msg("write result")
+
+			if _, err := writer.Write(res.Result); err != nil {
+				logger.Error().Err(err).Msg("write error")
+				metrics.IncProcessErrorsCnt("write")
+			} else {
+				successProcessed++
+			}
+
+			if res.Query != nil {
+				q.putIntoCache(res.Query, res.DBName, res.Result)
+			}
+
 		case <-ctx.Done():
 			logger.Error().Err(ctx.Err()).Msg("result error")
 
@@ -256,6 +269,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	successProcessed := q.writeResult(ctx, out, scheduled, writer)
 
 	logger.Debug().Int("successProcessed", successProcessed).
+		Err(ctx.Err()).
 		Msg("all database queries finished")
 
 	if successProcessed == 0 {

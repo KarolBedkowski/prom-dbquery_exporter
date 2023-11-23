@@ -200,7 +200,9 @@ loop:
 	for d.active {
 		select {
 		case task := <-d.workQueue:
-			wlog.Debug().Interface("task", task).Msg("handle task")
+			wlog.Debug().Interface("task", task).
+				Int("queue_len", len(d.workQueue)).
+				Msg("handle task")
 
 			if task.Ctx == nil {
 				wlog.Error().Interface("task", task).Msg("missing context")
@@ -210,7 +212,7 @@ loop:
 
 			select {
 			case <-task.Ctx.Done():
-				wlog.Info().Msg("task cancelled")
+				wlog.Warn().Msg("task cancelled before processing")
 
 				continue
 			default:
