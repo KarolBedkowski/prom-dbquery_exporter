@@ -209,6 +209,7 @@ loop:
 
 		case <-ctx.Done():
 			logger.Error().Err(ctx.Err()).Msg("result error")
+			metrics.IncProcessErrorsCnt("cancel")
 
 			break loop
 		}
