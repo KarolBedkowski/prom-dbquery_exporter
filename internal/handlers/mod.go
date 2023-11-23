@@ -21,9 +21,9 @@ import (
 )
 
 const (
-	rwTimeout       = 10 * time.Second
-	maxHeaderBytes  = 1 << 20
-	shutdownTimeout = time.Duration(10) * time.Second
+	defaultRwTimeout       = 300 * time.Second
+	defaultMaxHeaderBytes  = 1 << 20
+	defaultShutdownTimeout = time.Duration(10) * time.Second
 )
 
 // WebHandler manage http handlers.
@@ -33,6 +33,7 @@ type WebHandler struct {
 	server        *http.Server
 	listenAddress string
 	webConfig     string
+	cfg           *conf.Configuration
 }
 
 // NewWebHandler create new WebHandler.
@@ -50,6 +51,7 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 		infoHandler:   ih,
 		listenAddress: listenAddress,
 		webConfig:     webConfig,
+		cfg:           c,
 	}
 
 	local := strings.HasPrefix(listenAddress, "127.0.0.1:") || strings.HasPrefix(listenAddress, "localhost:")
@@ -75,11 +77,16 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 func (w *WebHandler) Run() error {
 	log.Logger.Info().Msgf("Listening on %s", w.listenAddress)
 
+	rwTimeout := defaultRwTimeout
+	if w.cfg.Global.RequestTimeout > 0 {
+		rwTimeout = time.Duration(w.cfg.Global.RequestTimeout) * time.Second
+	}
+
 	w.server = &http.Server{
 		Addr:           w.listenAddress,
 		ReadTimeout:    rwTimeout,
 		WriteTimeout:   rwTimeout,
-		MaxHeaderBytes: maxHeaderBytes,
+		MaxHeaderBytes: defaultMaxHeaderBytes,
 	}
 
 	if err := listenAndServe(w.server, w.webConfig); err != nil {
@@ -95,7 +102,7 @@ func (w *WebHandler) Close(err error) {
 
 	log.Logger.Debug().Msg("web handler close")
 
-	ctx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
 	defer cancel()
 
 	_ = w.server.Shutdown(ctx)
