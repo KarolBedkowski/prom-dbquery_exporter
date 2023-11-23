@@ -88,6 +88,7 @@ type dbLoader struct {
 	log            zerolog.Logger
 	active         bool
 	runningWorkers int32
+	createdWorkers uint64
 }
 
 const tasksQueueSize = 10
@@ -193,15 +194,15 @@ loop:
 }
 
 func (d *dbLoader) worker() {
-	running := atomic.AddInt32(&d.runningWorkers, 1)
-	idx := int(running)
-
-	d.log.Debug().Msgf("start worker %d, running: %d", idx, running)
-
+	idx := int(atomic.AddInt32(&d.runningWorkers, 1))
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
 
+	defer atomic.AddInt32(&d.runningWorkers, -1)
+
+	atomic.AddUint64(&d.createdWorkers, 1)
 	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx), "db", d.dbName)
 
+	wlog.Debug().Msgf("start worker %d", idx)
 loop:
 	for d.active {
 		select {
@@ -234,8 +235,7 @@ loop:
 		}
 	}
 
-	running = atomic.AddInt32(&d.runningWorkers, -1)
-	wlog.Debug().Msgf("worker stopped; running: %d", running)
+	wlog.Debug().Msg("worker stopped")
 }
 
 func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
@@ -266,6 +266,7 @@ func (d *dbLoader) stats() *LoaderStats {
 	s := d.loader.Stats()
 	if s != nil {
 		s.RunningWorkers = uint32(d.runningWorkers)
+		s.CreatedWorkers = d.createdWorkers
 	}
 
 	return s

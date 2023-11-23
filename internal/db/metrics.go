@@ -90,6 +90,11 @@ var (
 		"Number of active workes",
 		[]string{"loader"}, nil,
 	)
+	workersCreatedDesc = prometheus.NewDesc(
+		"dbquery_exporter_workers_created_total",
+		"Total number of created workers",
+		[]string{"loader"}, nil,
+	)
 )
 
 func (l loggersPoolCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -170,6 +175,12 @@ func (l loggersPoolCollector) Collect(ch chan<- prometheus.Metric) {
 			runningWorkersDesc,
 			prometheus.GaugeValue,
 			float64(stat.RunningWorkers),
+			stat.Name,
+		)
+		ch <- prometheus.MustNewConstMetric(
+			workersCreatedDesc,
+			prometheus.CounterValue,
+			float64(stat.CreatedWorkers),
 			stat.Name,
 		)
 	}

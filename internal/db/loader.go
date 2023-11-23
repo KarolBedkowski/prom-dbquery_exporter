@@ -67,4 +67,5 @@ type LoaderStats struct {
 	TotalOpenedConnections uint32
 	TotalFailedConnections uint32
 	RunningWorkers         uint32
+	CreatedWorkers         uint64
 }
