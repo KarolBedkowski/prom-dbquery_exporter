@@ -68,7 +68,9 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 			level = zerolog.DebugLevel
 		}
 
-		llog.WithLevel(level).Msg("request start")
+		llog.WithLevel(level).
+			Strs("agent", request.Header["User-Agent"]).
+			Msg("request start")
 
 		responseData := &responseData{
 			status: 0,
