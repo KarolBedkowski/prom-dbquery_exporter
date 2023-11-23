@@ -129,14 +129,14 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 
 	for _, dbName := range dbNames {
 		for _, queryName := range queryNames {
-			metrics.IncQueryTotalCnt(queryName, dbName)
-
 			query, ok := (q.configuration.Query)[queryName]
 			if !ok {
 				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("unknown query")
 
 				continue
 			}
+
+			metrics.IncQueryTotalCnt(queryName, dbName)
 
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Msg("query result from cache")
