@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
@@ -115,14 +116,6 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 	return dbl, nil
 }
 
-func (d *dbLoader) start() {
-	d.log.Debug().Msg("starting")
-
-	d.active = true
-
-	go d.mainWorker()
-}
-
 func (d *dbLoader) stop() error {
 	if !d.active {
 		return ErrLoaderStopped
@@ -132,6 +125,20 @@ func (d *dbLoader) stop() error {
 	d.stopCh <- struct{}{}
 
 	return nil
+}
+
+func (d *dbLoader) addTask(task *Task) {
+	if !d.active {
+		d.log.Debug().Msg("starting")
+
+		d.active = true
+
+		go d.mainWorker()
+	}
+
+	log.Logger.Debug().Msgf("add new task; queue size: %d", len(d.tasks))
+
+	d.tasks <- task
 }
 
 func (d *dbLoader) updateConf(cfg *conf.Database) bool {
@@ -177,7 +184,7 @@ loop:
 			break loop
 
 		case task := <-d.tasks:
-			if d.runningWorkers < int32(d.cfg.Pool.MaxConnections) {
+			if d.runningWorkers < int32(d.cfg.Pool.MaxConnections) && len(d.workQueue) > 0 {
 				group.Add(1)
 
 				go func() {
@@ -203,8 +210,20 @@ func (d *dbLoader) worker() {
 	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx), "db", d.dbName)
 
 	wlog.Debug().Msgf("start worker %d", idx)
+
+	// stop worker after 1 second of inactivty
+	shutdownTimer := time.NewTimer(time.Second)
+
 loop:
 	for d.active {
+		if !shutdownTimer.Stop() {
+			select {
+			case <-shutdownTimer.C:
+			default:
+			}
+		}
+		shutdownTimer.Reset(time.Second)
+
 		select {
 		case task := <-d.workQueue:
 			wlog.Debug().Interface("task", task).
@@ -223,14 +242,13 @@ loop:
 			case <-task.Ctx.Done():
 				wlog.Warn().Msg("task cancelled before processing")
 
-				continue
 			default:
 				d.handleTask(wlog, task)
 			}
 
 			continue
 
-		default:
+		case <-shutdownTimer.C:
 			break loop
 		}
 	}
@@ -334,11 +352,7 @@ func (d *Databases) PutTask(task *Task) error {
 		}
 	}
 
-	if !dbloader.active {
-		dbloader.start()
-	}
-
-	dbloader.tasks <- task
+	dbloader.addTask(task)
 
 	return nil
 }
