@@ -88,7 +88,7 @@ type dbLoader struct {
 	cfg            *conf.Database
 	log            zerolog.Logger
 	active         bool
-	runningWorkers int32
+	runningWorkers int
 	createdWorkers uint64
 }
 
@@ -155,12 +155,17 @@ func (d *dbLoader) mainWorker() {
 	var group sync.WaitGroup
 
 	wlog := d.log.With().Str("db_loader", d.dbName).Logger()
+	rwCh := make(chan struct{})
+
+	defer close(rwCh)
 
 	support.SetGoroutineLabels(context.Background(), "main_worker", d.dbName)
 
 loop:
 	for d.active {
 		select {
+		case <-rwCh:
+			d.runningWorkers--
 		case conf := <-d.newConfCh:
 			wlog.Debug().Msg("wait for workers finish its current task...")
 			group.Wait()
@@ -184,27 +189,27 @@ loop:
 			break loop
 
 		case task := <-d.tasks:
-			if d.runningWorkers < int32(d.cfg.Pool.MaxConnections) && len(d.workQueue) > 0 {
+			d.workQueue <- task
+
+			if d.runningWorkers < d.cfg.Pool.MaxConnections && len(d.workQueue) > 0 {
 				group.Add(1)
+				d.runningWorkers++
 
 				go func() {
-					d.worker()
+					d.worker(d.runningWorkers)
 					group.Done()
+
+					rwCh <- struct{}{}
 				}()
 			}
-
-			d.workQueue <- task
 		}
 	}
 
 	wlog.Debug().Msg("main worker exit")
 }
 
-func (d *dbLoader) worker() {
-	idx := int(atomic.AddInt32(&d.runningWorkers, 1))
+func (d *dbLoader) worker(idx int) {
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
-
-	defer atomic.AddInt32(&d.runningWorkers, -1)
 
 	atomic.AddUint64(&d.createdWorkers, 1)
 	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx), "db", d.dbName)
