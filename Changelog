@@ -1,3 +1,11 @@
+v0.8.0 2023-11-24
+* dev: refactor code, fix logging, format, fix minor problems
+* fix: fix broken metrics (esp. query time)
+* fix: fix postgresql-related code (sqlx named queries)
+* feat: configurable request timeout
+* dev: include some debug code when compile with `-tags debug`
+* bump: go 1.21, update deps
+
 v0.7.5 2023-02-06
 * fix: connection string for oracle & mysql
 * fix: use v2 go-ora that fix connection to oracle db
