@@ -5,15 +5,21 @@
 package support
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 	"text/template"
 	"unicode"
 )
 
-// TemplateCompile try to compile template
+// TemplateCompile try to compile template.
 func TemplateCompile(name, tmpl string) (*template.Template, error) {
-	return template.New(name).Funcs(templateFuncsMap).Parse(tmpl)
+	t, err := template.New(name).Funcs(templateFuncsMap).Parse(tmpl)
+	if err != nil {
+		return nil, fmt.Errorf("template %s compile error: %w", name, err)
+	}
+
+	return t, nil
 }
 
 var templateFuncsMap = template.FuncMap{
@@ -36,22 +42,26 @@ func replaceSpaces(i string) string {
 		if unicode.IsSpace(r) {
 			return '_'
 		}
+
 		return r
 	}
+
 	return strings.Map(rmap, i)
 }
 
-func removeSpaces(i string) string {
+func removeSpaces(input string) string {
 	rmap := func(r rune) rune {
 		if unicode.IsSpace(r) {
 			return -1
 		}
+
 		return r
 	}
-	return strings.Map(rmap, i)
+
+	return strings.Map(rmap, input)
 }
 
-func keepAlfaNum(i string) string {
+func keepAlfaNum(input string) string {
 	rmap := func(r rune) rune {
 		switch {
 		case r >= 'A' && r <= 'Z':
@@ -61,12 +71,14 @@ func keepAlfaNum(i string) string {
 		case r >= '0' && r <= '9':
 			return r
 		}
+
 		return -1
 	}
-	return strings.Map(rmap, i)
+
+	return strings.Map(rmap, input)
 }
 
-func keepAlfaNumUnderline(i string) string {
+func keepAlfaNumUnderline(input string) string {
 	rmap := func(r rune) rune {
 		switch {
 		case r >= 'A' && r <= 'Z':
@@ -78,12 +90,14 @@ func keepAlfaNumUnderline(i string) string {
 		case r == '_':
 			return r
 		}
+
 		return -1
 	}
-	return strings.Map(rmap, i)
+
+	return strings.Map(rmap, input)
 }
 
-func keepAlfaNumUnderlineSpace(i string) string {
+func keepAlfaNumUnderlineSpace(input string) string {
 	rmap := func(r rune) rune {
 		switch {
 		case r >= 'A' && r <= 'Z':
@@ -97,12 +111,14 @@ func keepAlfaNumUnderlineSpace(i string) string {
 		case r == ' ':
 			return r
 		}
+
 		return -1
 	}
-	return strings.Map(rmap, i)
+
+	return strings.Map(rmap, input)
 }
 
-func keepAlfaNumUnderlineU(i string) string {
+func keepAlfaNumUnderlineU(input string) string {
 	rmap := func(r rune) rune {
 		switch {
 		case unicode.IsLetter(r):
@@ -112,13 +128,14 @@ func keepAlfaNumUnderlineU(i string) string {
 		case r == '_':
 			return r
 		}
+
 		return -1
 	}
 
-	return strings.Map(rmap, i)
+	return strings.Map(rmap, input)
 }
 
-func keepAlfaNumUnderlineSpaceU(i string) string {
+func keepAlfaNumUnderlineSpaceU(input string) string {
 	rmap := func(r rune) rune {
 		switch {
 		case unicode.IsLetter(r):
@@ -130,10 +147,11 @@ func keepAlfaNumUnderlineSpaceU(i string) string {
 		case r == '_':
 			return r
 		}
+
 		return -1
 	}
 
-	return strings.Map(rmap, i)
+	return strings.Map(rmap, input)
 }
 
 func clean(i string) string {
@@ -142,5 +160,6 @@ func clean(i string) string {
 	res = replaceSpaces(res)
 	res = strings.ReplaceAll(res, "__", "_")
 	res = strings.ToLower(res)
+
 	return res
 }

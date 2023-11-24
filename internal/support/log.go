@@ -9,7 +9,6 @@
 package support
 
 import (
-	"fmt"
 	stdlog "log"
 	"os"
 	"time"
@@ -18,25 +17,23 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Logger is application global logger
-var Logger zerolog.Logger
-
-// InitializeLogger set log level and optional log filename
+// InitializeLogger set log level and optional log filename.
 func InitializeLogger(level string, format string) {
-	var l zerolog.Logger
+	var llog zerolog.Logger
 
 	switch format {
 	default:
-		fmt.Printf("unknown log format; using logfmt")
+		log.Error().Msg("unknown log format; using logfmt")
+
 		fallthrough
 	case "logfmt":
-		l = log.Output(zerolog.ConsoleWriter{
+		llog = log.Output(zerolog.ConsoleWriter{
 			Out:        os.Stderr,
 			NoColor:    !outputIsConsole(),
 			TimeFormat: time.RFC3339,
 		})
 	case "json":
-		l = log.Logger
+		llog = log.Logger
 	}
 
 	switch level {
@@ -51,17 +48,18 @@ func InitializeLogger(level string, format string) {
 	case "fatal":
 		zerolog.SetGlobalLevel(zerolog.FatalLevel)
 	default:
-		fmt.Printf("unknown log level '%s'; using debug", level)
+		log.Error().Msgf("unknown log level '%s'; using debug", level)
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 
-	log.Logger = l.With().Caller().Logger()
-	Logger = log.Logger
+	log.Logger = llog.With().Caller().Logger()
+
 	stdlog.SetFlags(0)
 	stdlog.SetOutput(log.Logger)
 }
 
 func outputIsConsole() bool {
 	fileInfo, _ := os.Stdout.Stat()
-	return (fileInfo.Mode() & os.ModeCharDevice) != 0
+
+	return fileInfo != nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
 }

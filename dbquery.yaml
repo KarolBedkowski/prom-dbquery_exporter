@@ -1,3 +1,5 @@
+global:
+  request_timeout: 600
 # sample database databases configuration
 database:
   testdb:
@@ -80,6 +82,7 @@ query:
        select s.name, count(t.id) as cnt
        from sports s left join trips t on s.id = t.sport_id
        group by s.name
+
     # result of query is cached by 20 second
     caching_time: 20
     # timeout define query timeout in second

@@ -13,8 +13,12 @@ import (
 	"strings"
 	"text/template"
 
-	"prom-dbquery_exporter.app/conf"
-	"prom-dbquery_exporter.app/support"
+	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/rs/zerolog/hlog"
+	"github.com/rs/zerolog/log"
 )
 
 const infoTmpl = `
@@ -60,6 +64,7 @@ func redact(key string, val interface{}) string {
 	if strings.HasPrefix(strings.ToLower(key), "pass") {
 		return "***"
 	}
+
 	return fmt.Sprintf("%v", val)
 }
 
@@ -67,21 +72,43 @@ var funcMap = template.FuncMap{
 	"redact": redact,
 }
 
-// infoHandler handle request and return information about current configuration
+// infoHandler handle request and return information about current configuration.
 type infoHandler struct {
 	Configuration *conf.Configuration
+
+	tmpl *template.Template
+}
+
+// newInfoHandler create new info handler with logging and instrumentation.
+func newInfoHandler(conf *conf.Configuration) *infoHandler {
+	return &infoHandler{
+		Configuration: conf,
+		tmpl:          template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl)),
+	}
+}
+
+func (q *infoHandler) Handler() http.Handler {
+	h := newLogMiddleware(
+		promhttp.InstrumentHandlerDuration(
+			metrics.NewReqDurationWraper("info"),
+			q), "info", false)
+
+	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
+	h = hlog.NewHandler(log.Logger)(h)
+
+	return h
 }
 
 func (q infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !strings.HasPrefix(r.RemoteAddr, "127.") && !strings.HasPrefix(r.RemoteAddr, "localhost:") {
 		http.Error(w, "forbidden", http.StatusForbidden)
+
 		return
 	}
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	t := template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl))
-	if err := t.Execute(w, q.Configuration); err != nil {
-		support.Logger.Error().Err(err).Msg("executing template error")
+	if err := q.tmpl.Execute(w, q.Configuration); err != nil {
+		log.Logger.Error().Err(err).Msg("executing template error")
 	}
 }

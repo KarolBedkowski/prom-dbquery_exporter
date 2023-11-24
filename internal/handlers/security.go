@@ -12,6 +12,7 @@ package handlers
 import (
 	"crypto/tls"
 	"encoding/hex"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -20,51 +21,58 @@ import (
 
 	config_util "github.com/prometheus/common/config"
 	"github.com/prometheus/exporter-toolkit/web"
+	"github.com/rs/zerolog/log"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v2"
-	"prom-dbquery_exporter.app/metrics"
-	"prom-dbquery_exporter.app/support"
+	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-// listenAndServe start webserver
+// listenAndServe start webserver.
 func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return err
+		return fmt.Errorf("listen error: %w", err)
 	}
 
 	defer listener.Close()
 
 	if tlsConfigPath == "" {
-		support.Logger.Info().Msg("TLS is disabled.")
-		return server.Serve(listener)
+		log.Logger.Info().Msg("TLS is disabled.")
+
+		if err := server.Serve(listener); err != nil {
+			return fmt.Errorf("server error: %w", err)
+		}
+
+		return nil
 	}
 
-	if err := web.Validate(tlsConfigPath); err != nil {
-		return err
-	}
-
-	c, err := getConfig(tlsConfigPath)
+	cfg, err := loadTLSConfig(tlsConfigPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("tls configuration error: %w", err)
 	}
 
 	var handler http.Handler = http.DefaultServeMux
 	if server.Handler != nil {
 		handler = server.Handler
 	}
-	server.Handler = newSecWebHandler(c, handler)
 
-	config, err := web.ConfigToTLSConfig(&c.TLSConfig)
+	server.Handler = newSecWebHandler(cfg, handler)
+
+	config, err := web.ConfigToTLSConfig(&cfg.TLSConfig)
 	if err == nil {
-		if !c.HTTPConfig.HTTP2 {
+		if !cfg.HTTPConfig.HTTP2 {
 			server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 		}
 		// Valid TLS config.
-		support.Logger.Info().Msg("TLS is enabled.")
+		log.Logger.Info().Msg("TLS is enabled.")
 	} else {
-		support.Logger.Info().Msg("TLS is disabled.")
-		return server.Serve(listener)
+		log.Logger.Info().Msg("TLS is disabled.")
+
+		if err := server.Serve(listener); err != nil {
+			return fmt.Errorf("server error: %w", err)
+		}
+
+		return nil
 	}
 
 	server.TLSConfig = config
@@ -73,22 +81,44 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 		if err != nil {
 			return nil, err
 		}
+
 		tlsconf, err := web.ConfigToTLSConfig(&config.TLSConfig)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("config tls error: %w", err)
 		}
+
 		tlsconf.NextProtos = server.TLSConfig.NextProtos
+
 		return tlsconf, nil
 	}
-	return server.ServeTLS(listener, "", "")
+
+	if err := server.ServeTLS(listener, "", ""); err != nil {
+		return fmt.Errorf("server tls error: %w", err)
+	}
+
+	return nil
+}
+
+func loadTLSConfig(tlsConfigPath string) (*web.Config, error) {
+	if err := web.Validate(tlsConfigPath); err != nil {
+		return nil, fmt.Errorf("validate tls config error: %w", err)
+	}
+
+	cfg, err := getConfig(tlsConfigPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return cfg, nil
 }
 
 func getConfig(configPath string) (*web.Config, error) {
 	content, err := os.ReadFile(configPath) // #nosec
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("read config file error: %w", err)
 	}
-	c := &web.Config{
+
+	cfg := &web.Config{
 		TLSConfig: web.TLSConfig{
 			MinVersion:               tls.VersionTLS12,
 			MaxVersion:               tls.VersionTLS13,
@@ -96,9 +126,15 @@ func getConfig(configPath string) (*web.Config, error) {
 		},
 		HTTPConfig: web.HTTPConfig{HTTP2: true},
 	}
-	err = yaml.UnmarshalStrict(content, c)
-	c.TLSConfig.SetDirectory(filepath.Dir(configPath))
-	return c, err
+
+	err = yaml.UnmarshalStrict(content, cfg)
+	cfg.TLSConfig.SetDirectory(filepath.Dir(configPath))
+
+	if err != nil {
+		return cfg, fmt.Errorf("unmarshal config error: %w", err)
+	}
+
+	return cfg, nil
 }
 
 type secWebHandler struct {
@@ -112,9 +148,9 @@ type secWebHandler struct {
 
 func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 	if cu := len(conf.Users); cu > 0 {
-		support.Logger.Info().Int("users", cu).Msg("Authorization enabled")
+		log.Logger.Info().Int("users", cu).Msg("Authorization enabled")
 	} else {
-		support.Logger.Info().Msg("Authorization disabled")
+		log.Logger.Info().Msg("Authorization disabled")
 	}
 
 	return &secWebHandler{
@@ -125,18 +161,19 @@ func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 	}
 }
 
-func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
 	// Configure http headers.
 	for k, v := range wh.headers {
-		w.Header().Set(k, v)
+		writer.Header().Set(k, v)
 	}
 
 	if len(wh.users) == 0 {
-		wh.handler.ServeHTTP(w, r)
+		wh.handler.ServeHTTP(writer, req)
+
 		return
 	}
 
-	user, pass, auth := r.BasicAuth()
+	user, pass, auth := req.BasicAuth()
 	if auth {
 		hashedPassword, validUser := wh.users[user]
 
@@ -151,6 +188,7 @@ func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			[]byte(pass)...))
 
 		wh.mtx.Lock()
+
 		authOk, ok := wh.cache[cacheKey]
 		if !ok {
 			// This user, hashedPassword, password is not cached.
@@ -162,12 +200,13 @@ func (wh *secWebHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		wh.mtx.Unlock()
 
 		if authOk && validUser {
-			wh.handler.ServeHTTP(w, r)
+			wh.handler.ServeHTTP(writer, req)
+
 			return
 		}
 	}
 
 	metrics.IncProcessErrorsCnt("unauthorized")
-	w.Header().Set("WWW-Authenticate", "Basic")
-	http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+	writer.Header().Set("WWW-Authenticate", "Basic")
+	http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }

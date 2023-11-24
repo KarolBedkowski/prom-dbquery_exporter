@@ -1,21 +1,19 @@
-package db
-
-//
 // formatters.go
 // Copyright (C) 2021 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
-//
+package db
 
 import (
 	"bytes"
 	"context"
 	"fmt"
 
-	"prom-dbquery_exporter.app/conf"
+	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/conf"
 )
 
-// resultTmplData keep query result and some metadata parsed to template
+// resultTmplData keep query result and some metadata parsed to template.
 type resultTmplData struct {
 	// Records (rows)
 	R []Record
@@ -33,26 +31,31 @@ type resultTmplData struct {
 	Database string
 }
 
-// FormatResult format query result using template from query configuration
-func FormatResult(ctx context.Context, qr *QueryResult, query *conf.Query,
-	db *conf.Database) ([]byte, error) {
-	r := &resultTmplData{
+// FormatResult format query result using template from query configuration.
+func FormatResult(ctx context.Context, result *QueryResult, query *conf.Query,
+	db *conf.Database,
+) ([]byte, error) {
+	llog := log.Ctx(ctx)
+	llog.Debug().Msg("format result")
+
+	res := &resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,
-		R:              qr.Records,
-		P:              qr.Params,
+		R:              result.Records,
+		P:              result.Params,
 		L:              db.Labels,
-		QueryStartTime: qr.Start.Unix(),
-		QueryDuration:  qr.Duration,
-		Count:          len(qr.Records),
+		QueryStartTime: result.Start.Unix(),
+		QueryDuration:  result.Duration,
+		Count:          len(result.Records),
 	}
 
 	var output bytes.Buffer
-	err := query.MetricTpl.Execute(&output, r)
-	if err != nil {
+
+	if err := query.MetricTpl.Execute(&output, res); err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 
 	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
+
 	return b, nil
 }
