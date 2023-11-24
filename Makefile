@@ -24,6 +24,13 @@ build_release:
 
 .PHONY: build_arm64
 
+build_arm64_debug:
+	CGO_ENABLED=0 GOARCH=arm64 GOOS=linux \
+		go build -v -o dbquery_exporter_arm64  \
+			--ldflags $(LDFLAGS) \
+			--tags debug \
+			cli/main.go
+
 build_arm64:
 	CGO_ENABLED=0 \
 		GOARCH=arm64 \
@@ -45,7 +52,7 @@ lint:
 
 .PHONY: format
 format:
-	find . -name '*.go' -type f -exec wsl -fix {} ';'
+	find cli -type d -exec wsl -fix ./{} ';'
 	find . -name '*.go' -type f -exec gofumpt -w {} ';'
 
 # vim:ft=make
