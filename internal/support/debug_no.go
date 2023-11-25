@@ -1,5 +1,6 @@
 //go:build !debug
 // +build !debug
+
 //
 // debug.go
 // Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
@@ -13,6 +14,6 @@ import (
 	"context"
 )
 
-func SetGoroutineLabels(ctx context.Context, labels ...string) {
+func SetGoroutineLabels(ctx context.Context, labels ...string) { //nolint:all
 	// ignore
 }

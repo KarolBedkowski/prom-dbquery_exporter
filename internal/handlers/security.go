@@ -27,6 +27,16 @@ import (
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
+func serveHTTP(server *http.Server, listener net.Listener) error {
+	log.Logger.Info().Msg("TLS is disabled.")
+
+	if err := server.Serve(listener); err != nil {
+		return fmt.Errorf("server error: %w", err)
+	}
+
+	return nil
+}
+
 // listenAndServe start webserver.
 func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	listener, err := net.Listen("tcp", server.Addr)
@@ -37,13 +47,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 	defer listener.Close()
 
 	if tlsConfigPath == "" {
-		log.Logger.Info().Msg("TLS is disabled.")
-
-		if err := server.Serve(listener); err != nil {
-			return fmt.Errorf("server error: %w", err)
-		}
-
-		return nil
+		return serveHTTP(server, listener)
 	}
 
 	cfg, err := loadTLSConfig(tlsConfigPath)
@@ -66,13 +70,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 		// Valid TLS config.
 		log.Logger.Info().Msg("TLS is enabled.")
 	} else {
-		log.Logger.Info().Msg("TLS is disabled.")
-
-		if err := server.Serve(listener); err != nil {
-			return fmt.Errorf("server error: %w", err)
-		}
-
-		return nil
+		return serveHTTP(server, listener)
 	}
 
 	server.TLSConfig = config

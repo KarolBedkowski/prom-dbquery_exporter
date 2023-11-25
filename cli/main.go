@@ -30,7 +30,7 @@ func init() {
 }
 
 // Main is main function for cli.
-func main() {
+func main() { //nolint:funlen
 	var (
 		showVersion = flag.Bool("version", false, "Print version information.")
 		configFile  = flag.String("config.file", "dbquery.yaml",
@@ -50,7 +50,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		_, _ = fmt.Println(version.Print("DBQuery exporter"))
+		_, _ = fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
 
 		os.Exit(0)
 	}

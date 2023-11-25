@@ -159,7 +159,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				Query:     query,
 			}
 
-			if err := db.DatabasesPool.PutTask(&task); err != nil {
+			if err := db.DatabasesPool.PutTask(&task); err != nil { //nolint:contextcheck
 				tr.LazyPrintf("scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
@@ -231,7 +231,7 @@ loop:
 	return successProcessed
 }
 
-func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
+func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) { //nolint:funlen
 	ctx := req.Context()
 	logger := log.Ctx(ctx)
 

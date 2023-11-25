@@ -13,7 +13,6 @@ import (
 	"reflect"
 	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -27,7 +26,8 @@ import (
 
 // Task is query to perform.
 type Task struct {
-	Ctx context.Context
+	// Ctx is context used for cancellation.
+	Ctx context.Context //nolint:containedctx
 
 	DBName    string
 	QueryName string
@@ -75,37 +75,40 @@ func (t TaskResult) MarshalZerologObject(e *zerolog.Event) {
 		Int("result_size", len(t.Result))
 }
 
-type dbLoader struct {
-	dbName string
+// Database handle task for one database (loader).
+type database struct {
+	sync.Mutex
 
+	dbName string
 	loader Loader
+	cfg    *conf.Database
+	log    zerolog.Logger
+	active bool
+	// runningWorkers is number of active workers.
+	runningWorkers int
+
 	// tasks is queue task to schedule
 	tasks chan *Task
 	// workQueue is chan that distribute task to workers
 	workQueue chan *Task
 	// newConfCh bring new configuration
-	newConfCh      chan *conf.Database
-	stopCh         chan struct{}
-	cfg            *conf.Database
-	log            zerolog.Logger
-	active         bool
-	runningWorkers int
-	createdWorkers uint64
+	newConfCh chan *conf.Database
+	// stopCh stopping main worker.
+	stopCh chan struct{}
 }
 
 const tasksQueueSize = 10
 
-func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
+func newDatabase(name string, cfg *conf.Database) (*database, error) {
 	loader, err := newLoader(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("get loader error: %w", err)
 	}
 
-	dbl := &dbLoader{
+	dbl := &database{
 		dbName: name,
 		loader: loader,
 
-		tasks:          make(chan *Task, 1),
 		workQueue:      make(chan *Task, tasksQueueSize),
 		newConfCh:      make(chan *conf.Database, 1),
 		stopCh:         make(chan struct{}, 1),
@@ -117,7 +120,10 @@ func newDBLoader(name string, cfg *conf.Database) (*dbLoader, error) {
 	return dbl, nil
 }
 
-func (d *dbLoader) stop() error {
+func (d *database) stop() error {
+	d.Lock()
+	defer d.Unlock()
+
 	if !d.active {
 		return ErrLoaderStopped
 	}
@@ -128,21 +134,33 @@ func (d *dbLoader) stop() error {
 	return nil
 }
 
-func (d *dbLoader) addTask(task *Task) {
+func (d *database) addTask(task *Task) {
+	d.Lock()
+
 	if !d.active {
 		d.log.Debug().Msg("starting")
 
 		d.active = true
 
+		if d.tasks == nil {
+			d.tasks = make(chan *Task, 1)
+		}
+
 		go d.mainWorker()
 	}
 
-	log.Logger.Debug().Msgf("add new task; queue size: %d", len(d.tasks))
+	d.Unlock()
 
-	d.tasks <- task
+	d.log.Debug().Msgf("add new task; queue size: %d", len(d.tasks))
+
+	if d.tasks != nil {
+		d.tasks <- task
+	} else {
+		d.log.Warn().Msg("try add new task to closed queue")
+	}
 }
 
-func (d *dbLoader) updateConf(cfg *conf.Database) bool {
+func (d *database) updateConf(cfg *conf.Database) bool {
 	if reflect.DeepEqual(d.cfg, cfg) {
 		return false
 	}
@@ -152,10 +170,11 @@ func (d *dbLoader) updateConf(cfg *conf.Database) bool {
 	return true
 }
 
-func (d *dbLoader) mainWorker() {
+func (d *database) mainWorker() {
 	var group sync.WaitGroup
 
 	wlog := d.log.With().Str("db_loader", d.dbName).Logger()
+	// rwCh receive worker-stopped events.
 	rwCh := make(chan struct{})
 
 	defer close(rwCh)
@@ -163,11 +182,13 @@ func (d *dbLoader) mainWorker() {
 	support.SetGoroutineLabels(context.Background(), "main_worker", d.dbName)
 
 loop:
-	for d.active {
+	for d.active && d.tasks != nil {
 		select {
 		case <-rwCh:
 			d.runningWorkers--
+
 		case conf := <-d.newConfCh:
+			d.Lock()
 			wlog.Debug().Msg("wait for workers finish its current task...")
 			group.Wait()
 			wlog.Debug().Msg("stopped workers")
@@ -178,14 +199,16 @@ loop:
 
 			d.cfg = conf
 
+			d.Unlock()
 			wlog.Debug().Msg("conf updated")
 
 		case <-d.stopCh:
-			d.log.Debug().Msgf("stopping workers...")
+			d.log.Debug().Msg("stopping workers...")
 			d.active = false
 			close(d.tasks)
+			d.tasks = nil
 			group.Wait()
-			d.log.Debug().Msgf("stoppped")
+			d.log.Debug().Msg("stopped")
 
 			break loop
 
@@ -209,10 +232,10 @@ loop:
 	wlog.Debug().Msg("main worker exit")
 }
 
-func (d *dbLoader) worker(idx int) {
+func (d *database) worker(idx int) {
 	wlog := d.log.With().Int("worker_idx", idx).Logger()
 
-	atomic.AddUint64(&d.createdWorkers, 1)
+	workersCreatedCnt.WithLabelValues(d.dbName).Inc()
 	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx), "db", d.dbName)
 
 	wlog.Debug().Msgf("start worker %d", idx)
@@ -222,6 +245,7 @@ func (d *dbLoader) worker(idx int) {
 
 loop:
 	for d.active {
+		// reset worker shutdown timer after each iteration.
 		if !shutdownTimer.Stop() {
 			select {
 			case <-shutdownTimer.C:
@@ -262,9 +286,10 @@ loop:
 	wlog.Debug().Msg("worker stopped")
 }
 
-func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
+func (d *database) handleTask(wlog zerolog.Logger, task *Task) {
 	ctx := task.Ctx
 	tr, _ := trace.FromContext(ctx)
+	llog := wlog.With().Object("task", task).Logger()
 
 	tr.LazyPrintf("start query %q in %q", task.QueryName, task.DBName)
 
@@ -276,7 +301,8 @@ func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
 		return
 	}
 
-	wlog.Debug().Interface("task", task).Msg("result received")
+	llog.Debug().Msg("result received")
+	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
 
 	output, err := FormatResult(ctx, result, task.Query, d.cfg)
 	if err != nil {
@@ -286,20 +312,18 @@ func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
 		return
 	}
 
-	wlog.Debug().Interface("task", task).Msg("result formatted")
-	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
-	task.Output <- task.newResult(nil, output)
-	tr.LazyPrintf("finished query %q in %q", task.QueryName, task.DBName)
+	llog.Debug().Msg("result formatted")
+	tr.LazyPrintf("finished  query and formatting %q in %q", task.QueryName, task.DBName)
+
+	select {
+	case task.Output <- task.newResult(nil, output):
+	default:
+		llog.Warn().Msg("can't send response")
+	}
 }
 
-func (d *dbLoader) stats() *LoaderStats {
-	s := d.loader.Stats()
-	if s != nil {
-		s.RunningWorkers = uint32(d.runningWorkers)
-		s.CreatedWorkers = d.createdWorkers
-	}
-
-	return s
+func (d *database) stats() *LoaderStats {
+	return d.loader.Stats()
 }
 
 // Databases is collection of all configured databases.
@@ -307,7 +331,7 @@ type Databases struct {
 	sync.Mutex
 
 	cfg *conf.Configuration
-	dbs map[string]*dbLoader
+	dbs map[string]*database
 
 	log zerolog.Logger
 }
@@ -315,13 +339,13 @@ type Databases struct {
 // newDatabases create new Databases object.
 func newDatabases() *Databases {
 	return &Databases{
-		dbs: make(map[string]*dbLoader),
+		dbs: make(map[string]*database),
 		cfg: nil,
 		log: log.Logger.With().Str("module", "databases").Logger(),
 	}
 }
 
-func (d *Databases) createLoader(dbName string) (*dbLoader, error) {
+func (d *Databases) createDatabase(dbName string) (*database, error) {
 	if d.cfg == nil {
 		return nil, ErrAppNotConfigured
 	}
@@ -331,9 +355,7 @@ func (d *Databases) createLoader(dbName string) (*dbLoader, error) {
 		return nil, ErrUnknownDatabase
 	}
 
-	var err error
-
-	dl, err := newDBLoader(dbName, dconf)
+	dl, err := newDatabase(dbName, dconf)
 	if err != nil {
 		return nil, fmt.Errorf("create dbloader error: %w", err)
 	}
@@ -343,7 +365,7 @@ func (d *Databases) createLoader(dbName string) (*dbLoader, error) {
 	return dl, nil
 }
 
-// PutTask schedule new task.
+// PutTask schedule new task to process in this database.
 func (d *Databases) PutTask(task *Task) error {
 	d.Lock()
 	defer d.Unlock()
@@ -354,7 +376,7 @@ func (d *Databases) PutTask(task *Task) error {
 	if !ok {
 		var err error
 
-		dbloader, err = d.createLoader(dbName)
+		dbloader, err = d.createDatabase(dbName)
 		if err != nil {
 			return err
 		}
@@ -380,7 +402,7 @@ func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 		return
 	}
 
-	d.log.Debug().Msg("update configuration")
+	d.log.Debug().Msg("update configuration begin")
 
 	// update existing
 	for k, dbConf := range cfg.Database {
@@ -426,12 +448,12 @@ func (d *Databases) Close() {
 
 // loadersInPool return number or loaders in pool.
 func (d *Databases) loadersInPool() float64 {
-	d.Lock()
-	defer d.Unlock()
-
 	if d == nil {
 		return 0
 	}
+
+	d.Lock()
+	defer d.Unlock()
 
 	return float64(len(d.dbs))
 }
