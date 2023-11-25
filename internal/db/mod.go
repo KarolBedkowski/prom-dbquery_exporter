@@ -19,6 +19,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/net/trace"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/support"
@@ -262,7 +263,12 @@ loop:
 }
 
 func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
-	result, err := d.loader.Query(task.Ctx, task.Query, task.Params)
+	ctx := task.Ctx
+	tr, _ := trace.FromContext(ctx)
+
+	tr.LazyPrintf("start query %q in %q", task.QueryName, task.DBName)
+
+	result, err := d.loader.Query(ctx, task.Query, task.Params)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("query")
 		task.Output <- task.newResult(fmt.Errorf("query error: %w", err), nil)
@@ -272,7 +278,7 @@ func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
 
 	wlog.Debug().Interface("task", task).Msg("result received")
 
-	output, err := FormatResult(task.Ctx, result, task.Query, d.cfg)
+	output, err := FormatResult(ctx, result, task.Query, d.cfg)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("format")
 		task.Output <- task.newResult(fmt.Errorf("format error: %w", err), nil)
@@ -283,6 +289,7 @@ func (d *dbLoader) handleTask(wlog zerolog.Logger, task *Task) {
 	wlog.Debug().Interface("task", task).Msg("result formatted")
 	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
 	task.Output <- task.newResult(nil, output)
+	tr.LazyPrintf("finished query %q in %q", task.QueryName, task.DBName)
 }
 
 func (d *dbLoader) stats() *LoaderStats {
