@@ -13,6 +13,7 @@ require (
 	github.com/rs/zerolog v1.31.0
 	github.com/sijms/go-ora/v2 v2.7.20
 	golang.org/x/crypto v0.15.0
+	golang.org/x/net v0.18.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -36,7 +37,6 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rs/xid v1.5.0 // indirect
 	github.com/stretchr/testify v1.8.4 // indirect
-	golang.org/x/net v0.18.0 // indirect
 	golang.org/x/oauth2 v0.14.0 // indirect
 	golang.org/x/sync v0.5.0 // indirect
 	golang.org/x/sys v0.14.0 // indirect

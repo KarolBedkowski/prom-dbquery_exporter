@@ -14,8 +14,8 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/net/trace"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 const (
@@ -163,11 +163,9 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 ) (*QueryResult, error) {
 	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
-
-	tr, _ := trace.FromContext(ctx)
 	result := &QueryResult{Start: time.Now()}
 
-	tr.LazyPrintf("db: opening connection")
+	support.TracePrintf(ctx, "db: opening connection")
 
 	conn, err := g.getConnection(ctx)
 	if err != nil {
@@ -195,7 +193,7 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 
 	defer tx.Rollback() //nolint:errcheck
 
-	tr.LazyPrintf("db: begin query")
+	support.TracePrintf(ctx, "db: begin query %q", query.Name)
 
 	rows, err := tx.NamedQuery(query.SQL, queryParams)
 	if err != nil {

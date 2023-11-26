@@ -18,7 +18,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/net/trace"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/support"
@@ -48,6 +47,7 @@ func (d *Task) newResult(err error, result []byte) *TaskResult {
 	}
 }
 
+// MarshalZerologObject implements LogObjectMarshaler.
 func (d Task) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("db", d.DBName).
 		Str("query", d.QueryName).
@@ -68,6 +68,7 @@ type TaskResult struct {
 	Query     *conf.Query
 }
 
+// MarshalZerologObject implements LogObjectMarshaler.
 func (t TaskResult) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("db", t.DBName).
 		Str("query", t.QueryName).
@@ -290,10 +291,9 @@ loop:
 
 func (d *database) handleTask(wlog zerolog.Logger, task *Task) {
 	ctx := task.Ctx
-	tr, _ := trace.FromContext(ctx)
 	llog := wlog.With().Object("task", task).Logger()
 
-	tr.LazyPrintf("start query %q in %q", task.QueryName, task.DBName)
+	support.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
 
 	result, err := d.loader.Query(ctx, task.Query, task.Params)
 	if err != nil {
@@ -315,7 +315,7 @@ func (d *database) handleTask(wlog zerolog.Logger, task *Task) {
 	}
 
 	llog.Debug().Msg("result formatted")
-	tr.LazyPrintf("finished  query and formatting %q in %q", task.QueryName, task.DBName)
+	support.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
 
 	select {
 	case task.Output <- task.newResult(nil, output):
@@ -435,6 +435,7 @@ func (d *Databases) UpdateConf(cfg *conf.Configuration) {
 	d.cfg = cfg
 }
 
+// Close database.
 func (d *Databases) Close() {
 	d.Lock()
 	defer d.Unlock()

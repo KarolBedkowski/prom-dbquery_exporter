@@ -18,7 +18,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
-	"golang.org/x/net/trace"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/metrics"
@@ -83,6 +82,7 @@ func (q *queryHandler) Handler() http.Handler {
 			metrics.NewReqDurationWraper("query"),
 			q), "query", false)
 
+	h = support.NewTraceMiddleware("dbquery_exporter")(h)
 	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
 	h = hlog.NewHandler(log.Logger)(h)
 
@@ -124,8 +124,6 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
 
-	tr, _ := trace.FromContext(ctx)
-
 	output := make(chan *db.TaskResult, len(dbNames)*len(queryNames))
 
 	scheduled := 0
@@ -143,7 +141,9 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Msg("query result from cache")
-				tr.LazyPrintf("data from cache for %q from %q", queryName, dbName)
+
+				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
+
 				output <- &db.TaskResult{Result: data, DBName: dbName, QueryName: queryName}
 				scheduled++
 
@@ -160,11 +160,11 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			}
 
 			if err := db.DatabasesPool.PutTask(&task); err != nil { //nolint:contextcheck
-				tr.LazyPrintf("scheduled %q to %q error: %v", queryName, dbName, err)
+				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
 			} else {
-				tr.LazyPrintf("scheduled %q to %q", queryName, dbName)
+				support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
 				scheduled++
 			}
 		}
@@ -180,7 +180,6 @@ func (q *queryHandler) writeResult(ctx context.Context, output chan *db.TaskResu
 	logger.Debug().Msg("database sequential processing start")
 
 	successProcessed := 0
-	tr, _ := trace.FromContext(ctx)
 
 loop:
 	for scheduled > 0 {
@@ -190,21 +189,21 @@ loop:
 
 			if res.Error != nil {
 				logger.Error().Err(res.Error).Str("query", res.QueryName).Str("db", res.DBName).Msg("processing query error")
-				tr.LazyPrintf("process query %q from %q: %v", res.QueryName, res.DBName, res.Error)
+				support.TracePrintf(ctx, "process query %q from %q: %v", res.QueryName, res.DBName, res.Error)
 
 				msg := fmt.Sprintf("# query %q in %q processing error: %q\n",
 					res.QueryName, res.DBName, res.Error.Error())
 				if _, err := writer.Write([]byte(msg)); err != nil {
 					logger.Error().Err(err).Msg("write error")
+					support.TraceErrorf(ctx, "write error: %s", err)
 					metrics.IncProcessErrorsCnt("write")
-					tr.SetError()
 				}
 
 				continue
 			}
 
 			logger.Debug().Object("res", res).Msg("write result")
-			tr.LazyPrintf("write result %q from %q", res.QueryName, res.DBName)
+			support.TracePrintf(ctx, "write result %q from %q", res.QueryName, res.DBName)
 
 			if _, err := writer.Write(res.Result); err != nil {
 				logger.Error().Err(err).Msg("write error")
@@ -218,9 +217,10 @@ loop:
 			}
 
 		case <-ctx.Done():
-			logger.Error().Err(ctx.Err()).Msg("result error")
+			err := ctx.Err()
+			logger.Error().Err(err).Msg("result error")
 			metrics.IncProcessErrorsCnt("cancel")
-			tr.SetError()
+			support.TraceErrorf(ctx, "result error: %s", err)
 
 			break loop
 		}
@@ -239,11 +239,6 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	dbNames := req.URL.Query()["database"]
 	requestID, _ := hlog.IDFromCtx(ctx)
 
-	tr := trace.New("dbquery_exporter.query_handler", req.URL.String()+" "+requestID.String())
-	defer tr.Finish()
-
-	ctx = trace.NewContext(ctx, tr)
-
 	support.SetGoroutineLabels(ctx, "requestID", requestID.String(), "req", req.URL.String())
 
 	for _, g := range req.URL.Query()["group"] {
@@ -256,7 +251,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 	if len(queryNames) == 0 || len(dbNames) == 0 {
 		http.Error(writer, "missing required parameters", http.StatusBadRequest)
-		tr.SetError()
+		support.TraceErrorf(ctx, "bad request")
 
 		return
 	}
@@ -264,7 +259,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	// prevent to run the same request twice
 	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
 		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
-		tr.SetError()
+		support.TraceErrorf(ctx, "query locked")
 
 		return
 	}
@@ -286,11 +281,11 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		defer cancel()
 	}
 
-	tr.LazyPrintf("start quering db")
+	support.TracePrintf(ctx, "start quering db")
 
 	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params)
 
-	tr.LazyPrintf("start reading data, scheduled: %d", scheduled)
+	support.TracePrintf(ctx, "start reading data, scheduled: %d", scheduled)
 
 	successProcessed := q.writeResult(ctx, out, scheduled, writer)
 
