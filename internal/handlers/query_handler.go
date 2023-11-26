@@ -144,7 +144,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Msg("query result from cache")
 				tr.LazyPrintf("data from cache for %q from %q", queryName, dbName)
-				output <- &db.TaskResult{Result: data}
+				output <- &db.TaskResult{Result: data, DBName: dbName, QueryName: queryName}
 				scheduled++
 
 				continue
@@ -204,7 +204,7 @@ loop:
 			}
 
 			logger.Debug().Object("res", res).Msg("write result")
-			tr.LazyPrintf("write result  %q from %q", res.QueryName, res.DBName)
+			tr.LazyPrintf("write result %q from %q", res.QueryName, res.DBName)
 
 			if _, err := writer.Write(res.Result); err != nil {
 				logger.Error().Err(err).Msg("write error")
