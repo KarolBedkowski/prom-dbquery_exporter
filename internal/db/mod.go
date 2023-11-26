@@ -84,9 +84,6 @@ type database struct {
 	cfg    *conf.Database
 	log    zerolog.Logger
 	active bool
-	// runningWorkers is number of active workers.
-	runningWorkers int
-
 	// tasks is queue task to schedule
 	tasks chan *Task
 	// workQueue is chan that distribute task to workers
@@ -109,12 +106,11 @@ func newDatabase(name string, cfg *conf.Database) (*database, error) {
 		dbName: name,
 		loader: loader,
 
-		workQueue:      make(chan *Task, tasksQueueSize),
-		newConfCh:      make(chan *conf.Database, 1),
-		stopCh:         make(chan struct{}, 1),
-		cfg:            cfg,
-		log:            log.Logger.With().Str("dbname", name).Logger(),
-		runningWorkers: 0,
+		workQueue: make(chan *Task, tasksQueueSize),
+		newConfCh: make(chan *conf.Database, 1),
+		stopCh:    make(chan struct{}, 1),
+		cfg:       cfg,
+		log:       log.Logger.With().Str("dbname", name).Logger(),
 	}
 
 	return dbl, nil
@@ -136,6 +132,7 @@ func (d *database) stop() error {
 
 func (d *database) addTask(task *Task) {
 	d.Lock()
+	defer d.Unlock()
 
 	if !d.active {
 		d.log.Debug().Msg("starting")
@@ -148,8 +145,6 @@ func (d *database) addTask(task *Task) {
 
 		go d.mainWorker()
 	}
-
-	d.Unlock()
 
 	d.log.Debug().Msgf("add new task; queue size: %d", len(d.tasks))
 
@@ -170,12 +165,24 @@ func (d *database) updateConf(cfg *conf.Database) bool {
 	return true
 }
 
-func (d *database) mainWorker() {
-	var group sync.WaitGroup
+func (d *database) recreateLoader(cfg *conf.Database) {
+	newLoader, err := newLoader(cfg)
+	if err != nil {
+		d.log.Error().Err(err).Msg("create loader with new configuration error")
+		d.log.Error().Msg("configuration not updated!")
+	} else {
+		d.cfg = cfg
+		d.loader = newLoader
 
-	wlog := d.log.With().Str("db_loader", d.dbName).Logger()
+		d.log.Debug().Msg("conf updated")
+	}
+}
+
+func (d *database) mainWorker() {
+	group := sync.WaitGroup{}
 	// rwCh receive worker-stopped events.
 	rwCh := make(chan struct{})
+	runningWorkers := 0
 
 	defer close(rwCh)
 
@@ -185,22 +192,17 @@ loop:
 	for d.active && d.tasks != nil {
 		select {
 		case <-rwCh:
-			d.runningWorkers--
+			runningWorkers--
 
-		case conf := <-d.newConfCh:
+		case cfg := <-d.newConfCh:
 			d.Lock()
-			wlog.Debug().Msg("wait for workers finish its current task...")
+			d.log.Debug().Msg("wait for workers finish its current task...")
 			group.Wait()
-			wlog.Debug().Msg("stopped workers")
+			d.log.Debug().Msg("stopped workers")
 
-			ctx := wlog.WithContext(context.Background())
-			d.loader.Close(ctx)
-			d.loader.UpdateConf(conf)
-
-			d.cfg = conf
-
+			d.loader.Close(d.log.WithContext(context.Background()))
+			d.recreateLoader(cfg)
 			d.Unlock()
-			wlog.Debug().Msg("conf updated")
 
 		case <-d.stopCh:
 			d.log.Debug().Msg("stopping workers...")
@@ -215,21 +217,21 @@ loop:
 		case task := <-d.tasks:
 			d.workQueue <- task
 
-			if d.runningWorkers < d.cfg.Pool.MaxConnections && len(d.workQueue) > 0 {
+			if runningWorkers < d.cfg.Pool.MaxConnections && len(d.workQueue) > 0 {
 				group.Add(1)
-				d.runningWorkers++
+				runningWorkers++
 
-				go func() {
-					d.worker(d.runningWorkers)
+				go func(rw int) {
+					d.worker(rw)
 					group.Done()
 
 					rwCh <- struct{}{}
-				}()
+				}(runningWorkers)
 			}
 		}
 	}
 
-	wlog.Debug().Msg("main worker exit")
+	d.log.Debug().Msg("main worker exit")
 }
 
 func (d *database) worker(idx int) {
