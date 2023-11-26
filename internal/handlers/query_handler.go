@@ -192,7 +192,7 @@ loop:
 				logger.Error().Err(res.Error).Str("query", res.QueryName).Str("db", res.DBName).Msg("processing query error")
 				tr.LazyPrintf("process query %q from %q: %v", res.QueryName, res.DBName, res.Error)
 
-				msg := fmt.Sprintf("# query %q in %q processing error: %q",
+				msg := fmt.Sprintf("# query %q in %q processing error: %q\n",
 					res.QueryName, res.DBName, res.Error.Error())
 				if _, err := writer.Write([]byte(msg)); err != nil {
 					logger.Error().Err(err).Msg("write error")
