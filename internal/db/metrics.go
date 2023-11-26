@@ -103,6 +103,10 @@ func (l loggersPoolCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (l loggersPoolCollector) Collect(resCh chan<- prometheus.Metric) { //nolint:funlen
+	if DatabasesPool == nil {
+		return
+	}
+
 	stats := DatabasesPool.loadersStats()
 
 	for _, stat := range stats {

@@ -63,7 +63,7 @@ func main() { //nolint:funlen
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
 
-	c, err := conf.LoadConfiguration(*configFile)
+	cfg, err := conf.LoadConfiguration(*configFile)
 	if err != nil {
 		log.Logger.Fatal().Err(err).Str("file", *configFile).
 			Msg("load config file error")
@@ -71,9 +71,14 @@ func main() { //nolint:funlen
 
 	metrics.UpdateConfLoadTime()
 	db.Init()
-	db.DatabasesPool.UpdateConf(c)
 
-	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableCache, *validateOutput)
+	if db.DatabasesPool == nil {
+		panic("database pool not configured")
+	}
+
+	db.DatabasesPool.UpdateConf(cfg)
+
+	webHandler := handlers.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput)
 
 	var runGroup run.Group
 	{

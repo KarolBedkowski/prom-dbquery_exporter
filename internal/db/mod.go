@@ -167,7 +167,7 @@ func (d *database) updateConf(cfg *conf.Database) bool {
 
 func (d *database) recreateLoader(cfg *conf.Database) {
 	newLoader, err := newLoader(cfg)
-	if err != nil {
+	if err != nil || newLoader == nil {
 		d.log.Error().Err(err).Msg("create loader with new configuration error")
 		d.log.Error().Msg("configuration not updated!")
 	} else {
