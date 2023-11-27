@@ -1,3 +1,7 @@
+v0.8.1 2023-11-27
+* fix: broken configuration reloading
+* fix: formatting errors in response
+
 v0.8.0 2023-11-24
 * dev: refactor code, fix logging, format, fix minor problems
 * fix: fix broken metrics (esp. query time)
