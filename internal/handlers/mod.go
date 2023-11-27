@@ -37,13 +37,13 @@ type WebHandler struct {
 }
 
 // NewWebHandler create new WebHandler.
-func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string,
+func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string,
 	disableCache bool, validateOutput bool,
 ) *WebHandler {
-	qh := newQueryHandler(c, disableCache, validateOutput)
+	qh := newQueryHandler(cfg, disableCache, validateOutput)
 	http.Handle("/query", qh.Handler())
 
-	ih := newInfoHandler(c)
+	ih := newInfoHandler(cfg)
 	http.Handle("/info", ih.Handler())
 
 	webHandler := &WebHandler{
@@ -51,7 +51,7 @@ func NewWebHandler(c *conf.Configuration, listenAddress string, webConfig string
 		infoHandler:   ih,
 		listenAddress: listenAddress,
 		webConfig:     webConfig,
-		cfg:           c,
+		cfg:           cfg,
 	}
 
 	local := strings.HasPrefix(listenAddress, "127.0.0.1:") || strings.HasPrefix(listenAddress, "localhost:")

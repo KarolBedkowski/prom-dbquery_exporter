@@ -66,6 +66,4 @@ type LoaderStats struct {
 	DBStats                sql.DBStats
 	TotalOpenedConnections uint32
 	TotalFailedConnections uint32
-	RunningWorkers         uint32
-	CreatedWorkers         uint64
 }

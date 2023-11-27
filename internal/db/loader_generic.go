@@ -15,6 +15,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 const (
@@ -162,6 +163,9 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 ) (*QueryResult, error) {
 	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
+	result := &QueryResult{Start: time.Now()}
+
+	support.TracePrintf(ctx, "db: opening connection")
 
 	conn, err := g.getConnection(ctx)
 	if err != nil {
@@ -187,11 +191,10 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 		return nil, fmt.Errorf("begin tx error: %w", err)
 	}
 
-	defer func() {
-		_ = tx.Rollback()
-	}()
+	defer tx.Rollback() //nolint:errcheck
 
-	// query
+	support.TracePrintf(ctx, "db: begin query %q", query.Name)
+
 	rows, err := tx.NamedQuery(query.SQL, queryParams)
 	if err != nil {
 		return nil, fmt.Errorf("execute query error: %w", err)
@@ -203,21 +206,30 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 		return nil, fmt.Errorf("get columns error: %w", err)
 	}
 
-	result := &QueryResult{Start: time.Now(), Params: queryParams}
+	result.Records, err = createRecords(rows)
+	if err != nil {
+		return nil, fmt.Errorf("create record error: %w", err)
+	}
 
-	// load records
+	result.Params = queryParams
+	result.Duration = time.Since(result.Start).Seconds()
+
+	return result, nil
+}
+
+func createRecords(rows *sqlx.Rows) ([]Record, error) {
+	var records []Record
+
 	for rows.Next() {
 		rec, err := newRecord(rows)
 		if err != nil {
 			return nil, err
 		}
 
-		result.Records = append(result.Records, rec)
+		records = append(records, rec)
 	}
 
-	result.Duration = time.Since(result.Start).Seconds()
-
-	return result, nil
+	return records, nil
 }
 
 // Close database connection.

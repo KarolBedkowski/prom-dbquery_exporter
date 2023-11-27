@@ -60,7 +60,7 @@ func newSqliteLoader(cfg *conf.Database) (Loader, error) {
 			vstr = fmt.Sprintf("%v", v)
 		}
 
-		if k == "database" {
+		if k == "database" { //nolint:goconst
 			dbname = vstr
 		} else {
 			params.Add(k, vstr)
@@ -95,61 +95,40 @@ func newSqliteLoader(cfg *conf.Database) (Loader, error) {
 }
 
 func newMysqlLoader(cfg *conf.Database) (Loader, error) {
-	params := url.Values{}
-	host := "localhost"
-	port := "3306"
-
-	var dbname, user, pass string
-
-	for key, val := range cfg.Connection {
-		vstr := ""
-		if val != nil {
-			vstr = fmt.Sprintf("%v", val)
-		}
-
-		switch key {
-		case "database":
-			dbname = url.PathEscape(vstr)
-		case "host":
-			host = url.PathEscape(vstr)
-		case "port":
-			port = url.PathEscape(vstr)
-		case "user":
-			user = url.PathEscape(vstr)
-		case "password":
-			pass = url.PathEscape(vstr)
-		default:
-			params.Add(key, vstr)
-		}
+	params := &standardParams{
+		host: "localhost",
+		port: "3306",
 	}
 
-	if dbname == "" {
+	params.load(cfg.Connection)
+
+	if params.dbname == "" {
 		return nil, ErrNoDatabaseName
 	}
 
 	var connstr strings.Builder
 
-	if user != "" {
-		connstr.WriteString(user)
+	if params.user != "" {
+		connstr.WriteString(params.user)
 
-		if pass != "" {
+		if params.pass != "" {
 			connstr.WriteRune(':')
-			connstr.WriteString(pass)
+			connstr.WriteString(params.pass)
 		}
 
 		connstr.WriteRune('@')
 	}
 
 	connstr.WriteString("tcp(")
-	connstr.WriteString(host)
+	connstr.WriteString(params.host)
 	connstr.WriteRune(':')
-	connstr.WriteString(port)
+	connstr.WriteString(params.port)
 	connstr.WriteString(")/")
-	connstr.WriteString(dbname)
+	connstr.WriteString(params.dbname)
 
-	if len(params) > 0 {
+	if len(params.params) > 0 {
 		connstr.WriteRune('?')
-		connstr.WriteString(params.Encode())
+		connstr.WriteString(params.params.Encode())
 	}
 
 	l := &genericLoader{
@@ -160,12 +139,21 @@ func newMysqlLoader(cfg *conf.Database) (Loader, error) {
 	return l, nil
 }
 
-func newOracleLoader(cfg *conf.Database) (Loader, error) {
-	params := url.Values{}
+type standardParams struct {
+	dbname, user, pass, host, port string
+	params                         url.Values
+}
 
-	var dbname, user, pass, host, port string
+func newStandardParams(cfg map[string]any) *standardParams {
+	s := &standardParams{}
 
-	for key, val := range cfg.Connection {
+	s.load(cfg)
+
+	return s
+}
+
+func (s *standardParams) load(cfg map[string]any) {
+	for key, val := range cfg {
 		vstr := ""
 		if val != nil {
 			vstr = fmt.Sprintf("%v", val)
@@ -173,21 +161,25 @@ func newOracleLoader(cfg *conf.Database) (Loader, error) {
 
 		switch key {
 		case "database":
-			dbname = url.PathEscape(vstr)
+			s.dbname = url.PathEscape(vstr)
 		case "host":
-			host = url.PathEscape(vstr)
+			s.host = url.PathEscape(vstr)
 		case "port":
-			port = url.PathEscape(vstr)
+			s.port = url.PathEscape(vstr)
 		case "user":
-			user = url.PathEscape(vstr)
+			s.user = url.PathEscape(vstr)
 		case "password":
-			pass = url.PathEscape(vstr)
+			s.pass = url.PathEscape(vstr)
 		default:
-			params.Add(key, vstr)
+			s.params.Add(key, vstr)
 		}
 	}
+}
 
-	if dbname == "" {
+func newOracleLoader(cfg *conf.Database) (Loader, error) {
+	params := newStandardParams(cfg.Connection)
+
+	if params.dbname == "" {
 		return nil, ErrNoDatabaseName
 	}
 
@@ -195,30 +187,30 @@ func newOracleLoader(cfg *conf.Database) (Loader, error) {
 
 	connstr.WriteString("oracle://")
 
-	if user != "" {
-		connstr.WriteString(user)
+	if params.user != "" {
+		connstr.WriteString(params.user)
 
-		if pass != "" {
+		if params.pass != "" {
 			connstr.WriteRune(':')
-			connstr.WriteString(pass)
+			connstr.WriteString(params.pass)
 		}
 
 		connstr.WriteRune('@')
 	}
 
-	connstr.WriteString(host)
+	connstr.WriteString(params.host)
 
-	if port != "" {
+	if params.port != "" {
 		connstr.WriteRune(':')
-		connstr.WriteString(port)
+		connstr.WriteString(params.port)
 	}
 
 	connstr.WriteRune('/')
-	connstr.WriteString(dbname)
+	connstr.WriteString(params.dbname)
 
-	if len(params) > 0 {
+	if len(params.params) > 0 {
 		connstr.WriteRune('?')
-		connstr.WriteString(params.Encode())
+		connstr.WriteString(params.params.Encode())
 	}
 
 	l := &genericLoader{

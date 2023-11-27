@@ -30,7 +30,7 @@ func init() {
 }
 
 // Main is main function for cli.
-func main() {
+func main() { //nolint:funlen
 	var (
 		showVersion = flag.Bool("version", false, "Print version information.")
 		configFile  = flag.String("config.file", "dbquery.yaml",
@@ -50,7 +50,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		_, _ = fmt.Println(version.Print("DBQuery exporter"))
+		_, _ = fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
 
 		os.Exit(0)
 	}
@@ -63,7 +63,7 @@ func main() {
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
 
-	c, err := conf.LoadConfiguration(*configFile)
+	cfg, err := conf.LoadConfiguration(*configFile)
 	if err != nil {
 		log.Logger.Fatal().Err(err).Str("file", *configFile).
 			Msg("load config file error")
@@ -71,9 +71,14 @@ func main() {
 
 	metrics.UpdateConfLoadTime()
 	db.Init()
-	db.DatabasesPool.UpdateConf(c)
 
-	webHandler := handlers.NewWebHandler(c, *listenAddress, *webConfig, *disableCache, *validateOutput)
+	if db.DatabasesPool == nil {
+		panic("database pool not configured")
+	}
+
+	db.DatabasesPool.UpdateConf(cfg)
+
+	webHandler := handlers.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput)
 
 	var runGroup run.Group
 	{
