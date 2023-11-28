@@ -72,7 +72,7 @@ func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bo
 		queryLocker:           newLocker(),
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
-		queryResultCache:      support.NewCache[[]byte](),
+		queryResultCache:      support.NewCache[[]byte]("query_cache"),
 	}
 }
 
@@ -100,8 +100,6 @@ func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, b
 	if query.CachingTime > 0 && !q.disableCache {
 		queryKey := query.Name + "@" + dbName
 		if data, ok := q.queryResultCache.Get(queryKey); ok {
-			metrics.IncQueryCacheHits()
-
 			return data, ok
 		}
 	}
