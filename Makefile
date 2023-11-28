@@ -22,6 +22,7 @@ build_release:
 	CGO_ENABLED=0 \
 		go build -v -o dbquery_exporter  --ldflags $(LDFLAGS) cli/main.go
 
+
 .PHONY: build_arm64
 
 build_arm64_debug:
@@ -40,7 +41,7 @@ build_arm64:
 .PHONY: run
 
 run:
-	go run -v main.go -log.level debug
+	go run -v cli/main.go -log.level debug
 
 
 .PHONY: check
