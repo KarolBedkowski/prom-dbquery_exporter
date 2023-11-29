@@ -1,3 +1,7 @@
+v0.8.2 2023-11-29
+* fix: don't use ReadOnly transaction as it is not supported by some db
+* fix: update grafana dashboard
+
 v0.8.1 2023-11-27
 * fix: broken configuration reloading
 * fix: formatting errors in response

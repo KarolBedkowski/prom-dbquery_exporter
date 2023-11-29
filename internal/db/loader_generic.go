@@ -6,7 +6,6 @@ package db
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -186,7 +185,7 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", query.Params).
 		Msg("genericQuery start execute")
 
-	tx, err := conn.BeginTxx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := conn.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx error: %w", err)
 	}

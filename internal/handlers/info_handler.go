@@ -13,12 +13,11 @@ import (
 	"strings"
 	"text/template"
 
-	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/metrics"
-
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 const infoTmpl = `

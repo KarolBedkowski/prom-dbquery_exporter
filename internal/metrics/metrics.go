@@ -44,12 +44,22 @@ var (
 		[]string{"database"},
 	)
 	// queryCacheHits is number of result served from cache.
-	queryCacheHits = prometheus.NewCounter(
+	queryCacheHits = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: MetricsNamespace,
-			Name:      "query_cache_hit_total",
+			Name:      "cache_hit_total",
 			Help:      "Number of result loaded from cache",
 		},
+		[]string{"name"},
+	)
+	// queryCacheMiss is number of result served from cache.
+	queryCacheMiss = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: MetricsNamespace,
+			Name:      "cache_miss_total",
+			Help:      "Number of missed request from cache",
+		},
+		[]string{"name"},
 	)
 	// processErrorsCnt is total number of internal errors by category.
 	processErrorsCnt = prometheus.NewCounterVec(
@@ -94,6 +104,7 @@ func init() {
 	prometheus.MustRegister(queryTotalCnt)
 	prometheus.MustRegister(queryErrorCnt)
 	prometheus.MustRegister(queryCacheHits)
+	prometheus.MustRegister(queryCacheMiss)
 	prometheus.MustRegister(processErrorsCnt)
 	prometheus.MustRegister(configReloadTime)
 	prometheus.MustRegister(reqDuration)
@@ -126,9 +137,14 @@ func ObserveQueryDuration(queryName, dbName string, duration float64) {
 	queryDuration.WithLabelValues(queryName, dbName).Observe(duration)
 }
 
-// IncQueryCacheHits increment query_cache_hit metric.
-func IncQueryCacheHits() {
-	queryCacheHits.Inc()
+// IncQueryCacheHits increment cache_hit_total metric.
+func IncQueryCacheHits(name string) {
+	queryCacheHits.WithLabelValues(name).Inc()
+}
+
+// IncQueryCacheMiss increment cache_miss_total metrics.
+func IncQueryCacheMiss(name string) {
+	queryCacheMiss.WithLabelValues(name).Inc()
 }
 
 // NewReqDurationWraper create new ObserverVec for InstrumentHandlerDuration.

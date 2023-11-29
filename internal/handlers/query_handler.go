@@ -72,7 +72,7 @@ func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bo
 		queryLocker:           newLocker(),
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
-		queryResultCache:      support.NewCache[[]byte](),
+		queryResultCache:      support.NewCache[[]byte]("query_cache"),
 	}
 }
 
@@ -100,8 +100,6 @@ func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, b
 	if query.CachingTime > 0 && !q.disableCache {
 		queryKey := query.Name + "@" + dbName
 		if data, ok := q.queryResultCache.Get(queryKey); ok {
-			metrics.IncQueryCacheHits()
-
 			return data, ok
 		}
 	}
@@ -259,7 +257,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	// prevent to run the same request twice
 	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
 		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
-		support.TraceErrorf(ctx, "query locked")
+		support.TraceErrorf(ctx, "query locked by %s", locker)
 
 		return
 	}
@@ -281,7 +279,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		defer cancel()
 	}
 
-	support.TracePrintf(ctx, "start quering db")
+	support.TracePrintf(ctx, "start querying db")
 
 	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params)
 

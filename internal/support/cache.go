@@ -10,11 +10,14 @@ package support
 import (
 	"sync"
 	"time"
+
+	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 type (
 	// Cache with per item expire time.
 	Cache[T any] struct {
+		name      string
 		cache     map[string]*cacheItem[T]
 		cacheLock sync.Mutex
 	}
@@ -26,8 +29,9 @@ type (
 )
 
 // NewCache create  new cache object.
-func NewCache[T any]() *Cache[T] {
+func NewCache[T any](name string) *Cache[T] {
 	return &Cache[T]{
+		name:  name,
 		cache: make(map[string]*cacheItem[T]),
 	}
 }
@@ -39,14 +43,19 @@ func (r *Cache[T]) Get(key string) (T, bool) {
 
 	item, ok := r.cache[key]
 	if !ok {
+		metrics.IncQueryCacheMiss(r.name)
+
 		return *new(T), false
 	}
 
 	if item.expireTS.After(time.Now()) {
+		metrics.IncQueryCacheHits(r.name)
+
 		return item.content, true
 	}
 
 	delete(r.cache, key)
+	metrics.IncQueryCacheMiss(r.name)
 
 	return *new(T), false
 }
