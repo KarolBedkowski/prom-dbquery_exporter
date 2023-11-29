@@ -8,12 +8,6 @@ import (
 	"runtime"
 	"syscall"
 
-	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/db"
-	"prom-dbquery_exporter.app/internal/handlers"
-	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
-
 	// _ "github.com/denisenkom/go-mssqldb"
 	// _ "github.com/go-sql-driver/mysql".
 	_ "github.com/glebarez/go-sqlite"
@@ -23,6 +17,11 @@ import (
 	"github.com/prometheus/common/version"
 	"github.com/rs/zerolog/log"
 	_ "github.com/sijms/go-ora/v2"
+	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/db"
+	"prom-dbquery_exporter.app/internal/handlers"
+	"prom-dbquery_exporter.app/internal/metrics"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 func init() {
