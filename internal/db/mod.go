@@ -263,20 +263,24 @@ loop:
 				Int("queue_len", len(d.workQueue)).
 				Msg("handle task")
 
-			if task.Ctx == nil {
-				wlog.Error().Interface("task", task).Msg("missing context")
-
-				continue
-			}
-
 			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", strconv.Itoa(idx), "db", d.dbName)
 
 			select {
 			case <-task.Ctx.Done():
 				wlog.Warn().Msg("task cancelled before processing")
 
+				continue
 			default:
-				d.handleTask(wlog, task)
+			}
+
+			res := d.handleTask(wlog, task)
+
+			select {
+			case <-task.Ctx.Done():
+				wlog.Warn().Msg("task cancelled after processing")
+			case task.Output <- res:
+			default:
+				wlog.Warn().Msg("can't send output")
 			}
 
 			continue
@@ -289,7 +293,7 @@ loop:
 	wlog.Debug().Msg("worker stopped")
 }
 
-func (d *database) handleTask(wlog zerolog.Logger, task *Task) {
+func (d *database) handleTask(wlog zerolog.Logger, task *Task) *TaskResult {
 	ctx := task.Ctx
 	llog := wlog.With().Object("task", task).Logger()
 
@@ -298,9 +302,8 @@ func (d *database) handleTask(wlog zerolog.Logger, task *Task) {
 	result, err := d.loader.Query(ctx, task.Query, task.Params)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("query")
-		task.Output <- task.newResult(fmt.Errorf("query error: %w", err), nil)
 
-		return
+		return task.newResult(fmt.Errorf("query error: %w", err), nil)
 	}
 
 	llog.Debug().Msg("result received")
@@ -309,19 +312,14 @@ func (d *database) handleTask(wlog zerolog.Logger, task *Task) {
 	output, err := FormatResult(ctx, result, task.Query, d.cfg)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("format")
-		task.Output <- task.newResult(fmt.Errorf("format error: %w", err), nil)
 
-		return
+		return task.newResult(fmt.Errorf("format error: %w", err), nil)
 	}
 
 	llog.Debug().Msg("result formatted")
 	support.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
 
-	select {
-	case task.Output <- task.newResult(nil, output):
-	default:
-		llog.Warn().Msg("can't send response")
-	}
+	return task.newResult(nil, output)
 }
 
 func (d *database) stats() *LoaderStats {
