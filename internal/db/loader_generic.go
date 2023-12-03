@@ -182,7 +182,7 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", query.Params).
+	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", queryParams).
 		Msg("genericQuery start execute")
 
 	tx, err := conn.BeginTxx(ctx, nil)
@@ -199,10 +199,12 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 		return nil, fmt.Errorf("execute query error: %w", err)
 	}
 
-	if cols, err := rows.Columns(); err == nil {
-		llog.Debug().Interface("cols", cols).Msg("genericQuery columns")
-	} else {
-		return nil, fmt.Errorf("get columns error: %w", err)
+	if e := llog.Debug(); e.Enabled() {
+		if cols, err := rows.Columns(); err == nil {
+			e.Interface("cols", cols).Msg("genericQuery columns")
+		} else {
+			return nil, fmt.Errorf("get columns error: %w", err)
+		}
 	}
 
 	result.Records, err = createRecords(rows)

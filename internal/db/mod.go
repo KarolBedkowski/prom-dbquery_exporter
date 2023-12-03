@@ -255,6 +255,7 @@ loop:
 			default:
 			}
 		}
+
 		shutdownTimer.Reset(time.Second)
 
 		select {
@@ -365,8 +366,8 @@ func (d *Databases) createDatabase(dbName string) (*database, error) {
 	return dl, nil
 }
 
-// PutTask schedule new task to process in this database.
-func (d *Databases) PutTask(task *Task) error {
+// ScheduleTask schedule new task to process in this database.
+func (d *Databases) ScheduleTask(task *Task) error {
 	d.Lock()
 	defer d.Unlock()
 

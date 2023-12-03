@@ -157,7 +157,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				Query:     query,
 			}
 
-			if err := db.DatabasesPool.PutTask(&task); err != nil { //nolint:contextcheck
+			if err := db.DatabasesPool.ScheduleTask(&task); err != nil { //nolint:contextcheck
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
