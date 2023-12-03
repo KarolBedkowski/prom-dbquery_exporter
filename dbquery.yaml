@@ -78,6 +78,7 @@ query:
       ping{database="{{ .Database }}"} 1
 
   testq1:
+    # Characters like `:` must be doubled to prevent binding paramaters.
     sql: >
        select s.name, count(t.id) as cnt
        from sports s left join trips t on s.id = t.sport_id
@@ -248,7 +249,7 @@ query:
 
   pg_locks:
     groups:
-      - pgstats
+      - pg
     sql: >
       SELECT tmp.mode, count(pl.mode) as cnt
       FROM (VALUES ('accesssharelock'), ('rowsharelock'), ('rowexclusivelock'), ('shareupdateexclusivelock'),  ('sharelock'),
@@ -261,6 +262,36 @@ query:
       pg_locks{mode="{{ .mode }}"} {{ .cnt }}
       {{- end }}
 
+  pg_tx:
+    groups:
+      - pgstats
+    sql: >
+      SELECT min(EXTRACT(EPOCH FROM xact_start)) AS oldesttx, count(*) AS cnt
+      FROM pg_stat_activity
+      WHERE state IS DISTINCT FROM 'idle' AND query NOT LIKE 'autovacuum%'
+    metrics: |
+      {{- range .R }}
+      pg_tx_oldest {{ .oldesttx }}
+      pg_tx_total {{ .cnt }}
+      {{- end }}
+
+  pg_db:
+    groups:
+      - pg
+    sql: >
+      SELECT 'postmaster_start_unix' AS name, '' AS key, EXTRACT(EPOCH FROM pg_postmaster_start_time) AS val FROM pg_postmaster_start_time()
+      UNION ALL
+      SELECT 'databases_count', '' AS key, count(*) AS val FROM pg_database
+      UNION ALL
+      SELECT 'version', version() as key, 1 as val
+    metrics: |
+      {{- range .R }}
+        {{- if (ne .key "") }}
+          pg_db_{{ .name }}{key="{{ .key | removeQuotes }}"} {{ .val }}
+        {{- else }}
+          pg_db_{{ .name }} {{ .val }}
+        {{- end }}
+      {{- end }}
 
   oracle_v_sysmetric:
     groups:
