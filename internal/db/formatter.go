@@ -1,10 +1,13 @@
+package db
+
+// Formatter contain methods used to format query result using defined templates.
 // formatters.go
 // Copyright (C) 2021 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
-package db
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -49,13 +52,25 @@ func FormatResult(ctx context.Context, result *QueryResult, query *conf.Query,
 		Count:          len(result.Records),
 	}
 
-	var output bytes.Buffer
+	var buf bytes.Buffer
 
-	if err := query.MetricTpl.Execute(&output, res); err != nil {
+	if err := query.MetricTpl.Execute(&buf, res); err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 
-	b := bytes.TrimLeft(output.Bytes(), "\n\r\t ")
+	// trim lines
+	var output bytes.Buffer
 
-	return b, nil
+	scanner := bufio.NewScanner(&buf)
+	for scanner.Scan() {
+		line := bytes.Trim(scanner.Bytes(), "\n\r\t ")
+		output.Write(line)
+		output.WriteRune('\n')
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("scan result error: %w", err)
+	}
+
+	return output.Bytes(), nil
 }

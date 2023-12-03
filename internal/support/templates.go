@@ -35,6 +35,7 @@ var templateFuncsMap = template.FuncMap{
 	"keepAlfaNumUnderlineU":      keepAlfaNumUnderlineU,
 	"keepAlfaNumUnderlineSpaceU": keepAlfaNumUnderlineSpaceU,
 	"clean":                      clean,
+	"removeQuotes":               removeQuotes,
 }
 
 func replaceSpaces(i string) string {
@@ -162,4 +163,8 @@ func clean(i string) string {
 	res = strings.ToLower(res)
 
 	return res
+}
+
+func removeQuotes(i string) string {
+	return strings.ReplaceAll(i, "\"", "'")
 }
