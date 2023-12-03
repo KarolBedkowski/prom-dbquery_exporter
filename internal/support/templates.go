@@ -6,6 +6,8 @@ package support
 
 import (
 	"fmt"
+	"math"
+	"reflect"
 	"strconv"
 	"strings"
 	"text/template"
@@ -36,6 +38,8 @@ var templateFuncsMap = template.FuncMap{
 	"keepAlfaNumUnderlineSpaceU": keepAlfaNumUnderlineSpaceU,
 	"clean":                      clean,
 	"removeQuotes":               removeQuotes,
+	"buckets":                    buckets,
+	"bucketsInt":                 bucketsInt,
 }
 
 func replaceSpaces(i string) string {
@@ -167,4 +171,165 @@ func clean(i string) string {
 
 func removeQuotes(i string) string {
 	return strings.ReplaceAll(i, "\"", "'")
+}
+
+func buckets(input any, valueKey string, buckets ...float64) []map[string]any {
+	inp := reflect.ValueOf(input)
+	if inp.Len() == 0 {
+		return nil
+	}
+
+	// get key-vals from first row:
+	resKeyVal := make(map[string]any)
+
+	iter := inp.Index(0).MapRange()
+	for iter.Next() {
+		resKeyVal[iter.Key().String()] = iter.Value().Interface()
+	}
+
+	// extract
+	bucketsCnt := make([]int, len(buckets))
+	allCnt := 0
+	vk := reflect.ValueOf(valueKey)
+
+	for i := 0; i < inp.Len(); i++ {
+		// get value
+		rec := inp.Index(i)
+		val := rec.MapIndex(vk).Interface()
+
+		var value float64
+
+		switch v := val.(type) {
+		case float32:
+			value = float64(v)
+		case float64:
+			value = v
+		case int:
+			value = float64(v)
+		case uint32:
+			value = float64(v)
+		case uint64:
+			value = float64(v)
+		case int32:
+			value = float64(v)
+		case int64:
+			value = float64(v)
+		default:
+			// ignore other
+			continue
+		}
+
+		for i, b := range buckets {
+			if value <= b {
+				bucketsCnt[i]++
+			}
+		}
+
+		allCnt++
+	}
+
+	res := make([]map[string]any, 0, len(buckets)+1)
+
+	for i, b := range buckets {
+		row := make(map[string]any, len(bucketsCnt))
+		for k, v := range resKeyVal {
+			row[k] = v
+		}
+
+		row["le"] = fmt.Sprintf("%0.2f", b)
+		row["count"] = bucketsCnt[i]
+		res = append(res, row)
+	}
+
+	// inf
+	row := make(map[string]any)
+	for k, v := range resKeyVal {
+		row[k] = v
+	}
+
+	row["le"] = "+Inf"
+	row["count"] = allCnt
+	res = append(res, row)
+
+	return res
+}
+
+func bucketsInt(input any, valueKey string, buckets ...int) []map[string]any {
+	inp := reflect.ValueOf(input)
+	if inp.Len() == 0 {
+		return nil
+	}
+
+	// get key-vals from first row:
+	resKeyVal := make(map[string]any)
+
+	iter := inp.Index(0).MapRange()
+	for iter.Next() {
+		resKeyVal[iter.Key().String()] = iter.Value().Interface()
+	}
+
+	// extract
+	bucketsCnt := make([]int, len(buckets))
+	allCnt := 0
+	vk := reflect.ValueOf(valueKey)
+
+	for i := 0; i < inp.Len(); i++ {
+		// get value
+		rec := inp.Index(i)
+		val := rec.MapIndex(vk).Interface()
+
+		var value int
+
+		switch v := val.(type) {
+		case int:
+			value = v
+		case uint32:
+			value = int(v)
+		case uint64:
+			value = int(v)
+		case int32:
+			value = int(v)
+		case int64:
+			value = int(v)
+		case float64:
+			value = int(math.Ceil(v))
+		case float32:
+			value = int(math.Ceil(float64(v)))
+		default:
+			continue
+		}
+
+		for i, b := range buckets {
+			if value <= b {
+				bucketsCnt[i]++
+			}
+		}
+
+		allCnt++
+	}
+
+	res := make([]map[string]any, 0, len(buckets)+1)
+
+	for i, b := range buckets {
+		row := make(map[string]any, len(bucketsCnt))
+		for k, v := range resKeyVal {
+			row[k] = v
+		}
+
+		row["le"] = strconv.Itoa(b)
+		row["count"] = bucketsCnt[i]
+		res = append(res, row)
+	}
+
+	// inf
+	row := make(map[string]any)
+	for k, v := range resKeyVal {
+		row[k] = v
+	}
+
+	row["le"] = "+Inf"
+	row["count"] = allCnt
+	res = append(res, row)
+
+	return res
 }

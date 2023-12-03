@@ -116,6 +116,24 @@ query:
       rwr3_trips_query_secounds {{ .QueryDuration }}
       rwr3_trips_last_query_unix {{ .QueryStartTime }}
 
+  test_buckets:
+    sql: >
+       select sport_id, distance from trips t
+
+    metrics: |
+      {{- range (buckets .R "distance" 5.0 10.0 20.0 40.0 50.0) }}
+      rwr3_trips_distance_bucket{sport_id="{{ .sport_id }}", le="{{ .le }}"} {{ .count }}
+      {{- end  }}
+
+  test_buckets_int:
+    sql: >
+       select sport_id, duration from trips t
+
+    metrics: |
+      {{- range (bucketsInt .R "duration" 3600 7200 10800 14400 18000) }}
+      rwr3_trips_duration_bucket{sport_id="{{ .sport_id }}", le="{{ .le }}"} {{ .count }}
+      {{- end  }}
+
   testparam1:
     # Queries may use parameters delivered by request->query (ie ...&id=12)
     sql: >
