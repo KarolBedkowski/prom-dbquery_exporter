@@ -64,8 +64,11 @@ func FormatResult(ctx context.Context, result *QueryResult, query *conf.Query,
 	scanner := bufio.NewScanner(&buf)
 	for scanner.Scan() {
 		line := bytes.Trim(scanner.Bytes(), "\n\r\t ")
-		output.Write(line)
-		output.WriteRune('\n')
+
+		if len(line) > 0 {
+			output.Write(line)
+			output.WriteRune('\n')
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
