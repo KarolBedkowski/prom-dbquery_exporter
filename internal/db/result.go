@@ -11,10 +11,23 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
 )
+
+// queryResult is result of Loader.Query.
+type queryResult struct {
+	// rows
+	Records []Record
+	// query duration
+	Duration float64
+	// query start time
+	Start time.Time
+	// all query parameters
+	Params map[string]interface{}
+}
 
 // resultTmplData keep query result and some metadata parsed to template.
 type resultTmplData struct {
@@ -35,7 +48,7 @@ type resultTmplData struct {
 }
 
 // FormatResult format query result using template from query configuration.
-func FormatResult(ctx context.Context, result *QueryResult, query *conf.Query,
+func (r *queryResult) format(ctx context.Context, query *conf.Query,
 	db *conf.Database,
 ) ([]byte, error) {
 	llog := log.Ctx(ctx)
@@ -44,12 +57,12 @@ func FormatResult(ctx context.Context, result *QueryResult, query *conf.Query,
 	res := &resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,
-		R:              result.Records,
-		P:              result.Params,
+		R:              r.Records,
+		P:              r.Params,
 		L:              db.Labels,
-		QueryStartTime: result.Start.Unix(),
-		QueryDuration:  result.Duration,
-		Count:          len(result.Records),
+		QueryStartTime: r.Start.Unix(),
+		QueryDuration:  r.Duration,
+		Count:          len(r.Records),
 	}
 
 	var buf bytes.Buffer

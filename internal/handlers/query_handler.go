@@ -139,10 +139,9 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Msg("query result from cache")
-
 				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
 
-				output <- &db.TaskResult{Result: data, DBName: dbName, QueryName: queryName}
+				output <- db.NewSimpleTaskResult(data, dbName, queryName)
 				scheduled++
 
 				continue
@@ -185,12 +184,14 @@ loop:
 		case res := <-output:
 			scheduled--
 
+			task := res.Task
+
 			if res.Error != nil {
-				logger.Error().Err(res.Error).Str("query", res.QueryName).Str("db", res.DBName).Msg("processing query error")
-				support.TracePrintf(ctx, "process query %q from %q: %v", res.QueryName, res.DBName, res.Error)
+				logger.Error().Err(res.Error).Object("task", task).Msg("processing query error")
+				support.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
 
 				msg := fmt.Sprintf("# query %q in %q processing error: %q\n",
-					res.QueryName, res.DBName, res.Error.Error())
+					res.Task.QueryName, res.Task.DBName, res.Error.Error())
 				if _, err := writer.Write([]byte(msg)); err != nil {
 					logger.Error().Err(err).Msg("write error")
 					support.TraceErrorf(ctx, "write error: %s", err)
@@ -201,7 +202,7 @@ loop:
 			}
 
 			logger.Debug().Object("res", res).Msg("write result")
-			support.TracePrintf(ctx, "write result %q from %q", res.QueryName, res.DBName)
+			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
 
 			if _, err := writer.Write(res.Result); err != nil {
 				logger.Error().Err(err).Msg("write error")
@@ -210,8 +211,8 @@ loop:
 				successProcessed++
 			}
 
-			if res.Query != nil {
-				q.putIntoCache(res.Query, res.DBName, res.Result)
+			if task.Query != nil {
+				q.putIntoCache(task.Query, task.DBName, res.Result)
 			}
 
 		case <-ctx.Done():

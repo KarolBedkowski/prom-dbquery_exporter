@@ -8,7 +8,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
 	"github.com/jmoiron/sqlx"
 	"prom-dbquery_exporter.app/internal/conf"
@@ -36,7 +35,7 @@ func newRecord(rows *sqlx.Rows) (Record, error) {
 // Loader load data from database.
 type Loader interface {
 	// Query execute sql and returns records or error. Open connection when necessary.
-	Query(ctx context.Context, q *conf.Query, params map[string]string) (*QueryResult, error)
+	Query(ctx context.Context, q *conf.Query, params map[string]string) (*queryResult, error)
 	// Close db connection.
 	Close(ctx context.Context) error
 	// Human-friendly info
@@ -46,18 +45,6 @@ type Loader interface {
 
 	// Stats return database stats if available
 	Stats() *LoaderStats
-}
-
-// QueryResult is result of Loader.Query.
-type QueryResult struct {
-	// rows
-	Records []Record
-	// query duration
-	Duration float64
-	// query start time
-	Start time.Time
-	// all query parameters
-	Params map[string]interface{}
 }
 
 // LoaderStats transfer stats from database driver.

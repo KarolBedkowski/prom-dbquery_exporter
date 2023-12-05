@@ -16,7 +16,7 @@ import (
 
 // TemplateCompile try to compile template.
 func TemplateCompile(name, tmpl string) (*template.Template, error) {
-	t, err := template.New(name).Funcs(templateFuncsMap).Parse(tmpl)
+	t, err := template.New(name).Funcs(FuncMap).Parse(tmpl)
 	if err != nil {
 		return nil, fmt.Errorf("template %s compile error: %w", name, err)
 	}
@@ -24,7 +24,8 @@ func TemplateCompile(name, tmpl string) (*template.Template, error) {
 	return t, nil
 }
 
-var templateFuncsMap = template.FuncMap{
+// FuncMap is global map of functions available in template.
+var FuncMap = template.FuncMap{
 	"toLower":                    strings.ToLower,
 	"toUpper":                    strings.ToUpper,
 	"trim":                       strings.TrimSpace,

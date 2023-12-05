@@ -16,65 +16,11 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/support"
 )
-
-// Task is query to perform.
-type Task struct {
-	// Ctx is context used for cancellation.
-	Ctx context.Context //nolint:containedctx
-
-	DBName    string
-	QueryName string
-
-	Query  *conf.Query
-	Params map[string]string
-
-	Output chan *TaskResult
-}
-
-func (d *Task) newResult(err error, result []byte) *TaskResult {
-	return &TaskResult{
-		Error:     err,
-		Result:    result,
-		DBName:    d.DBName,
-		QueryName: d.QueryName,
-		Query:     d.Query,
-	}
-}
-
-// MarshalZerologObject implements LogObjectMarshaler.
-func (d Task) MarshalZerologObject(e *zerolog.Event) {
-	e.Str("db", d.DBName).
-		Str("query", d.QueryName).
-		Interface("params", d.Params)
-
-	if rid, ok := hlog.IDFromCtx(d.Ctx); ok {
-		e.Str("req_id", rid.String())
-	}
-}
-
-// TaskResult is query result.
-type TaskResult struct {
-	Error  error
-	Result []byte
-
-	DBName    string
-	QueryName string
-	Query     *conf.Query
-}
-
-// MarshalZerologObject implements LogObjectMarshaler.
-func (t TaskResult) MarshalZerologObject(e *zerolog.Event) {
-	e.Str("db", t.DBName).
-		Str("query", t.QueryName).
-		Err(t.Error).
-		Int("result_size", len(t.Result))
-}
 
 // Database handle task for one database (loader).
 type database struct {
@@ -260,10 +206,7 @@ loop:
 
 		select {
 		case task := <-d.workQueue:
-			wlog.Debug().Interface("task", task).
-				Int("queue_len", len(d.workQueue)).
-				Msg("handle task")
-
+			wlog.Debug().Object("task", task).Int("queue_len", len(d.workQueue)).Msg("handle task")
 			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", strconv.Itoa(idx), "db", d.dbName)
 
 			select {
@@ -310,7 +253,7 @@ func (d *database) handleTask(wlog zerolog.Logger, task *Task) *TaskResult {
 	llog.Debug().Msg("result received")
 	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
 
-	output, err := FormatResult(ctx, result, task.Query, d.cfg)
+	output, err := result.format(ctx, task.Query, d.cfg)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("format")
 
