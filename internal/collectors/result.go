@@ -39,7 +39,7 @@ type resultTmplData struct {
 }
 
 // FormatResult format query result using template from query configuration.
-func formatResult(ctx context.Context, r *db.QueryResult, query *conf.Query,
+func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 	db *conf.Database,
 ) ([]byte, error) {
 	llog := log.Ctx(ctx)
@@ -48,12 +48,12 @@ func formatResult(ctx context.Context, r *db.QueryResult, query *conf.Query,
 	res := &resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,
-		R:              r.Records,
-		P:              r.Params,
+		R:              qRes.Records,
+		P:              qRes.Params,
 		L:              db.Labels,
-		QueryStartTime: r.Start.Unix(),
-		QueryDuration:  r.Duration,
-		Count:          len(r.Records),
+		QueryStartTime: qRes.Start.Unix(),
+		QueryDuration:  qRes.Duration,
+		Count:          len(qRes.Records),
 	}
 
 	var buf bytes.Buffer
@@ -214,7 +214,7 @@ func tmplFuncBucketsInt(input []db.Record, valueKey string, buckets ...int) []db
 }
 
 // InitTemplates register template functions relate to Records.
-func InitTemplates() {
+func initTemplates() {
 	support.FuncMap["buckets"] = tmplFuncBuckets
 	support.FuncMap["bucketsInt"] = tmplFuncBucketsInt
 }

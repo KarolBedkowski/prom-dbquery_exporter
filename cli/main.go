@@ -61,7 +61,8 @@ func main() { //nolint:funlen
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
-	collectors.InitTemplates()
+
+	collectors.Init()
 
 	cfg, err := conf.LoadConfiguration(*configFile)
 	if err != nil {
@@ -70,13 +71,12 @@ func main() { //nolint:funlen
 	}
 
 	metrics.UpdateConfLoadTime()
-	collectors.Init()
 
-	if collectors.DatabasesPool == nil {
+	if collectors.CollectorsPool == nil {
 		panic("database pool not configured")
 	}
 
-	collectors.DatabasesPool.UpdateConf(cfg)
+	collectors.CollectorsPool.UpdateConf(cfg)
 
 	webHandler := handlers.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput)
 
@@ -89,7 +89,7 @@ func main() { //nolint:funlen
 			func() error {
 				<-term
 				log.Logger.Warn().Msg("Received SIGTERM, exiting...")
-				collectors.DatabasesPool.Close()
+				collectors.CollectorsPool.Close()
 
 				return nil
 			},
@@ -109,7 +109,7 @@ func main() { //nolint:funlen
 
 					if newConf, err := conf.LoadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
-						collectors.DatabasesPool.UpdateConf(newConf)
+						collectors.CollectorsPool.UpdateConf(newConf)
 						metrics.UpdateConfLoadTime()
 						log.Info().Msg("configuration reloaded")
 					} else {
