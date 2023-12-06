@@ -159,10 +159,10 @@ func (g *genericLoader) executeInitialQuery(ctx context.Context, sql string, con
 
 // Query get data from database.
 func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map[string]string,
-) (*queryResult, error) {
+) (*QueryResult, error) {
 	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
-	result := &queryResult{Start: time.Now()}
+	result := &QueryResult{Start: time.Now()}
 
 	support.TracePrintf(ctx, "db: opening connection")
 

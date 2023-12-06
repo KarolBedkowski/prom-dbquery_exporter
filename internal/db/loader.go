@@ -35,7 +35,7 @@ func newRecord(rows *sqlx.Rows) (Record, error) {
 // Loader load data from database.
 type Loader interface {
 	// Query execute sql and returns records or error. Open connection when necessary.
-	Query(ctx context.Context, q *conf.Query, params map[string]string) (*queryResult, error)
+	Query(ctx context.Context, q *conf.Query, params map[string]string) (*QueryResult, error)
 	// Close db connection.
 	Close(ctx context.Context) error
 	// Human-friendly info

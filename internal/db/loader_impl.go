@@ -250,8 +250,8 @@ func newMssqlLoader(cfg *conf.Database) (Loader, error) {
 	return l, nil
 }
 
-// newLoader returns configured Loader for given configuration.
-func newLoader(cfg *conf.Database) (Loader, error) {
+// CreateLoader returns configured Loader for given configuration.
+func CreateLoader(cfg *conf.Database) (Loader, error) {
 	switch cfg.Driver {
 	case "postgresql", "postgres", "cockroach", "cockroachdb":
 		return newPostgresLoader(cfg)

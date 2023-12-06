@@ -53,7 +53,7 @@ lint:
 
 .PHONY: format
 format:
-	find cli -type d -exec wsl -fix ./{} ';'
+	find internal cli -type d -exec wsl -fix ./{} ';'
 	find . -name '*.go' -type f -exec gofumpt -w {} ';'
 
 # vim:ft=make

@@ -17,8 +17,8 @@ import (
 	"github.com/prometheus/common/version"
 	"github.com/rs/zerolog/log"
 	_ "github.com/sijms/go-ora/v2"
+	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/handlers"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/support"
@@ -61,7 +61,7 @@ func main() { //nolint:funlen
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
-	db.InitTemplates()
+	collectors.InitTemplates()
 
 	cfg, err := conf.LoadConfiguration(*configFile)
 	if err != nil {
@@ -70,13 +70,13 @@ func main() { //nolint:funlen
 	}
 
 	metrics.UpdateConfLoadTime()
-	db.Init()
+	collectors.Init()
 
-	if db.DatabasesPool == nil {
+	if collectors.DatabasesPool == nil {
 		panic("database pool not configured")
 	}
 
-	db.DatabasesPool.UpdateConf(cfg)
+	collectors.DatabasesPool.UpdateConf(cfg)
 
 	webHandler := handlers.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput)
 
@@ -89,7 +89,7 @@ func main() { //nolint:funlen
 			func() error {
 				<-term
 				log.Logger.Warn().Msg("Received SIGTERM, exiting...")
-				db.DatabasesPool.Close()
+				collectors.DatabasesPool.Close()
 
 				return nil
 			},
@@ -109,7 +109,7 @@ func main() { //nolint:funlen
 
 					if newConf, err := conf.LoadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
-						db.DatabasesPool.UpdateConf(newConf)
+						collectors.DatabasesPool.UpdateConf(newConf)
 						metrics.UpdateConfLoadTime()
 						log.Info().Msg("configuration reloaded")
 					} else {

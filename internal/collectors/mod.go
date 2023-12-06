@@ -1,4 +1,4 @@
-package db
+package collectors
 
 //
 // mod.go
@@ -18,6 +18,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/support"
 )
@@ -27,7 +28,7 @@ type database struct {
 	sync.Mutex
 
 	dbName string
-	loader Loader
+	loader db.Loader
 	cfg    *conf.Database
 	log    zerolog.Logger
 	active bool
@@ -44,7 +45,7 @@ type database struct {
 const tasksQueueSize = 10
 
 func newDatabase(name string, cfg *conf.Database) (*database, error) {
-	loader, err := newLoader(cfg)
+	loader, err := db.CreateLoader(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("get loader error: %w", err)
 	}
@@ -113,7 +114,7 @@ func (d *database) updateConf(cfg *conf.Database) bool {
 }
 
 func (d *database) recreateLoader(cfg *conf.Database) {
-	newLoader, err := newLoader(cfg)
+	newLoader, err := db.CreateLoader(cfg)
 	if err != nil || newLoader == nil {
 		d.log.Error().Err(err).Msg("create loader with new configuration error")
 		d.log.Error().Msg("configuration not updated!")
@@ -253,7 +254,7 @@ func (d *database) handleTask(wlog zerolog.Logger, task *Task) *TaskResult {
 	llog.Debug().Msg("result received")
 	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
 
-	output, err := result.format(ctx, task.Query, d.cfg)
+	output, err := formatResult(ctx, result, task.Query, d.cfg)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("format")
 
@@ -266,7 +267,7 @@ func (d *database) handleTask(wlog zerolog.Logger, task *Task) *TaskResult {
 	return task.newResult(nil, output)
 }
 
-func (d *database) stats() *LoaderStats {
+func (d *database) stats() *db.LoaderStats {
 	return d.loader.Stats()
 }
 
@@ -404,11 +405,11 @@ func (d *Databases) loadersInPool() float64 {
 }
 
 // loadersStats return stats for each loaders.
-func (d *Databases) loadersStats() []*LoaderStats {
+func (d *Databases) loadersStats() []*db.LoaderStats {
 	d.Lock()
 	defer d.Unlock()
 
-	var stats []*LoaderStats
+	var stats []*db.LoaderStats
 
 	for _, l := range d.dbs {
 		if s := l.stats(); s != nil {

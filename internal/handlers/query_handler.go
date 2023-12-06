@@ -18,8 +18,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/support"
 )
@@ -118,11 +118,11 @@ func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byt
 // queryDatabases query all given databases sequentially.
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]string,
-) (chan *db.TaskResult, int) {
+) (chan *collectors.TaskResult, int) {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
 
-	output := make(chan *db.TaskResult, len(dbNames)*len(queryNames))
+	output := make(chan *collectors.TaskResult, len(dbNames)*len(queryNames))
 
 	scheduled := 0
 
@@ -141,13 +141,14 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				logger.Debug().Msg("query result from cache")
 				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
 
-				output <- db.NewSimpleTaskResult(data, dbName, queryName)
+				output <- collectors.NewSimpleTaskResult(data, dbName, queryName)
+
 				scheduled++
 
 				continue
 			}
 
-			task := db.Task{
+			task := collectors.Task{
 				Ctx:       ctx,
 				DBName:    dbName,
 				QueryName: queryName,
@@ -156,12 +157,13 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				Query:     query,
 			}
 
-			if err := db.DatabasesPool.ScheduleTask(&task); err != nil { //nolint:contextcheck
+			if err := collectors.DatabasesPool.ScheduleTask(&task); err != nil { //nolint:contextcheck
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
 			} else {
 				support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
+
 				scheduled++
 			}
 		}
@@ -170,7 +172,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	return output, scheduled
 }
 
-func (q *queryHandler) writeResult(ctx context.Context, output chan *db.TaskResult, scheduled int,
+func (q *queryHandler) writeResult(ctx context.Context, output chan *collectors.TaskResult, scheduled int,
 	writer http.ResponseWriter,
 ) int {
 	logger := log.Ctx(ctx)
