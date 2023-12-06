@@ -39,8 +39,8 @@ var FuncMap = template.FuncMap{
 	"keepAlfaNumUnderlineSpaceU": keepAlfaNumUnderlineSpaceU,
 	"clean":                      clean,
 	"removeQuotes":               removeQuotes,
-	"buckets":                    buckets,
-	"bucketsInt":                 bucketsInt,
+	"genericBuckets":             buckets,
+	"genericBucketsInt":          bucketsInt,
 }
 
 func replaceSpaces(i string) string {

@@ -61,6 +61,7 @@ func main() { //nolint:funlen
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
+	db.InitTemplates()
 
 	cfg, err := conf.LoadConfiguration(*configFile)
 	if err != nil {

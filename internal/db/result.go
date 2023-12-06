@@ -11,10 +11,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
+	"strconv"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 // queryResult is result of Loader.Query.
@@ -89,4 +92,141 @@ func (r *queryResult) format(ctx context.Context, query *conf.Query,
 	}
 
 	return output.Bytes(), nil
+}
+
+func cloneMap[K comparable, V any](inp map[K]V) map[K]V {
+	res := make(map[K]V, len(inp)+1)
+	for k, v := range inp {
+		res[k] = v
+	}
+
+	return res
+}
+
+func tmplFuncBuckets(input []Record, valueKey string, buckets ...float64) []Record {
+	if len(input) == 0 {
+		return input
+	}
+
+	// extract
+	bucketsCnt := make([]int, len(buckets))
+	allCnt := 0
+
+	for _, rec := range input {
+		var value float64
+
+		recVal := rec[valueKey]
+		switch val := recVal.(type) {
+		case float32:
+			value = float64(val)
+		case float64:
+			value = val
+		case int:
+			value = float64(val)
+		case uint32:
+			value = float64(val)
+		case uint64:
+			value = float64(val)
+		case int32:
+			value = float64(val)
+		case int64:
+			value = float64(val)
+		default: // ignore other
+			continue
+		}
+
+		for i, b := range buckets {
+			if value <= b {
+				bucketsCnt[i]++
+			}
+		}
+
+		allCnt++
+	}
+
+	res := make([]Record, 0, len(buckets)+1)
+
+	firstRec := input[0]
+
+	for i, b := range buckets {
+		row := cloneMap(firstRec)
+		row["le"] = fmt.Sprintf("%0.2f", b)
+		row["count"] = bucketsCnt[i]
+		res = append(res, row)
+	}
+
+	// inf
+	row := cloneMap(firstRec)
+	row["le"] = "+Inf"
+	row["count"] = allCnt
+	res = append(res, row)
+
+	return res
+}
+
+func tmplFuncBucketsInt(input []Record, valueKey string, buckets ...int) []Record {
+	if len(input) == 0 {
+		return input
+	}
+
+	// extract
+	bucketsCnt := make([]int, len(buckets))
+	allCnt := 0
+
+	for _, rec := range input {
+		var value int
+
+		recVal := rec[valueKey]
+		switch val := recVal.(type) {
+		case int:
+			value = val
+		case uint32:
+			value = int(val)
+		case uint64:
+			value = int(val)
+		case int32:
+			value = int(val)
+		case int64:
+			value = int(val)
+		case float64:
+			value = int(math.Ceil(val))
+		case float32:
+			value = int(math.Ceil(float64(val)))
+		default:
+			continue
+		}
+
+		for i, b := range buckets {
+			if value <= b {
+				bucketsCnt[i]++
+			}
+		}
+
+		allCnt++
+	}
+
+	res := make([]Record, 0, len(buckets)+1)
+
+	firstRec := input[0]
+
+	for i, b := range buckets {
+		row := cloneMap(firstRec)
+		row["le"] = strconv.Itoa(b)
+		row["count"] = bucketsCnt[i]
+		res = append(res, row)
+	}
+
+	// inf
+	row := cloneMap(firstRec)
+	row["le"] = "+Inf"
+	row["count"] = allCnt
+	res = append(res, row)
+
+	return res
+}
+
+// InitTemplates register template functions relate to Records.
+func InitTemplates() {
+	support.FuncMap["buckets"] = tmplFuncBuckets
+	support.FuncMap["bucketsInt"] = tmplFuncBucketsInt
 }
