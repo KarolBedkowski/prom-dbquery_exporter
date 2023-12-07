@@ -26,7 +26,7 @@ type QueryResult struct {
 }
 
 // Record is one record (row) loaded from database.
-type Record map[string]interface{}
+type Record map[string]any
 
 func newRecord(rows *sqlx.Rows) (Record, error) {
 	rec := Record{}
