@@ -117,7 +117,7 @@ func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byt
 
 // queryDatabases query all given databases sequentially.
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]string,
+	queryNames []string, params map[string]any,
 ) (chan *collectors.TaskResult, int) {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database sequential processing start")
@@ -300,8 +300,8 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	}
 }
 
-func paramsFromQuery(req *http.Request) map[string]string {
-	params := make(map[string]string)
+func paramsFromQuery(req *http.Request) map[string]any {
+	params := make(map[string]any)
 
 	for k, v := range req.URL.Query() {
 		if k != "query" && k != "database" && len(v) > 0 {

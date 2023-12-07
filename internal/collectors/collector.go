@@ -28,7 +28,7 @@ type collector struct {
 	sync.Mutex
 
 	dbName string
-	loader db.Loader
+	loader db.Database
 	cfg    *conf.Database
 	log    zerolog.Logger
 	active bool
@@ -267,6 +267,6 @@ func (c *collector) handleTask(wlog zerolog.Logger, task *Task) *TaskResult {
 	return task.newResult(nil, output)
 }
 
-func (c *collector) stats() *db.LoaderStats {
+func (c *collector) stats() *db.DatabaseStats {
 	return c.loader.Stats()
 }

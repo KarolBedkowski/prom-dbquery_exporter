@@ -82,15 +82,6 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 	return output.Bytes(), nil
 }
 
-func cloneMap[K comparable, V any](inp map[K]V) map[K]V {
-	res := make(map[K]V, len(inp)+1)
-	for k, v := range inp {
-		res[k] = v
-	}
-
-	return res
-}
-
 func tmplFuncBuckets(input []db.Record, valueKey string, buckets ...float64) []db.Record {
 	if len(input) == 0 {
 		return input
@@ -137,14 +128,14 @@ func tmplFuncBuckets(input []db.Record, valueKey string, buckets ...float64) []d
 	firstRec := input[0]
 
 	for i, b := range buckets {
-		row := cloneMap(firstRec)
+		row := support.CloneMap(firstRec)
 		row["le"] = fmt.Sprintf("%0.2f", b)
 		row["count"] = bucketsCnt[i]
 		res = append(res, row)
 	}
 
 	// inf
-	row := cloneMap(firstRec)
+	row := support.CloneMap(firstRec)
 	row["le"] = "+Inf"
 	row["count"] = allCnt
 	res = append(res, row)
@@ -198,14 +189,14 @@ func tmplFuncBucketsInt(input []db.Record, valueKey string, buckets ...int) []db
 	firstRec := input[0]
 
 	for i, b := range buckets {
-		row := cloneMap(firstRec)
+		row := support.CloneMap(firstRec)
 		row["le"] = strconv.Itoa(b)
 		row["count"] = bucketsCnt[i]
 		res = append(res, row)
 	}
 
 	// inf
-	row := cloneMap(firstRec)
+	row := support.CloneMap(firstRec)
 	row["le"] = "+Inf"
 	row["count"] = allCnt
 	res = append(res, row)

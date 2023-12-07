@@ -151,11 +151,11 @@ func (cs *Collectors) collectorsLen() float64 {
 }
 
 // stats return stats for each loaders.
-func (cs *Collectors) stats() []*db.LoaderStats {
+func (cs *Collectors) stats() []*db.DatabaseStats {
 	cs.Lock()
 	defer cs.Unlock()
 
-	var stats []*db.LoaderStats
+	var stats []*db.DatabaseStats
 
 	for _, l := range cs.collectors {
 		if s := l.stats(); s != nil {

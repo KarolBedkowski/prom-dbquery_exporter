@@ -24,7 +24,7 @@ type Task struct {
 	QueryName string
 
 	Query  *conf.Query
-	Params map[string]string
+	Params map[string]any
 
 	Output chan *TaskResult
 }

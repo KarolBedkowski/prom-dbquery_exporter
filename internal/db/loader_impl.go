@@ -15,7 +15,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-func newPostgresLoader(cfg *conf.Database) (Loader, error) {
+func newPostgresLoader(cfg *conf.Database) (Database, error) {
 	var connStr string
 	if val, ok := cfg.Connection["connstr"]; ok && val != "" {
 		connStr, ok = val.(string)
@@ -39,7 +39,7 @@ func newPostgresLoader(cfg *conf.Database) (Loader, error) {
 		connStr = strings.Join(p, " ")
 	}
 
-	l := &genericLoader{
+	l := &genericDatabase{
 		connStr:    connStr,
 		driver:     "postgres",
 		initialSQL: cfg.InitialQuery,
@@ -49,7 +49,7 @@ func newPostgresLoader(cfg *conf.Database) (Loader, error) {
 	return l, nil
 }
 
-func newSqliteLoader(cfg *conf.Database) (Loader, error) {
+func newSqliteLoader(cfg *conf.Database) (Database, error) {
 	params := url.Values{}
 
 	var dbname string
@@ -82,7 +82,7 @@ func newSqliteLoader(cfg *conf.Database) (Loader, error) {
 	}
 
 	// glebarez/go-sqlite uses 'sqlite', mattn/go-sqlite3 - 'sqlite3'
-	l := &genericLoader{
+	l := &genericDatabase{
 		connStr: connstr.String(), driver: "sqlite", initialSQL: cfg.InitialQuery,
 		dbConf: cfg,
 	}
@@ -94,7 +94,7 @@ func newSqliteLoader(cfg *conf.Database) (Loader, error) {
 	return l, nil
 }
 
-func newMysqlLoader(cfg *conf.Database) (Loader, error) {
+func newMysqlLoader(cfg *conf.Database) (Database, error) {
 	params := &standardParams{
 		host: "localhost",
 		port: "3306",
@@ -131,7 +131,7 @@ func newMysqlLoader(cfg *conf.Database) (Loader, error) {
 		connstr.WriteString(params.params.Encode())
 	}
 
-	l := &genericLoader{
+	l := &genericDatabase{
 		connStr: connstr.String(), driver: "mysql", initialSQL: cfg.InitialQuery,
 		dbConf: cfg,
 	}
@@ -140,13 +140,14 @@ func newMysqlLoader(cfg *conf.Database) (Loader, error) {
 }
 
 type standardParams struct {
-	dbname, user, pass, host, port string
-	params                         url.Values
+	dbname     string
+	user, pass string
+	host, port string
+	params     url.Values
 }
 
 func newStandardParams(cfg map[string]any) *standardParams {
 	s := &standardParams{}
-
 	s.load(cfg)
 
 	return s
@@ -176,7 +177,7 @@ func (s *standardParams) load(cfg map[string]any) {
 	}
 }
 
-func newOracleLoader(cfg *conf.Database) (Loader, error) {
+func newOracleLoader(cfg *conf.Database) (Database, error) {
 	params := newStandardParams(cfg.Connection)
 
 	if params.dbname == "" {
@@ -213,7 +214,7 @@ func newOracleLoader(cfg *conf.Database) (Loader, error) {
 		connstr.WriteString(params.params.Encode())
 	}
 
-	l := &genericLoader{
+	l := &genericDatabase{
 		connStr: connstr.String(), driver: "oracle", initialSQL: cfg.InitialQuery,
 		dbConf: cfg,
 	}
@@ -221,7 +222,7 @@ func newOracleLoader(cfg *conf.Database) (Loader, error) {
 	return l, nil
 }
 
-func newMssqlLoader(cfg *conf.Database) (Loader, error) {
+func newMssqlLoader(cfg *conf.Database) (Database, error) {
 	params := url.Values{}
 	databaseConfigured := false
 
@@ -242,28 +243,10 @@ func newMssqlLoader(cfg *conf.Database) (Loader, error) {
 
 	connstr := params.Encode()
 
-	l := &genericLoader{
+	l := &genericDatabase{
 		connStr: connstr, driver: "mssql", initialSQL: cfg.InitialQuery,
 		dbConf: cfg,
 	}
 
 	return l, nil
-}
-
-// CreateLoader returns configured Loader for given configuration.
-func CreateLoader(cfg *conf.Database) (Loader, error) {
-	switch cfg.Driver {
-	case "postgresql", "postgres", "cockroach", "cockroachdb":
-		return newPostgresLoader(cfg)
-	case "sqlite3", "sqlite":
-		return newSqliteLoader(cfg)
-	case "mysql", "mariadb", "tidb":
-		return newMysqlLoader(cfg)
-	case "oracle", "oci8":
-		return newOracleLoader(cfg)
-	case "mssql":
-		return newMssqlLoader(cfg)
-	}
-
-	return nil, InvalidConfigrationError(fmt.Sprintf("unsupported database type '%s'", cfg.Driver))
 }
