@@ -210,33 +210,9 @@ loop:
 			wlog.Debug().Object("task", task).Int("queue_len", len(c.workQueue)).Msg("handle task")
 			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", strconv.Itoa(idx), "db", c.dbName)
 
-			select {
-			case <-task.Ctx.Done():
-				wlog.Warn().Msg("task cancelled before processing")
-
-				continue
-			default:
-			}
-
-			if task.Ctx.Err() != nil {
-				continue
-			}
-
-			res := c.handleTask(wlog, task)
-
-			select {
-			case <-task.Ctx.Done():
-				wlog.Warn().Msg("task cancelled after processing")
-			default:
-				if task.Ctx.Err() == nil {
-					task.Output <- res
-				} else {
-					wlog.Warn().Msg("can't send output")
-				}
-			}
+			c.handleTask(wlog, task)
 
 			continue
-
 		case <-shutdownTimer.C:
 			break loop
 		}
@@ -245,9 +221,42 @@ loop:
 	wlog.Debug().Msg("worker stopped")
 }
 
-func (c *collector) handleTask(wlog zerolog.Logger, task *Task) *TaskResult {
-	ctx := task.Ctx
+func (c *collector) handleTask(wlog zerolog.Logger, task *Task) {
 	llog := wlog.With().Object("task", task).Logger()
+
+	select {
+	case <-task.Ctx.Done():
+		llog.Warn().Msg("task cancelled before processing")
+
+		return
+	default:
+	}
+
+	if task.Ctx.Err() != nil {
+		return
+	}
+
+	res := c.doQuery(wlog, task)
+
+	select {
+	case <-task.Ctx.Done():
+		llog.Warn().Msg("task cancelled after processing")
+
+		return
+	default:
+	}
+
+	if task.Ctx.Err() != nil {
+		llog.Warn().Msg("can't send output")
+
+		return
+	}
+
+	task.Output <- res
+}
+
+func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
+	ctx := task.Ctx
 
 	support.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
 
