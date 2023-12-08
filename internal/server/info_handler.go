@@ -1,4 +1,4 @@
-package handlers
+package server
 
 //
 // info_handler.go

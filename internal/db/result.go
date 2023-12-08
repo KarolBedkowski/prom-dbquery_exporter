@@ -7,21 +7,14 @@ package db
 // Distributed under terms of the GPLv3 license.
 
 import (
-	"bufio"
-	"bytes"
-	"context"
 	"fmt"
-	"math"
-	"strconv"
 	"time"
 
-	"github.com/rs/zerolog/log"
-	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/support"
+	"github.com/jmoiron/sqlx"
 )
 
-// queryResult is result of Loader.Query.
-type queryResult struct {
+// QueryResult is result of Loader.Query.
+type QueryResult struct {
 	// rows
 	Records []Record
 	// query duration
@@ -32,201 +25,36 @@ type queryResult struct {
 	Params map[string]interface{}
 }
 
-// resultTmplData keep query result and some metadata parsed to template.
-type resultTmplData struct {
-	// Records (rows)
-	R []Record
-	// Parameters
-	P map[string]interface{}
-	// Labels
-	L map[string]interface{}
+// Record is one record (row) loaded from database.
+type Record map[string]any
 
-	QueryStartTime int64
-	QueryDuration  float64
-	Count          int
-	// Query name
-	Query string
-	// Database name
-	Database string
-}
-
-// FormatResult format query result using template from query configuration.
-func (r *queryResult) format(ctx context.Context, query *conf.Query,
-	db *conf.Database,
-) ([]byte, error) {
-	llog := log.Ctx(ctx)
-	llog.Debug().Msg("format result")
-
-	res := &resultTmplData{
-		Query:          query.Name,
-		Database:       db.Name,
-		R:              r.Records,
-		P:              r.Params,
-		L:              db.Labels,
-		QueryStartTime: r.Start.Unix(),
-		QueryDuration:  r.Duration,
-		Count:          len(r.Records),
+func newRecord(rows *sqlx.Rows) (Record, error) {
+	rec := Record{}
+	if err := rows.MapScan(rec); err != nil {
+		return nil, fmt.Errorf("map scan record error: %w", err)
 	}
 
-	var buf bytes.Buffer
-
-	if err := query.MetricTpl.Execute(&buf, res); err != nil {
-		return nil, fmt.Errorf("execute template error: %w", err)
-	}
-
-	// trim lines
-	var output bytes.Buffer
-
-	scanner := bufio.NewScanner(&buf)
-	for scanner.Scan() {
-		line := bytes.Trim(scanner.Bytes(), "\n\r\t ")
-
-		if len(line) > 0 {
-			output.Write(line)
-			output.WriteRune('\n')
+	// convert []byte to string
+	for k, v := range rec {
+		if v, ok := v.([]byte); ok {
+			rec[k] = string(v)
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan result error: %w", err)
-	}
-
-	return output.Bytes(), nil
+	return rec, nil
 }
 
-func cloneMap[K comparable, V any](inp map[K]V) map[K]V {
-	res := make(map[K]V, len(inp)+1)
-	for k, v := range inp {
-		res[k] = v
-	}
+func createRecords(rows *sqlx.Rows) ([]Record, error) {
+	var records []Record
 
-	return res
-}
-
-func tmplFuncBuckets(input []Record, valueKey string, buckets ...float64) []Record {
-	if len(input) == 0 {
-		return input
-	}
-
-	// extract
-	bucketsCnt := make([]int, len(buckets))
-	allCnt := 0
-
-	for _, rec := range input {
-		var value float64
-
-		recVal := rec[valueKey]
-		switch val := recVal.(type) {
-		case float32:
-			value = float64(val)
-		case float64:
-			value = val
-		case int:
-			value = float64(val)
-		case uint32:
-			value = float64(val)
-		case uint64:
-			value = float64(val)
-		case int32:
-			value = float64(val)
-		case int64:
-			value = float64(val)
-		default: // ignore other
-			continue
+	for rows.Next() {
+		rec, err := newRecord(rows)
+		if err != nil {
+			return nil, err
 		}
 
-		for i, b := range buckets {
-			if value <= b {
-				bucketsCnt[i]++
-			}
-		}
-
-		allCnt++
+		records = append(records, rec)
 	}
 
-	res := make([]Record, 0, len(buckets)+1)
-
-	firstRec := input[0]
-
-	for i, b := range buckets {
-		row := cloneMap(firstRec)
-		row["le"] = fmt.Sprintf("%0.2f", b)
-		row["count"] = bucketsCnt[i]
-		res = append(res, row)
-	}
-
-	// inf
-	row := cloneMap(firstRec)
-	row["le"] = "+Inf"
-	row["count"] = allCnt
-	res = append(res, row)
-
-	return res
-}
-
-func tmplFuncBucketsInt(input []Record, valueKey string, buckets ...int) []Record {
-	if len(input) == 0 {
-		return input
-	}
-
-	// extract
-	bucketsCnt := make([]int, len(buckets))
-	allCnt := 0
-
-	for _, rec := range input {
-		var value int
-
-		recVal := rec[valueKey]
-		switch val := recVal.(type) {
-		case int:
-			value = val
-		case uint32:
-			value = int(val)
-		case uint64:
-			value = int(val)
-		case int32:
-			value = int(val)
-		case int64:
-			value = int(val)
-		case float64:
-			value = int(math.Ceil(val))
-		case float32:
-			value = int(math.Ceil(float64(val)))
-		default:
-			continue
-		}
-
-		for i, b := range buckets {
-			if value <= b {
-				bucketsCnt[i]++
-			}
-		}
-
-		allCnt++
-	}
-
-	res := make([]Record, 0, len(buckets)+1)
-
-	firstRec := input[0]
-
-	for i, b := range buckets {
-		row := cloneMap(firstRec)
-		row["le"] = strconv.Itoa(b)
-		row["count"] = bucketsCnt[i]
-		res = append(res, row)
-	}
-
-	// inf
-	row := cloneMap(firstRec)
-	row["le"] = "+Inf"
-	row["count"] = allCnt
-	res = append(res, row)
-
-	return res
-}
-
-// InitTemplates register template functions relate to Records.
-func InitTemplates() {
-	support.FuncMap["buckets"] = tmplFuncBuckets
-	support.FuncMap["bucketsInt"] = tmplFuncBucketsInt
+	return records, nil
 }

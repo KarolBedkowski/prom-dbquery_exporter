@@ -1,4 +1,4 @@
-package support
+package collectors
 
 //
 // templates_test.go
@@ -9,10 +9,12 @@ package support
 
 import (
 	"testing"
+
+	"prom-dbquery_exporter.app/internal/db"
 )
 
-func addRow(value float64, keyval ...string) map[string]any {
-	res := make(map[string]any)
+func addRow(value float64, keyval ...string) db.Record {
+	res := make(db.Record)
 	res["value"] = value
 
 	for i := 1; i < len(keyval); i += 2 {
@@ -22,7 +24,7 @@ func addRow(value float64, keyval ...string) map[string]any {
 	return res
 }
 
-func checkRes(t *testing.T, res []map[string]any, idx int, bucket string, cnt int) {
+func checkRes(t *testing.T, res []db.Record, idx int, bucket string, cnt int) {
 	t.Helper()
 
 	val, ok := res[idx]["count"]
@@ -53,7 +55,7 @@ func checkRes(t *testing.T, res []map[string]any, idx int, bucket string, cnt in
 func TestBuckets(t *testing.T) {
 	t.Parallel()
 
-	var inp []map[string]any
+	var inp []db.Record
 	inp = append(inp, addRow(1, "key1", "val1", "key2", "val2"))
 	inp = append(inp, addRow(1.1, "key1", "val1", "key2", "val2"))
 	inp = append(inp, addRow(2.0, "key1", "val1", "key2", "val2"))
@@ -65,7 +67,7 @@ func TestBuckets(t *testing.T) {
 
 	t.Logf("inp: %v", inp)
 
-	res := buckets(inp, "value", 1.0, 2.5, 4.0, 7.0, 10.0)
+	res := tmplFuncBuckets(inp, "value", 1.0, 2.5, 4.0, 7.0, 10.0)
 
 	if len(res) != 6 {
 		t.Errorf("invalid number of results: %v", res)
@@ -84,7 +86,7 @@ func TestBuckets(t *testing.T) {
 func TestBucketsInt(t *testing.T) {
 	t.Parallel()
 
-	var inp []map[string]any
+	var inp []db.Record
 	inp = append(inp, addRow(0.1, "key1", "val1", "key2", "val2"))
 	inp = append(inp, addRow(1.1, "key1", "val1", "key2", "val2"))
 	inp = append(inp, addRow(2.0, "key1", "val1", "key2", "val2"))
@@ -100,7 +102,7 @@ func TestBucketsInt(t *testing.T) {
 
 	t.Logf("inp: %v", inp)
 
-	res := bucketsInt(inp, "value", 1, 2, 4, 7, 10)
+	res := tmplFuncBucketsInt(inp, "value", 1, 2, 4, 7, 10)
 
 	if len(res) != 6 {
 		t.Errorf("invalid number of results: %v", res)

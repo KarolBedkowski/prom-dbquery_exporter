@@ -1,4 +1,4 @@
-package db
+package collectors
 
 //
 // pool.go
@@ -20,7 +20,7 @@ func initMetrics() {
 				Name:      "loaders_in_pool",
 				Help:      "Number of active loaders in pool",
 			},
-			DatabasesPool.loadersInPool,
+			CollectorsPool.collectorsLen,
 		))
 
 	prometheus.MustRegister(loggersPoolCollector{})
@@ -103,11 +103,11 @@ func (l loggersPoolCollector) Describe(ch chan<- *prometheus.Desc) {
 }
 
 func (l loggersPoolCollector) Collect(resCh chan<- prometheus.Metric) { //nolint:funlen
-	if DatabasesPool == nil {
+	if CollectorsPool == nil {
 		return
 	}
 
-	stats := DatabasesPool.loadersStats()
+	stats := CollectorsPool.stats()
 
 	for _, stat := range stats {
 		resCh <- prometheus.MustNewConstMetric(
