@@ -261,6 +261,8 @@ func (c *collector) handleTask(wlog zerolog.Logger, task *Task) *TaskResult {
 	llog.Debug().Msg("result received")
 	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
 
+	time.Sleep(1 * time.Second)
+
 	output, err := formatResult(ctx, result, task.Query, c.cfg)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("format")

@@ -1,4 +1,4 @@
-package handlers
+package server
 
 //
 // mod.go
@@ -26,7 +26,7 @@ const (
 	defaultShutdownTimeout = time.Duration(10) * time.Second
 )
 
-// WebHandler manage http handlers.
+// WebHandler handle incomming requests
 type WebHandler struct {
 	handler       *queryHandler
 	infoHandler   *infoHandler

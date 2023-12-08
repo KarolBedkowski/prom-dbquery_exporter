@@ -19,8 +19,8 @@ import (
 	_ "github.com/sijms/go-ora/v2"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/handlers"
 	"prom-dbquery_exporter.app/internal/metrics"
+	"prom-dbquery_exporter.app/internal/server"
 	"prom-dbquery_exporter.app/internal/support"
 )
 
@@ -78,7 +78,7 @@ func main() { //nolint:funlen
 
 	collectors.CollectorsPool.UpdateConf(cfg)
 
-	webHandler := handlers.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput)
+	webHandler := server.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput)
 
 	var runGroup run.Group
 	{
