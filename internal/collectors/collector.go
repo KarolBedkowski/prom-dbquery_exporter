@@ -218,14 +218,21 @@ loop:
 			default:
 			}
 
+			if task.Ctx.Err() != nil {
+				continue
+			}
+
 			res := c.handleTask(wlog, task)
 
 			select {
 			case <-task.Ctx.Done():
 				wlog.Warn().Msg("task cancelled after processing")
-			case task.Output <- res:
 			default:
-				wlog.Warn().Msg("can't send output")
+				if task.Ctx.Err() == nil {
+					task.Output <- res
+				} else {
+					wlog.Warn().Msg("can't send output")
+				}
 			}
 
 			continue
