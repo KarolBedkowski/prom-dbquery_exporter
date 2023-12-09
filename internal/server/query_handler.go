@@ -115,12 +115,11 @@ func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byt
 	}
 }
 
-// queryDatabases query all given databases sequentially.
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]any,
 ) (chan *collectors.TaskResult, int) {
 	logger := zerolog.Ctx(ctx)
-	logger.Debug().Msg("database sequential processing start")
+	logger.Debug().Msg("database processing start")
 
 	output := make(chan *collectors.TaskResult, len(dbNames)*len(queryNames))
 
@@ -157,7 +156,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				Query:     query,
 			}
 
-			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil { //nolint: contextcheck
+			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
@@ -176,7 +175,7 @@ func (q *queryHandler) writeResult(ctx context.Context, output chan *collectors.
 	writer http.ResponseWriter,
 ) int {
 	logger := log.Ctx(ctx)
-	logger.Debug().Msg("database sequential processing start")
+	logger.Debug().Msg("write result start")
 
 	successProcessed := 0
 
