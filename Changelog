@@ -1,3 +1,8 @@
+v0.8.3 2023-12-09
+* fix: remove empty lines from output
+* fix: panic when remote connection was closed during query
+* dev: refactor code
+
 v0.8.2 2023-11-29
 * fix: don't use ReadOnly transaction as it is not supported by some db
 * fix: update grafana dashboard

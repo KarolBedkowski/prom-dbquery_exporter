@@ -33,7 +33,7 @@ database:
       password: dbquery_exporter
       port: 5432
     pool:
-      max_connections: 2
+      max_connections: 3
       max_idle_connections: 2
   testdbpgsql2:
     driver: postgres
@@ -78,6 +78,7 @@ query:
       ping{database="{{ .Database }}"} 1
 
   testq1:
+    # Characters like `:` must be doubled to prevent binding paramaters.
     sql: >
        select s.name, count(t.id) as cnt
        from sports s left join trips t on s.id = t.sport_id
@@ -115,6 +116,24 @@ query:
       rwr3_trips_query_secounds {{ .QueryDuration }}
       rwr3_trips_last_query_unix {{ .QueryStartTime }}
 
+  test_buckets:
+    sql: >
+       select sport_id, distance from trips t
+
+    metrics: |
+      {{- range (buckets .R "distance" 5.0 10.0 20.0 40.0 50.0) }}
+      rwr3_trips_distance_bucket{sport_id="{{ .sport_id }}", le="{{ .le }}"} {{ .count }}
+      {{- end  }}
+
+  test_buckets_int:
+    sql: >
+       select sport_id, duration from trips t
+
+    metrics: |
+      {{- range (bucketsInt .R "duration" 3600 7200 10800 14400 18000) }}
+      rwr3_trips_duration_bucket{sport_id="{{ .sport_id }}", le="{{ .le }}"} {{ .count }}
+      {{- end  }}
+
   testparam1:
     # Queries may use parameters delivered by request->query (ie ...&id=12)
     sql: >
@@ -130,14 +149,35 @@ query:
     params:
       id: 0
 
+  # real & useful databases queries
+
   pg_stats_activity_state:
     sql: >
-      select COALESCE(state, '') as state, count(*) as cnt
-      from pg_stat_activity group by state
+      SELECT tmp.state as state, count(psa.state) AS cnt
+      FROM (VALUES ('active'), ('idle'), ('idle in transaction'), ('idle in transaction (aborted)'), ('fastpath function call'), ('disabled')) AS tmp(state)
+      LEFT JOIN pg_stat_activity psa ON psa.state = tmp.state
+      GROUP BY tmp.state
     caching_time: 30
     metrics: |
       {{- range .R }}
       pg_stats_activity_state{state="{{ .state }}"} {{ .cnt }}
+      {{- end }}
+
+  pg_stats_activity_state_db:
+    sql: >
+      WITH s AS (
+        SELECT datname, state, count(*) AS cnt
+        FROM pg_stat_activity
+        GROUP BY datname, state
+      )
+      SELECT pd.datname, tmp.state, COALESCE(s.cnt, 0) as cnt
+      FROM (VALUES ('active'), ('idle'), ('idle in transaction'), ('idle in transaction (aborted)'), ('fastpath function call'), ('disabled')) AS tmp(state)
+      CROSS JOIN pg_database pd
+      LEFT JOIN s ON s.state = tmp.state AND s.datname = pd.datname
+    caching_time: 30
+    metrics: |
+      {{- range .R }}
+      pg_stats_activity_state_db{database="{{ .datname }}", state="{{ .state }}"} {{ .cnt }}
       {{- end }}
 
   pg_stat_database:
@@ -145,7 +185,7 @@ query:
       - pgstats
       - pg
     sql: >
-      select COALESCE(psd.datname, '') AS datname, numbackends, xact_commit,
+      SELECT COALESCE(psd.datname, '') AS datname, numbackends, xact_commit,
         xact_rollback, blks_read, blks_hit, tup_returned, tup_fetched,
         tup_inserted, tup_updated, tup_deleted, conflicts, temp_files,
         temp_bytes, deadlocks, blk_read_time, blk_write_time,
@@ -158,7 +198,7 @@ query:
           ELSE 1.0
         END as commit_ratio,
         pg_database_size(psd.datname) AS size
-      from pg_stat_database psd
+      FROM pg_stat_database psd
       JOIN pg_database pd ON pd.oid =  psd.datid
       WHERE not pd.datistemplate
     caching_time: 30
@@ -191,7 +231,7 @@ query:
     sql: >
       SELECT psdc.datname, confl_tablespace, confl_lock, confl_snapshot,
         confl_bufferpin, confl_deadlock
-      from pg_stat_database_conflicts psdc
+      FROM pg_stat_database_conflicts psdc
       JOIN pg_database pd ON pd.oid =  psdc.datid
       WHERE not pd.datistemplate
     caching_time: 60
@@ -204,13 +244,71 @@ query:
       pg_stat_database_conflicts{name="{{.datname}}", conf="deadlock"} {{.confl_deadlock}}
       {{- end }}
 
-  tidb_test:
+  pg_locks_db:
+    groups:
+      - pgstats
     sql: >
-      select id, aa from test
-
+      WITH s AS (
+        SELECT DATABASE, lower(MODE) AS mode, count(*) AS cnt
+        FROM pg_locks
+        WHERE DATABASE IS NOT null
+        GROUP BY DATABASE, lower(MODE)
+      )
+      SELECT pd.datname, tmp.mode, COALESCE(s.cnt, 0) as cnt
+      FROM (VALUES ('accesssharelock'), ('rowsharelock'), ('rowexclusivelock'), ('shareupdateexclusivelock'),  ('sharelock'),
+        ('sharerowexclusivelock'), ('exclusivelock'),  ('accessexclusivelock'), ('sireadlock')) AS tmp(mode)
+      CROSS JOIN pg_database pd
+      LEFT JOIN s ON s.mode = tmp.MODE AND s.database = pd.oid
+    caching_time: 60
     metrics: |
       {{- range .R }}
-      tidb_test{key="{{ .aa }}"} {{ .id }}
+      pg_locks{database="{{ .datname }}", mode="{{ .mode }}"} {{ .cnt }}
+      {{- end }}
+
+  pg_locks:
+    groups:
+      - pg
+    sql: >
+      SELECT tmp.mode, count(pl.mode) as cnt
+      FROM (VALUES ('accesssharelock'), ('rowsharelock'), ('rowexclusivelock'), ('shareupdateexclusivelock'),  ('sharelock'),
+        ('sharerowexclusivelock'), ('exclusivelock'),  ('accessexclusivelock'), ('sireadlock')) AS tmp(mode)
+      LEFT JOIN pg_locks pl ON lower(pl.MODE) = tmp.MODE AND pl."database" IS NOT null
+      GROUP BY tmp.MODE
+    caching_time: 60
+    metrics: |
+      {{- range .R }}
+      pg_locks{mode="{{ .mode }}"} {{ .cnt }}
+      {{- end }}
+
+  pg_tx:
+    groups:
+      - pgstats
+    sql: >
+      SELECT min(EXTRACT(EPOCH FROM xact_start)) AS oldesttx, count(*) AS cnt
+      FROM pg_stat_activity
+      WHERE state IS DISTINCT FROM 'idle' AND query NOT LIKE 'autovacuum%'
+    metrics: |
+      {{- range .R }}
+      pg_tx_oldest {{ .oldesttx }}
+      pg_tx_total {{ .cnt }}
+      {{- end }}
+
+  pg_db:
+    groups:
+      - pg
+    sql: >
+      SELECT 'postmaster_start_unix' AS name, '' AS key, EXTRACT(EPOCH FROM pg_postmaster_start_time) AS val FROM pg_postmaster_start_time()
+      UNION ALL
+      SELECT 'databases_count', '' AS key, count(*) AS val FROM pg_database
+      UNION ALL
+      SELECT 'version', version() as key, 1 as val
+    metrics: |
+      {{- range .R }}
+        {{- if (ne .key "") }}
+          pg_db_{{ .name }}{key="{{ .key | removeQuotes }}"} {{ .val }}
+        {{- else }}
+          pg_db_{{ .name }} {{ .val }}
+        {{- end }}
       {{- end }}
 
   oracle_v_sysmetric:

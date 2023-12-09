@@ -24,7 +24,7 @@ const (
 	defaultMaxIdleConns         = 2
 )
 
-type genericLoader struct {
+type genericDatabase struct {
 	connStr                string
 	driver                 string
 	conn                   *sqlx.DB
@@ -35,9 +35,9 @@ type genericLoader struct {
 	totalFailedConnections uint32
 }
 
-func (g *genericLoader) Stats() *LoaderStats {
+func (g *genericDatabase) Stats() *DatabaseStats {
 	if g.conn != nil {
-		return &LoaderStats{
+		return &DatabaseStats{
 			Name:                   g.dbConf.Name,
 			DBStats:                g.conn.Stats(),
 			TotalOpenedConnections: atomic.LoadUint32(&g.totalOpenedConnections),
@@ -48,7 +48,7 @@ func (g *genericLoader) Stats() *LoaderStats {
 	return nil
 }
 
-func (g *genericLoader) configureConnection(ctx context.Context) {
+func (g *genericDatabase) configureConnection(ctx context.Context) {
 	g.conn.SetConnMaxLifetime(defaultConnMaxLifetime)
 	g.conn.SetMaxOpenConns(defaultMaxOpenConns)
 	g.conn.SetMaxIdleConns(defaultMaxIdleConns)
@@ -74,7 +74,7 @@ func (g *genericLoader) configureConnection(ctx context.Context) {
 	}
 }
 
-func (g *genericLoader) openConnection(ctx context.Context) error {
+func (g *genericDatabase) openConnection(ctx context.Context) error {
 	// lock loader for write
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -107,7 +107,7 @@ func (g *genericLoader) openConnection(ctx context.Context) error {
 	return nil
 }
 
-func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
+func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	llog := log.Ctx(ctx)
 	llog.Debug().Interface("conn", g.conn).Msg("conn")
 
@@ -141,7 +141,7 @@ func (g *genericLoader) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	return conn, nil
 }
 
-func (g *genericLoader) executeInitialQuery(ctx context.Context, sql string, conn *sqlx.Conn) error {
+func (g *genericDatabase) executeInitialQuery(ctx context.Context, sql string, conn *sqlx.Conn) error {
 	lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
 	defer cancel()
 
@@ -158,7 +158,7 @@ func (g *genericLoader) executeInitialQuery(ctx context.Context, sql string, con
 }
 
 // Query get data from database.
-func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map[string]string,
+func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
 ) (*QueryResult, error) {
 	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
@@ -176,13 +176,13 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 	defer g.lock.RUnlock()
 
 	// prepare query parameters; combine parameters from query and params
-	queryParams := prepareParams(query, params)
+	queryParams := support.CloneMap(query.Params, params)
 	timeout := g.queryTimeout(query)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", query.Params).
+	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", queryParams).
 		Msg("genericQuery start execute")
 
 	tx, err := conn.BeginTxx(ctx, nil)
@@ -199,10 +199,12 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 		return nil, fmt.Errorf("execute query error: %w", err)
 	}
 
-	if cols, err := rows.Columns(); err == nil {
-		llog.Debug().Interface("cols", cols).Msg("genericQuery columns")
-	} else {
-		return nil, fmt.Errorf("get columns error: %w", err)
+	if e := llog.Debug(); e.Enabled() {
+		if cols, err := rows.Columns(); err == nil {
+			e.Interface("cols", cols).Msg("genericQuery columns")
+		} else {
+			return nil, fmt.Errorf("get columns error: %w", err)
+		}
 	}
 
 	result.Records, err = createRecords(rows)
@@ -216,23 +218,8 @@ func (g *genericLoader) Query(ctx context.Context, query *conf.Query, params map
 	return result, nil
 }
 
-func createRecords(rows *sqlx.Rows) ([]Record, error) {
-	var records []Record
-
-	for rows.Next() {
-		rec, err := newRecord(rows)
-		if err != nil {
-			return nil, err
-		}
-
-		records = append(records, rec)
-	}
-
-	return records, nil
-}
-
 // Close database connection.
-func (g *genericLoader) Close(ctx context.Context) error {
+func (g *genericDatabase) Close(ctx context.Context) error {
 	// lock loader for write
 	g.lock.Lock()
 	defer g.lock.Unlock()
@@ -254,18 +241,18 @@ func (g *genericLoader) Close(ctx context.Context) error {
 	return nil
 }
 
-func (g *genericLoader) UpdateConf(db *conf.Database) bool {
+func (g *genericDatabase) UpdateConf(db *conf.Database) bool {
 	g.dbConf = db
 
 	return true
 }
 
-func (g *genericLoader) String() string {
+func (g *genericDatabase) String() string {
 	return fmt.Sprintf("genericLoader name='%s' driver='%s' connstr='%v' connected=%v",
 		g.dbConf.Name, g.driver, g.connStr, g.conn != nil)
 }
 
-func (g *genericLoader) queryTimeout(q *conf.Query) time.Duration {
+func (g *genericDatabase) queryTimeout(q *conf.Query) time.Duration {
 	timeout := defaultTimeout
 
 	switch {
@@ -276,20 +263,4 @@ func (g *genericLoader) queryTimeout(q *conf.Query) time.Duration {
 	}
 
 	return time.Duration(timeout) * time.Second
-}
-
-func prepareParams(q *conf.Query, params map[string]string) map[string]interface{} {
-	p := make(map[string]interface{})
-
-	if q.Params != nil {
-		for k, v := range q.Params {
-			p[k] = v
-		}
-	}
-
-	for k, v := range params {
-		p[k] = v
-	}
-
-	return p
 }
