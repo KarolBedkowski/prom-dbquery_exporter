@@ -9,6 +9,7 @@ package collectors
 
 import (
 	"context"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
@@ -27,6 +28,8 @@ type Task struct {
 	Params map[string]any
 
 	Output chan *TaskResult
+
+	RequestStart time.Time
 }
 
 func (d *Task) newResult(err error, result []byte) *TaskResult {

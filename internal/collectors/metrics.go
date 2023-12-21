@@ -25,6 +25,7 @@ func initMetrics() {
 
 	prometheus.MustRegister(loggersPoolCollector{})
 	prometheus.MustRegister(workersCreatedCnt)
+	prometheus.MustRegister(tasksQueueWaitTime)
 }
 
 // workersCreatedCnt is total number of created workers.
@@ -33,6 +34,16 @@ var workersCreatedCnt = prometheus.NewCounterVec(
 		Namespace: metrics.MetricsNamespace,
 		Name:      "workers_created_total",
 		Help:      "Total number of created workers",
+	},
+	[]string{"loader"},
+)
+
+var tasksQueueWaitTime = prometheus.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Namespace: metrics.MetricsNamespace,
+		Name:      "tasks_queue_wait_time_seconds",
+		Help:      "A histogram of time what log task waiting for handle.",
+		Buckets:   []float64{0.05, 0.1, 0.2, 0.5, 1, 5, 10, 30, 60, 120, 300},
 	},
 	[]string{"loader"},
 )

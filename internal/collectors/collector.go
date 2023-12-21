@@ -209,6 +209,7 @@ loop:
 		case task := <-c.workQueue:
 			wlog.Debug().Object("task", task).Int("queue_len", len(c.workQueue)).Msg("handle task")
 			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", strconv.Itoa(idx), "db", c.dbName)
+			tasksQueueWaitTime.WithLabelValues(c.dbName).Observe(time.Since(task.RequestStart).Seconds())
 
 			c.handleTask(wlog, task)
 

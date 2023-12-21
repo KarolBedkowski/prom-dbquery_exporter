@@ -124,6 +124,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	output := make(chan *collectors.TaskResult, len(dbNames)*len(queryNames))
 
 	scheduled := 0
+	now := time.Now()
 
 	for _, dbName := range dbNames {
 		for _, queryName := range queryNames {
@@ -148,12 +149,13 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			}
 
 			task := collectors.Task{
-				Ctx:       ctx,
-				DBName:    dbName,
-				QueryName: queryName,
-				Params:    params,
-				Output:    output,
-				Query:     query,
+				Ctx:          ctx,
+				DBName:       dbName,
+				QueryName:    queryName,
+				Params:       params,
+				Output:       output,
+				Query:        query,
+				RequestStart: now,
 			}
 
 			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
