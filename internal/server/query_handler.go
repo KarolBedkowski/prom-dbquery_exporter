@@ -24,25 +24,41 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
+const defaultMaxLockTime = 20 * time.Minute
+
+type lockInfo struct {
+	key string
+	ts  time.Time
+}
+
+func (l lockInfo) String() string {
+	return fmt.Sprintf("by %s on %s (%s ago)", l.key, l.ts, time.Since(l.ts))
+}
+
 type locker struct {
 	sync.Mutex
+	maxLockTime time.Duration
 
-	runningQuery map[string]string
+	runningQuery map[string]lockInfo
 }
 
 func newLocker() locker {
-	return locker{runningQuery: make(map[string]string)}
+	return locker{runningQuery: make(map[string]lockInfo), maxLockTime: defaultMaxLockTime}
 }
 
 func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
 	l.Lock()
 	defer l.Unlock()
 
-	if rid, ok := l.runningQuery[queryKey]; ok {
-		return rid, false
+	if li, ok := l.runningQuery[queryKey]; ok {
+		if time.Since(li.ts) < l.maxLockTime {
+			return li.String(), false
+		}
+
+		log.Logger.Warn().Str("reqID", li.key).Msgf("lock after maxLockTime, since %s", li.ts)
 	}
 
-	l.runningQuery[queryKey] = reqID
+	l.runningQuery[queryKey] = lockInfo{key: reqID, ts: time.Now()}
 
 	return "", true
 }
