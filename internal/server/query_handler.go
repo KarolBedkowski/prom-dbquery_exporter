@@ -174,6 +174,8 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				RequestStart: now,
 			}
 
+			logger.Debug().Object("task", &task).Msg("schedule task")
+
 			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).

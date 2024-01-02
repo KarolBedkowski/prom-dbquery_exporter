@@ -67,6 +67,8 @@ func (cs *Collectors) ScheduleTask(task *Task) error {
 	if !ok {
 		var err error
 
+		cs.log.Debug().Str("dbname", dbName).Msg("creating collector")
+
 		dbloader, err = cs.createCollector(dbName)
 		if err != nil {
 			return err
