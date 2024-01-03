@@ -132,7 +132,7 @@ func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byt
 }
 
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]any,
+	queryNames []string, params map[string]any, writer func([]byte),
 ) (chan *collectors.TaskResult, int) {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database processing start")
@@ -154,12 +154,9 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			metrics.IncQueryTotalCnt(queryName, dbName)
 
 			if data, ok := q.getFromCache(query, dbName); ok {
-				logger.Debug().Msg("query result from cache")
+				logger.Debug().Str("dbname", dbName).Str("query", queryName).Msg("query result from cache")
 				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
-
-				output <- collectors.NewSimpleTaskResult(data, dbName, queryName)
-
-				scheduled++
+				writer(data)
 
 				continue
 			}
@@ -192,12 +189,10 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 }
 
 func (q *queryHandler) writeResult(ctx context.Context, output chan *collectors.TaskResult, scheduled int,
-	writer http.ResponseWriter,
-) int {
+	writer func([]byte),
+) {
 	logger := log.Ctx(ctx)
-	logger.Debug().Msg("write result start")
-
-	successProcessed := 0
+	logger.Debug().Msgf("write result start; waiting for %d results", scheduled)
 
 loop:
 	for scheduled > 0 {
@@ -213,11 +208,7 @@ loop:
 
 				msg := fmt.Sprintf("# query %q in %q processing error: %q\n",
 					res.Task.QueryName, res.Task.DBName, res.Error.Error())
-				if _, err := writer.Write([]byte(msg)); err != nil {
-					logger.Error().Err(err).Msg("write error")
-					support.TraceErrorf(ctx, "write error: %s", err)
-					metrics.IncProcessErrorsCnt("write")
-				}
+				writer([]byte(msg))
 
 				continue
 			}
@@ -225,12 +216,7 @@ loop:
 			logger.Debug().Object("res", res).Msg("write result")
 			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
 
-			if _, err := writer.Write(res.Result); err != nil {
-				logger.Error().Err(err).Msg("write error")
-				metrics.IncProcessErrorsCnt("write")
-			} else {
-				successProcessed++
-			}
+			writer(res.Result)
 
 			if task.Query != nil {
 				q.putIntoCache(task.Query, task.DBName, res.Result)
@@ -247,8 +233,6 @@ loop:
 	}
 
 	close(output)
-
-	return successProcessed
 }
 
 func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) { //nolint:funlen
@@ -301,13 +285,24 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		defer cancel()
 	}
 
+	successProcessed := 0
+	writeResult := func(data []byte) {
+		if _, err := writer.Write(data); err != nil {
+			logger.Error().Err(err).Msg("write error")
+			support.TraceErrorf(ctx, "write error: %s", err)
+			metrics.IncProcessErrorsCnt("write")
+		} else {
+			successProcessed++
+		}
+	}
+
 	support.TracePrintf(ctx, "start querying db")
 
-	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params)
+	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params, writeResult)
 
 	support.TracePrintf(ctx, "start reading data, scheduled: %d", scheduled)
 
-	successProcessed := q.writeResult(ctx, out, scheduled, writer)
+	q.writeResult(ctx, out, scheduled, writeResult)
 
 	logger.Debug().Int("successProcessed", successProcessed).
 		Err(ctx.Err()).
