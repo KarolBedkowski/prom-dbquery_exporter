@@ -32,7 +32,7 @@ type lockInfo struct {
 }
 
 func (l lockInfo) String() string {
-	return fmt.Sprintf("by %s on %s (%s ago)", l.key, l.ts, time.Since(l.ts))
+	return fmt.Sprintf("%s on %s (%s ago)", l.key, l.ts, time.Since(l.ts))
 }
 
 type locker struct {
@@ -261,6 +261,16 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 	support.SetGoroutineLabels(ctx, "requestID", requestID.String(), "req", req.URL.String())
 
+	// prevent to run the same request twice
+	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
+		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
+		support.TraceErrorf(ctx, "query locked by %s", locker)
+
+		return
+	}
+
+	defer q.queryLocker.unlock(req.URL.RawQuery)
+
 	for _, g := range req.URL.Query()["group"] {
 		q := q.configuration.GroupQueries(g)
 		if len(q) > 0 {
@@ -275,16 +285,6 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 		return
 	}
-
-	// prevent to run the same request twice
-	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
-		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
-		support.TraceErrorf(ctx, "query locked by %s", locker)
-
-		return
-	}
-
-	defer q.queryLocker.unlock(req.URL.RawQuery)
 
 	params := paramsFromQuery(req)
 	queryNames = deduplicateStringList(queryNames)
