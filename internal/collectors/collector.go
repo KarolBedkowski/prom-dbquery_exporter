@@ -192,6 +192,7 @@ func (c *collector) worker(idx int) {
 
 	// stop worker after 1 second of inactivty
 	shutdownTimer := time.NewTimer(time.Second)
+	defer shutdownTimer.Stop()
 
 loop:
 	for c.active {
