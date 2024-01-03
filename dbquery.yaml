@@ -325,3 +325,11 @@ query:
       {{- range .R }}
       oracle_v_sysmetric_{{ .NAME | keepAlfaNumUnderlineSpace | trim | replaceSpaces | toLower }} {{ .VALUE }}
       {{- end  }}
+
+jobs:
+  - query: pg_locks
+    database: testdbpgsql
+    interval: 30
+  - query: pg_locks_db
+    database: testdbpgsql
+    interval: 15

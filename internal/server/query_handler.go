@@ -82,13 +82,14 @@ type queryHandler struct {
 }
 
 func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bool,
+	cache *support.Cache[[]byte],
 ) *queryHandler {
 	return &queryHandler{
 		configuration:         c,
 		queryLocker:           newLocker(),
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
-		queryResultCache:      support.NewCache[[]byte]("query_cache"),
+		queryResultCache:      cache,
 	}
 }
 

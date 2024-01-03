@@ -18,6 +18,8 @@ type Configuration struct {
 	Database map[string]*Database
 	// Queries
 	Query map[string]*Query
+
+	Jobs []Job
 }
 
 // GroupQueries return queries that belong to given group.
