@@ -219,7 +219,8 @@ loop:
 
 			writer(res.Result)
 
-			if task.Query != nil {
+			// do not cache query with user params
+			if task.Query != nil && len(task.Params) == 0 {
 				q.putIntoCache(task.Query, task.DBName, res.Result)
 			}
 
