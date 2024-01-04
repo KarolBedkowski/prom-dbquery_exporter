@@ -49,7 +49,7 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	queryName := j.job.Query
 	dbName := j.job.Database
 
-	timeout := time.Duration(j.job.Interval*2) + time.Second
+	timeout := time.Duration(j.job.Interval) * time.Second
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
