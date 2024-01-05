@@ -1,5 +1,5 @@
 global:
-  request_timeout: 600
+  request_timeout: 600s
 # sample database databases configuration
 database:
   testdb:
@@ -85,9 +85,9 @@ query:
        group by s.name
 
     # result of query is cached by 20 second
-    caching_time: 20
+    caching_time: 20s
     # timeout define query timeout in second
-    timeout: 1
+    timeout: 1s
     # Rows from query are accessible via `conext.R` variable and should be
     # always iterate.
     # Labels defined on database level are available via `context.L map`.
@@ -157,7 +157,7 @@ query:
       FROM (VALUES ('active'), ('idle'), ('idle in transaction'), ('idle in transaction (aborted)'), ('fastpath function call'), ('disabled')) AS tmp(state)
       LEFT JOIN pg_stat_activity psa ON psa.state = tmp.state
       GROUP BY tmp.state
-    caching_time: 30
+    caching_time: 30s
     metrics: |
       {{- range .R }}
       pg_stats_activity_state{state="{{ .state }}"} {{ .cnt }}
@@ -174,7 +174,7 @@ query:
       FROM (VALUES ('active'), ('idle'), ('idle in transaction'), ('idle in transaction (aborted)'), ('fastpath function call'), ('disabled')) AS tmp(state)
       CROSS JOIN pg_database pd
       LEFT JOIN s ON s.state = tmp.state AND s.datname = pd.datname
-    caching_time: 30
+    caching_time: 30s
     metrics: |
       {{- range .R }}
       pg_stats_activity_state_db{database="{{ .datname }}", state="{{ .state }}"} {{ .cnt }}
@@ -201,7 +201,7 @@ query:
       FROM pg_stat_database psd
       JOIN pg_database pd ON pd.oid =  psd.datid
       WHERE not pd.datistemplate
-    caching_time: 30
+    caching_time: 30s
     metrics: |
       {{- range .R }}
       pg_stat_database_numbackends{name="{{.datname}}"} {{.numbackends}}
@@ -274,7 +274,7 @@ query:
         ('sharerowexclusivelock'), ('exclusivelock'),  ('accessexclusivelock'), ('sireadlock')) AS tmp(mode)
       LEFT JOIN pg_locks pl ON lower(pl.MODE) = tmp.MODE AND pl."database" IS NOT null
       GROUP BY tmp.MODE
-    caching_time: 60
+    caching_time: 60s
     metrics: |
       {{- range .R }}
       pg_locks{mode="{{ .mode }}"} {{ .cnt }}
@@ -318,7 +318,7 @@ query:
        select metric_name as name, to_char(value) as value
        from V$SYSMETRIC
        where GROUP_ID=2
-    caching_time: 10
+    caching_time: 10s
 
     # some additional functions may be used for preparing result
     metrics: |
@@ -330,7 +330,7 @@ query:
 jobs:
   - query: pg_locks
     database: testdbpgsql
-    interval: 30
+    interval: 30s
   - query: pg_locks_db
     database: testdbpgsql
-    interval: 15
+    interval: 15s
