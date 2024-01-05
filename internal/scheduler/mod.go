@@ -48,8 +48,7 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration) *Schedu
 func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	queryName := j.job.Query
 	dbName := j.job.Database
-
-	timeout := time.Duration(j.job.Interval) * time.Second
+	timeout := j.job.Interval
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -139,7 +138,7 @@ func (s *Scheduler) Run() error {
 					interval *= 2
 				}
 
-				job.nextRun = time.Now().Add(time.Duration(interval) * time.Second)
+				job.nextRun = time.Now().Add(interval)
 			}
 		}
 	}
@@ -158,7 +157,7 @@ func (s *Scheduler) ReloadConf(cfg *conf.Configuration) {
 	jobs := make([]*scheduledJob, 0, len(cfg.Jobs))
 
 	for _, job := range cfg.Jobs {
-		if job.Interval <= 0 {
+		if job.Interval.Seconds() <= 1 {
 			continue
 		}
 

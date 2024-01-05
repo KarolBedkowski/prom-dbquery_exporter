@@ -14,7 +14,7 @@ database:
       # xax number of idle connection; default 1
       max_idle_connections: 1
       # connection max life time
-      conn_max_life_time: 600
+      conn_max_life_time: 600s
     # additional labels that can be used in templates
     labels:
       env: test
@@ -22,7 +22,7 @@ database:
     initial_query:
       - select 1
     # default timeout for queries in second
-    timeout: 1
+    timeout: 1s
   testdbpgsql:
     driver: postgres
     connection:
@@ -234,7 +234,7 @@ query:
       FROM pg_stat_database_conflicts psdc
       JOIN pg_database pd ON pd.oid =  psdc.datid
       WHERE not pd.datistemplate
-    caching_time: 60
+    caching_time: 1m
     metrics: |
       {{- range .R }}
       pg_stat_database_conflicts{name="{{.datname}}", conf="tablespace"} {{.confl_tablespace}}
@@ -259,7 +259,7 @@ query:
         ('sharerowexclusivelock'), ('exclusivelock'),  ('accessexclusivelock'), ('sireadlock')) AS tmp(mode)
       CROSS JOIN pg_database pd
       LEFT JOIN s ON s.mode = tmp.MODE AND s.database = pd.oid
-    caching_time: 60
+    caching_time: 1m
     metrics: |
       {{- range .R }}
       pg_locks{database="{{ .datname }}", mode="{{ .mode }}"} {{ .cnt }}
@@ -326,6 +326,7 @@ query:
       oracle_v_sysmetric_{{ .NAME | keepAlfaNumUnderlineSpace | trim | replaceSpaces | toLower }} {{ .VALUE }}
       {{- end  }}
 
+# run this quieries in background and fill the cache
 jobs:
   - query: pg_locks
     database: testdbpgsql

@@ -18,10 +18,10 @@ import (
 )
 
 const (
-	defaultTimeout         uint = 300 // sec
-	defaultConnMaxLifetime      = 600 * time.Second
-	defaultMaxOpenConns         = 10
-	defaultMaxIdleConns         = 2
+	defaultTimeout         = 300 * time.Second // sec
+	defaultConnMaxLifetime = 600 * time.Second
+	defaultMaxOpenConns    = 10
+	defaultMaxIdleConns    = 2
 )
 
 type genericDatabase struct {
@@ -67,7 +67,7 @@ func (g *genericDatabase) configureConnection(ctx context.Context) {
 		}
 
 		if pool.ConnMaxLifeTime > 0 {
-			llog.Debug().Int("conn-max-life-time", pool.ConnMaxLifeTime).
+			llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
 				Msg("connection max life time set")
 			g.conn.SetConnMaxLifetime(time.Duration(pool.ConnMaxLifeTime) * time.Second)
 		}
@@ -262,5 +262,5 @@ func (g *genericDatabase) queryTimeout(q *conf.Query) time.Duration {
 		timeout = g.dbConf.Timeout
 	}
 
-	return time.Duration(timeout) * time.Second
+	return timeout
 }

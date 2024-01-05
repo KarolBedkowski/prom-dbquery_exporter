@@ -3,6 +3,7 @@ package conf
 import (
 	"strings"
 	"text/template"
+	"time"
 
 	"prom-dbquery_exporter.app/internal/support"
 )
@@ -23,9 +24,9 @@ type Query struct {
 	// Query params
 	Params map[string]interface{}
 	// Result caching time
-	CachingTime uint `yaml:"caching_time"`
+	CachingTime time.Duration `yaml:"caching_time"`
 	// Max time for query result
-	Timeout uint `yaml:"timeout"`
+	Timeout time.Duration `yaml:"timeout"`
 
 	// Groups define group names that query belong to
 	Groups []string `yaml:"groups"`

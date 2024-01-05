@@ -1,5 +1,7 @@
 package conf
 
+import "time"
+
 //
 // scheduler.go
 // Copyright (C) 2024 Karol Będkowski <Karol Będkowski@kkomp>
@@ -11,5 +13,5 @@ package conf
 type Job struct {
 	Query    string
 	Database string
-	Interval int
+	Interval time.Duration
 }

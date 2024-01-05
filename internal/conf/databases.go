@@ -14,9 +14,9 @@ import (
 
 // PoolConfiguration configure database connection pool.
 type PoolConfiguration struct {
-	MaxConnections     int `yaml:"max_connections"`
-	MaxIdleConnections int `yaml:"max_idle_connections"`
-	ConnMaxLifeTime    int `yaml:"conn_max_life_time"`
+	MaxConnections     int           `yaml:"max_connections"`
+	MaxIdleConnections int           `yaml:"max_idle_connections"`
+	ConnMaxLifeTime    time.Duration `yaml:"conn_max_life_time"`
 }
 
 func (p *PoolConfiguration) validate() error {
@@ -48,10 +48,10 @@ type Database struct {
 	InitialQuery []string `yaml:"initial_query"`
 
 	// Default timeout for all queries
-	Timeout uint `yaml:"timeout"`
+	Timeout time.Duration `yaml:"timeout"`
 
 	// Connection and ping timeout
-	ConnectTimeout uint `yaml:"connect_timeout"`
+	ConnectTimeout time.Duration `yaml:"connect_timeout"`
 
 	Pool *PoolConfiguration `yaml:"pool"`
 
