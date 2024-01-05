@@ -15,3 +15,21 @@ type Job struct {
 	Database string
 	Interval time.Duration
 }
+
+func (j *Job) validate(cfg *Configuration) error {
+	if len(j.Query) == 0 || len(j.Database) == 0 {
+		return MissingFieldError{"'database' or 'query'"}
+	}
+
+	if _, ok := cfg.Database[j.Database]; !ok {
+		return NewInvalidFieldError("database", j.Database).
+			WithMsg("unknown database")
+	}
+
+	if _, ok := cfg.Query[j.Query]; !ok {
+		return NewInvalidFieldError("query", j.Database).
+			WithMsg("unknown query")
+	}
+
+	return nil
+}

@@ -89,6 +89,13 @@ func (c *Configuration) validate() error {
 		}
 	}
 
+	for i, job := range c.Jobs {
+		if err := job.validate(c); err != nil {
+			return newConfigurationError(
+				fmt.Sprintf("validate job '%d' error", i)).Wrap(err)
+		}
+	}
+
 	return nil
 }
 
