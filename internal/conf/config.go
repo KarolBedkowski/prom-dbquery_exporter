@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v2"
 )
 
@@ -20,6 +21,28 @@ type Configuration struct {
 	Query map[string]*Query
 
 	Jobs []Job
+}
+
+// MarshalZerologObject implements LogObjectMarshaler.
+func (c Configuration) MarshalZerologObject(event *zerolog.Event) {
+	event.Object("global", c.Global).
+		Interface("jobs", c.Jobs)
+
+	d := zerolog.Dict()
+
+	for k, v := range c.Database {
+		d.Object(k, v)
+	}
+
+	event.Dict("database", d)
+
+	qd := zerolog.Dict()
+
+	for k, v := range c.Query {
+		qd.Object(k, v)
+	}
+
+	event.Dict("query", qd)
 }
 
 // GroupQueries return queries that belong to given group.

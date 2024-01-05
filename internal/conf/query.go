@@ -5,6 +5,7 @@ import (
 	"text/template"
 	"time"
 
+	"github.com/rs/zerolog"
 	"prom-dbquery_exporter.app/internal/support"
 )
 
@@ -35,6 +36,17 @@ type Query struct {
 	MetricTpl *template.Template `yaml:"-"`
 	// Query name for internal use
 	Name string `yaml:"-"`
+}
+
+// MarshalZerologObject implements LogObjectMarshaler.
+func (q Query) MarshalZerologObject(e *zerolog.Event) {
+	e.Str("sql", q.SQL).
+		Str("metrics", q.Metrics).
+		Interface("params", q.Params).
+		Dur("caching_time", q.CachingTime).
+		Dur("timeout", q.Timeout).
+		Strs("groups", q.Groups).
+		Str("name", q.Name)
 }
 
 func (q *Query) validate() error {

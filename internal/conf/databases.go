@@ -3,6 +3,8 @@ package conf
 import (
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog"
 )
 
 //
@@ -57,6 +59,29 @@ type Database struct {
 
 	// Database name for internal use
 	Name string `yaml:"-"`
+}
+
+// MarshalZerologObject implements LogObjectMarshaler.
+func (d Database) MarshalZerologObject(event *zerolog.Event) {
+	event.Str("driver", d.Driver).
+		Interface("labels", d.Labels).
+		Strs("initial_query", d.InitialQuery).
+		Dur("timeout", d.Timeout).
+		Dur("connect_timeout", d.ConnectTimeout).
+		Interface("pool", d.Pool).
+		Str("name", d.Name)
+
+	conn := zerolog.Dict()
+
+	for k, v := range d.Connection {
+		if k == "password" {
+			conn.Str(k, "***")
+		} else {
+			conn.Interface(k, v)
+		}
+	}
+
+	event.Dict("connection", conn)
 }
 
 func (d *Database) validatePG() error {

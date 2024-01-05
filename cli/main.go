@@ -71,6 +71,7 @@ func main() { //nolint:funlen
 			Msg("load config file error")
 	}
 
+	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
 	metrics.UpdateConfLoadTime()
 
 	if collectors.CollectorsPool == nil {
@@ -115,7 +116,7 @@ func main() { //nolint:funlen
 						sched.ReloadConf(newConf)
 						collectors.CollectorsPool.UpdateConf(newConf)
 						metrics.UpdateConfLoadTime()
-						log.Info().Msg("configuration reloaded")
+						log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
 					} else {
 						log.Logger.Error().Err(err).
 							Msg("reloading configuration error; using old configuration")
