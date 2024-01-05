@@ -9,7 +9,7 @@ require (
 	github.com/oklog/run v1.1.0
 	github.com/prometheus/client_golang v1.18.0
 	github.com/prometheus/common v0.45.0
-	github.com/prometheus/exporter-toolkit v0.10.0
+	github.com/prometheus/exporter-toolkit v0.11.0
 	github.com/rs/zerolog v1.31.0
 	github.com/sijms/go-ora/v2 v2.7.20
 	golang.org/x/crypto v0.16.0
@@ -27,7 +27,6 @@ require (
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/uuid v1.5.0 // indirect
 	github.com/jpillora/backoff v1.0.0 // indirect
-	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/matttproud/golang_protobuf_extensions/v2 v2.0.0 // indirect
