@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 //
@@ -32,6 +33,10 @@ func (p *PoolConfiguration) validate() error {
 
 	if p.ConnMaxLifeTime < 0 {
 		return NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections)
+	}
+
+	if p.ConnMaxLifeTime.Seconds() < 1 && p.ConnMaxLifeTime > 0 {
+		log.Logger.Warn().Msgf("pool configuration conn_max_life_time < 1s: %v", p.ConnMaxLifeTime)
 	}
 
 	return nil
@@ -136,6 +141,14 @@ func (d *Database) validate() error {
 		err = d.validateCommon()
 	}
 
+	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
+		log.Logger.Warn().Msgf("database %v: timeout < 1s: %v", d.Name, d.Timeout)
+	}
+
+	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
+		log.Logger.Warn().Msgf("database %v: connect_timeout < 1s: %v", d.Name, d.ConnectTimeout)
+	}
+
 	return err
 }
 
@@ -167,7 +180,7 @@ const defaultConnectioTimeout = 15 * time.Second
 // GetConnectTimeout return connection timeout from configuration or default.
 func (d *Database) GetConnectTimeout() time.Duration {
 	if d.ConnectTimeout > 0 {
-		return time.Duration(d.ConnectTimeout) * time.Second
+		return d.ConnectTimeout
 	}
 
 	return defaultConnectioTimeout

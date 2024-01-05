@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 // GlobalConf is application global configuration.
@@ -23,5 +24,9 @@ func (g GlobalConf) MarshalZerologObject(e *zerolog.Event) {
 }
 
 func (g *GlobalConf) validate() error {
+	if g.RequestTimeout.Seconds() < 0 && g.RequestTimeout > 0 {
+		log.Logger.Warn().Msgf("FGlobal request_timeout < 1s: %v", g.RequestTimeout)
+	}
+
 	return nil
 }

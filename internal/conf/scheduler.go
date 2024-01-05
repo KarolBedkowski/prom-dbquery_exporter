@@ -1,6 +1,10 @@
 package conf
 
-import "time"
+import (
+	"time"
+
+	"github.com/rs/zerolog/log"
+)
 
 //
 // scheduler.go
@@ -14,6 +18,8 @@ type Job struct {
 	Query    string
 	Database string
 	Interval time.Duration
+
+	Idx int `yaml:"-"`
 }
 
 func (j *Job) validate(cfg *Configuration) error {
@@ -29,6 +35,10 @@ func (j *Job) validate(cfg *Configuration) error {
 	if _, ok := cfg.Query[j.Query]; !ok {
 		return NewInvalidFieldError("query", j.Database).
 			WithMsg("unknown query")
+	}
+
+	if j.Interval.Seconds() < 1 {
+		log.Logger.Warn().Msgf("job %d (%v, %v): interval < 1s: %v", j.Idx, j.Database, j.Query, j.Interval)
 	}
 
 	return nil

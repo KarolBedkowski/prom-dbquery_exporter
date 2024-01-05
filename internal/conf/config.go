@@ -92,7 +92,7 @@ func (c *Configuration) validate() error {
 	for i, job := range c.Jobs {
 		if err := job.validate(c); err != nil {
 			return newConfigurationError(
-				fmt.Sprintf("validate job '%d' error", i)).Wrap(err)
+				fmt.Sprintf("validate job %d error", i+1)).Wrap(err)
 		}
 	}
 
@@ -112,16 +112,20 @@ func LoadConfiguration(filename string) (*Configuration, error) {
 		return nil, newConfigurationError("unmarshal file error").Wrap(err)
 	}
 
-	if err = conf.validate(); err != nil {
-		return nil, newConfigurationError("validate error").Wrap(err)
-	}
-
 	for name, db := range conf.Database {
 		db.Name = name
 	}
 
 	for name, q := range conf.Query {
 		q.Name = name
+	}
+
+	for idx, j := range conf.Jobs {
+		j.Idx = idx + 1
+	}
+
+	if err = conf.validate(); err != nil {
+		return nil, newConfigurationError("validate error").Wrap(err)
 	}
 
 	return conf, nil

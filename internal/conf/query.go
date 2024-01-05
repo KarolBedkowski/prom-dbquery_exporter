@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/support"
 )
 
@@ -65,6 +66,14 @@ func (q *Query) validate() error {
 	}
 
 	q.MetricTpl = tmpl
+
+	if q.Timeout.Seconds() < 1 && q.Timeout > 0 {
+		log.Logger.Warn().Msgf("query %v: timeout < 1s: %v", q.Name, q.Timeout)
+	}
+
+	if q.CachingTime.Seconds() < 1 && q.CachingTime > 0 {
+		log.Logger.Warn().Msgf("query %v: caching_time < 1s: %v", q.Name, q.CachingTime)
+	}
 
 	return nil
 }
