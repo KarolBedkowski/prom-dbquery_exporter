@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/rs/zerolog"
 	"gopkg.in/yaml.v2"
 )
 
@@ -18,6 +19,30 @@ type Configuration struct {
 	Database map[string]*Database
 	// Queries
 	Query map[string]*Query
+
+	Jobs []Job
+}
+
+// MarshalZerologObject implements LogObjectMarshaler.
+func (c Configuration) MarshalZerologObject(event *zerolog.Event) {
+	event.Object("global", c.Global).
+		Interface("jobs", c.Jobs)
+
+	d := zerolog.Dict()
+
+	for k, v := range c.Database {
+		d.Object(k, v)
+	}
+
+	event.Dict("database", d)
+
+	qd := zerolog.Dict()
+
+	for k, v := range c.Query {
+		qd.Object(k, v)
+	}
+
+	event.Dict("query", qd)
 }
 
 // GroupQueries return queries that belong to given group.
@@ -64,6 +89,13 @@ func (c *Configuration) validate() error {
 		}
 	}
 
+	for i, job := range c.Jobs {
+		if err := job.validate(c); err != nil {
+			return newConfigurationError(
+				fmt.Sprintf("validate job %d error", i+1)).Wrap(err)
+		}
+	}
+
 	return nil
 }
 
@@ -80,16 +112,20 @@ func LoadConfiguration(filename string) (*Configuration, error) {
 		return nil, newConfigurationError("unmarshal file error").Wrap(err)
 	}
 
-	if err = conf.validate(); err != nil {
-		return nil, newConfigurationError("validate error").Wrap(err)
-	}
-
 	for name, db := range conf.Database {
 		db.Name = name
 	}
 
 	for name, q := range conf.Query {
 		q.Name = name
+	}
+
+	for idx, j := range conf.Jobs {
+		j.Idx = idx + 1
+	}
+
+	if err = conf.validate(); err != nil {
+		return nil, newConfigurationError("validate error").Wrap(err)
 	}
 
 	return conf, nil

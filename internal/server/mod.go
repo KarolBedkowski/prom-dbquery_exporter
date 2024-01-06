@@ -18,6 +18,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/support"
 )
 
 const (
@@ -38,9 +39,9 @@ type WebHandler struct {
 
 // NewWebHandler create new WebHandler.
 func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string,
-	disableCache bool, validateOutput bool,
+	disableCache bool, validateOutput bool, cache *support.Cache[[]byte],
 ) *WebHandler {
-	qh := newQueryHandler(cfg, disableCache, validateOutput)
+	qh := newQueryHandler(cfg, disableCache, validateOutput, cache)
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)

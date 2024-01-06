@@ -3,6 +3,9 @@ package conf
 import (
 	"strings"
 	"time"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
 //
@@ -14,9 +17,9 @@ import (
 
 // PoolConfiguration configure database connection pool.
 type PoolConfiguration struct {
-	MaxConnections     int `yaml:"max_connections"`
-	MaxIdleConnections int `yaml:"max_idle_connections"`
-	ConnMaxLifeTime    int `yaml:"conn_max_life_time"`
+	MaxConnections     int           `yaml:"max_connections"`
+	MaxIdleConnections int           `yaml:"max_idle_connections"`
+	ConnMaxLifeTime    time.Duration `yaml:"conn_max_life_time"`
 }
 
 func (p *PoolConfiguration) validate() error {
@@ -30,6 +33,10 @@ func (p *PoolConfiguration) validate() error {
 
 	if p.ConnMaxLifeTime < 0 {
 		return NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections)
+	}
+
+	if p.ConnMaxLifeTime.Seconds() < 1 && p.ConnMaxLifeTime > 0 {
+		log.Logger.Warn().Msgf("pool configuration conn_max_life_time < 1s: %v", p.ConnMaxLifeTime)
 	}
 
 	return nil
@@ -48,15 +55,38 @@ type Database struct {
 	InitialQuery []string `yaml:"initial_query"`
 
 	// Default timeout for all queries
-	Timeout uint `yaml:"timeout"`
+	Timeout time.Duration `yaml:"timeout"`
 
 	// Connection and ping timeout
-	ConnectTimeout uint `yaml:"connect_timeout"`
+	ConnectTimeout time.Duration `yaml:"connect_timeout"`
 
 	Pool *PoolConfiguration `yaml:"pool"`
 
 	// Database name for internal use
 	Name string `yaml:"-"`
+}
+
+// MarshalZerologObject implements LogObjectMarshaler.
+func (d Database) MarshalZerologObject(event *zerolog.Event) {
+	event.Str("driver", d.Driver).
+		Interface("labels", d.Labels).
+		Strs("initial_query", d.InitialQuery).
+		Dur("timeout", d.Timeout).
+		Dur("connect_timeout", d.ConnectTimeout).
+		Interface("pool", d.Pool).
+		Str("name", d.Name)
+
+	conn := zerolog.Dict()
+
+	for k, v := range d.Connection {
+		if k == "password" {
+			conn.Str(k, "***")
+		} else {
+			conn.Interface(k, v)
+		}
+	}
+
+	event.Dict("connection", conn)
 }
 
 func (d *Database) validatePG() error {
@@ -111,6 +141,14 @@ func (d *Database) validate() error {
 		err = d.validateCommon()
 	}
 
+	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
+		log.Logger.Warn().Msgf("database %v: timeout < 1s: %v", d.Name, d.Timeout)
+	}
+
+	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
+		log.Logger.Warn().Msgf("database %v: connect_timeout < 1s: %v", d.Name, d.ConnectTimeout)
+	}
+
 	return err
 }
 
@@ -142,7 +180,7 @@ const defaultConnectioTimeout = 15 * time.Second
 // GetConnectTimeout return connection timeout from configuration or default.
 func (d *Database) GetConnectTimeout() time.Duration {
 	if d.ConnectTimeout > 0 {
-		return time.Duration(d.ConnectTimeout) * time.Second
+		return d.ConnectTimeout
 	}
 
 	return defaultConnectioTimeout

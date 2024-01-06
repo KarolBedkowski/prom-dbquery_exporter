@@ -3,7 +3,10 @@ package conf
 import (
 	"strings"
 	"text/template"
+	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/support"
 )
 
@@ -23,9 +26,9 @@ type Query struct {
 	// Query params
 	Params map[string]interface{}
 	// Result caching time
-	CachingTime uint `yaml:"caching_time"`
+	CachingTime time.Duration `yaml:"caching_time"`
 	// Max time for query result
-	Timeout uint `yaml:"timeout"`
+	Timeout time.Duration `yaml:"timeout"`
 
 	// Groups define group names that query belong to
 	Groups []string `yaml:"groups"`
@@ -34,6 +37,17 @@ type Query struct {
 	MetricTpl *template.Template `yaml:"-"`
 	// Query name for internal use
 	Name string `yaml:"-"`
+}
+
+// MarshalZerologObject implements LogObjectMarshaler.
+func (q Query) MarshalZerologObject(e *zerolog.Event) {
+	e.Str("sql", q.SQL).
+		Str("metrics", q.Metrics).
+		Interface("params", q.Params).
+		Dur("caching_time", q.CachingTime).
+		Dur("timeout", q.Timeout).
+		Strs("groups", q.Groups).
+		Str("name", q.Name)
 }
 
 func (q *Query) validate() error {
@@ -52,6 +66,14 @@ func (q *Query) validate() error {
 	}
 
 	q.MetricTpl = tmpl
+
+	if q.Timeout.Seconds() < 1 && q.Timeout > 0 {
+		log.Logger.Warn().Msgf("query %v: timeout < 1s: %v", q.Name, q.Timeout)
+	}
+
+	if q.CachingTime.Seconds() < 1 && q.CachingTime > 0 {
+		log.Logger.Warn().Msgf("query %v: caching_time < 1s: %v", q.Name, q.CachingTime)
+	}
 
 	return nil
 }

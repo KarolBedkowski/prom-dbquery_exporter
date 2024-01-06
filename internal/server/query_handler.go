@@ -24,25 +24,41 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
+const defaultMaxLockTime = 20 * time.Minute
+
+type lockInfo struct {
+	key string
+	ts  time.Time
+}
+
+func (l lockInfo) String() string {
+	return fmt.Sprintf("%s on %s (%s ago)", l.key, l.ts, time.Since(l.ts))
+}
+
 type locker struct {
 	sync.Mutex
+	maxLockTime time.Duration
 
-	runningQuery map[string]string
+	runningQuery map[string]lockInfo
 }
 
 func newLocker() locker {
-	return locker{runningQuery: make(map[string]string)}
+	return locker{runningQuery: make(map[string]lockInfo), maxLockTime: defaultMaxLockTime}
 }
 
 func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
 	l.Lock()
 	defer l.Unlock()
 
-	if rid, ok := l.runningQuery[queryKey]; ok {
-		return rid, false
+	if li, ok := l.runningQuery[queryKey]; ok {
+		if time.Since(li.ts) < l.maxLockTime {
+			return li.String(), false
+		}
+
+		log.Logger.Warn().Str("reqID", li.key).Msgf("lock after maxLockTime, since %s", li.ts)
 	}
 
-	l.runningQuery[queryKey] = reqID
+	l.runningQuery[queryKey] = lockInfo{key: reqID, ts: time.Now()}
 
 	return "", true
 }
@@ -66,13 +82,14 @@ type queryHandler struct {
 }
 
 func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bool,
+	cache *support.Cache[[]byte],
 ) *queryHandler {
 	return &queryHandler{
 		configuration:         c,
 		queryLocker:           newLocker(),
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
-		queryResultCache:      support.NewCache[[]byte]("query_cache"),
+		queryResultCache:      cache,
 	}
 }
 
@@ -116,7 +133,7 @@ func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byt
 }
 
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]any,
+	queryNames []string, params map[string]any, writer func([]byte),
 ) (chan *collectors.TaskResult, int) {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("database processing start")
@@ -138,12 +155,9 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			metrics.IncQueryTotalCnt(queryName, dbName)
 
 			if data, ok := q.getFromCache(query, dbName); ok {
-				logger.Debug().Msg("query result from cache")
+				logger.Debug().Str("dbname", dbName).Str("query", queryName).Msg("query result from cache")
 				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
-
-				output <- collectors.NewSimpleTaskResult(data, dbName, queryName)
-
-				scheduled++
+				writer(data)
 
 				continue
 			}
@@ -157,6 +171,8 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				Query:        query,
 				RequestStart: now,
 			}
+
+			logger.Debug().Object("task", &task).Msg("schedule task")
 
 			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
@@ -174,12 +190,10 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 }
 
 func (q *queryHandler) writeResult(ctx context.Context, output chan *collectors.TaskResult, scheduled int,
-	writer http.ResponseWriter,
-) int {
+	writer func([]byte),
+) {
 	logger := log.Ctx(ctx)
-	logger.Debug().Msg("write result start")
-
-	successProcessed := 0
+	logger.Debug().Msgf("write result start; waiting for %d results", scheduled)
 
 loop:
 	for scheduled > 0 {
@@ -195,11 +209,7 @@ loop:
 
 				msg := fmt.Sprintf("# query %q in %q processing error: %q\n",
 					res.Task.QueryName, res.Task.DBName, res.Error.Error())
-				if _, err := writer.Write([]byte(msg)); err != nil {
-					logger.Error().Err(err).Msg("write error")
-					support.TraceErrorf(ctx, "write error: %s", err)
-					metrics.IncProcessErrorsCnt("write")
-				}
+				writer([]byte(msg))
 
 				continue
 			}
@@ -207,14 +217,10 @@ loop:
 			logger.Debug().Object("res", res).Msg("write result")
 			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
 
-			if _, err := writer.Write(res.Result); err != nil {
-				logger.Error().Err(err).Msg("write error")
-				metrics.IncProcessErrorsCnt("write")
-			} else {
-				successProcessed++
-			}
+			writer(res.Result)
 
-			if task.Query != nil {
+			// do not cache query with user params
+			if task.Query != nil && len(task.Params) == 0 {
 				q.putIntoCache(task.Query, task.DBName, res.Result)
 			}
 
@@ -229,8 +235,6 @@ loop:
 	}
 
 	close(output)
-
-	return successProcessed
 }
 
 func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) { //nolint:funlen
@@ -242,6 +246,16 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	requestID, _ := hlog.IDFromCtx(ctx)
 
 	support.SetGoroutineLabels(ctx, "requestID", requestID.String(), "req", req.URL.String())
+
+	// prevent to run the same request twice
+	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
+		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
+		support.TraceErrorf(ctx, "query locked by %s", locker)
+
+		return
+	}
+
+	defer q.queryLocker.unlock(req.URL.RawQuery)
 
 	for _, g := range req.URL.Query()["group"] {
 		q := q.configuration.GroupQueries(g)
@@ -258,16 +272,6 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	// prevent to run the same request twice
-	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
-		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
-		support.TraceErrorf(ctx, "query locked by %s", locker)
-
-		return
-	}
-
-	defer q.queryLocker.unlock(req.URL.RawQuery)
-
 	params := paramsFromQuery(req)
 	queryNames = deduplicateStringList(queryNames)
 	dbNames = deduplicateStringList(dbNames)
@@ -283,13 +287,24 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		defer cancel()
 	}
 
+	successProcessed := 0
+	writeResult := func(data []byte) {
+		if _, err := writer.Write(data); err != nil {
+			logger.Error().Err(err).Msg("write error")
+			support.TraceErrorf(ctx, "write error: %s", err)
+			metrics.IncProcessErrorsCnt("write")
+		} else {
+			successProcessed++
+		}
+	}
+
 	support.TracePrintf(ctx, "start querying db")
 
-	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params)
+	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params, writeResult)
 
 	support.TracePrintf(ctx, "start reading data, scheduled: %d", scheduled)
 
-	successProcessed := q.writeResult(ctx, out, scheduled, writer)
+	q.writeResult(ctx, out, scheduled, writeResult)
 
 	logger.Debug().Int("successProcessed", successProcessed).
 		Err(ctx.Err()).

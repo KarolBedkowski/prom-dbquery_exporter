@@ -20,6 +20,7 @@ import (
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
+	"prom-dbquery_exporter.app/internal/scheduler"
 	"prom-dbquery_exporter.app/internal/server"
 	"prom-dbquery_exporter.app/internal/support"
 )
@@ -70,6 +71,7 @@ func main() { //nolint:funlen
 			Msg("load config file error")
 	}
 
+	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
 	metrics.UpdateConfLoadTime()
 
 	if collectors.CollectorsPool == nil {
@@ -78,7 +80,9 @@ func main() { //nolint:funlen
 
 	collectors.CollectorsPool.UpdateConf(cfg)
 
-	webHandler := server.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput)
+	cache := support.NewCache[[]byte]("query_cache")
+	webHandler := server.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput, cache)
+	sched := scheduler.NewScheduler(cache, cfg)
 
 	var runGroup run.Group
 	{
@@ -109,9 +113,10 @@ func main() { //nolint:funlen
 
 					if newConf, err := conf.LoadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
+						sched.ReloadConf(newConf)
 						collectors.CollectorsPool.UpdateConf(newConf)
 						metrics.UpdateConfLoadTime()
-						log.Info().Msg("configuration reloaded")
+						log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
 					} else {
 						log.Logger.Error().Err(err).
 							Msg("reloading configuration error; using old configuration")
@@ -127,6 +132,7 @@ func main() { //nolint:funlen
 	}
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
+	runGroup.Add(sched.Run, sched.Close)
 
 	if err := runGroup.Run(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")

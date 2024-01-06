@@ -61,12 +61,12 @@ func (r *Cache[T]) Get(key string) (T, bool) {
 }
 
 // Put data into cache.
-func (r *Cache[T]) Put(key string, ttl uint, data T) {
+func (r *Cache[T]) Put(key string, ttl time.Duration, data T) {
 	r.cacheLock.Lock()
 	defer r.cacheLock.Unlock()
 
 	r.cache[key] = &cacheItem[T]{
-		expireTS: time.Now().Add(time.Duration(ttl) * time.Second),
+		expireTS: time.Now().Add(ttl),
 		content:  data,
 	}
 }

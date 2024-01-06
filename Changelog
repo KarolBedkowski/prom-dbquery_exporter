@@ -1,3 +1,11 @@
+v0.9.0 2024-01-06
+* breaking: use duration for interval, caching time, timeout, etc, so there
+  must be given unit (i.e. "1h", "5m", "30s").
+* feat (experimental): background loading data into cache by "jobs" launched
+  in configured interval
+* fix: do not cache query result when user give some additional parameters
+* dev: bump deps
+
 v0.8.3 2023-12-09
 * fix: remove empty lines from output
 * fix: panic when remote connection was closed during query
