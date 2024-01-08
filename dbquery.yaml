@@ -35,6 +35,7 @@ database:
     pool:
       max_connections: 3
       max_idle_connections: 2
+    timeout: 2s
   testdbpgsql2:
     driver: postgres
     connection:
@@ -133,6 +134,26 @@ query:
       {{- range (bucketsInt .R "duration" 3600 7200 10800 14400 18000) }}
       rwr3_trips_duration_bucket{sport_id="{{ .sport_id }}", le="{{ .le }}"} {{ .count }}
       {{- end  }}
+
+  test_long_query:
+    sql: >
+      WITH RECURSIVE r(i) AS (
+        VALUES(0)
+        UNION ALL
+        SELECT i FROM r
+        LIMIT 10000000
+      )
+      SELECT i as v FROM r WHERE i = 1;
+    metrics: |
+      test_long_query 1
+      {{- range .R }}
+      test_res {{ .v }}
+      {{- end  }}
+
+  test_long_query_pg:
+    sql: select pg_sleep(5 * 60);
+    metrics: |
+      test_long_query 2
 
   testparam1:
     # Queries may use parameters delivered by request->query (ie ...&id=12)
