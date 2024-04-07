@@ -7,10 +7,11 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
 	// _ "github.com/denisenkom/go-mssqldb"
 	// _ "github.com/go-sql-driver/mysql".
-
+	"github.com/coreos/go-systemd/v22/daemon"
 	_ "github.com/glebarez/go-sqlite"
 	_ "github.com/lib/pq"
 	"github.com/oklog/run"
@@ -65,6 +66,10 @@ func main() { //nolint:funlen
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
 
+	if err := enableSDNotify(); err != nil {
+		log.Logger.Warn().Err(err).Msg("initialize systemd error")
+	}
+
 	collectors.Init()
 
 	cfg, err := conf.LoadConfiguration(*configFile)
@@ -95,6 +100,7 @@ func main() { //nolint:funlen
 			func() error {
 				<-term
 				log.Logger.Warn().Msg("Received SIGTERM, exiting...")
+				daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
 				collectors.CollectorsPool.Close()
 
 				return nil
@@ -114,6 +120,7 @@ func main() { //nolint:funlen
 			func() error {
 				for range hup {
 					log.Info().Msg("reloading configuration")
+					daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
 
 					if newConf, err := conf.LoadConfiguration(*configFile); err == nil {
 						webHandler.ReloadConf(newConf)
@@ -126,6 +133,8 @@ func main() { //nolint:funlen
 							Msg("reloading configuration error; using old configuration")
 					}
 				}
+
+				daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 
 				return nil
 			},
@@ -140,10 +149,44 @@ func main() { //nolint:funlen
 	runGroup.Add(webHandler.Run, webHandler.Close)
 	runGroup.Add(sched.Run, sched.Close)
 
+	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
+	daemon.SdNotify(false, "STATUS=ready")       //nolint:errcheck
+
 	if err := runGroup.Run(); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
 
 	log.Logger.Info().Msg("finished..")
+}
+
+func enableSDNotify() error {
+	ok, err := daemon.SdNotify(false, "STATUS=starting")
+	if err != nil {
+		return fmt.Errorf("send sd status error: %w", err)
+	}
+
+	// not running under systemd?
+	if !ok {
+		return nil
+	}
+
+	interval, err := daemon.SdWatchdogEnabled(false)
+	if err != nil {
+		return fmt.Errorf("enable sdwatchdog error: %w", err)
+	}
+
+	// watchdog disabled?
+	if interval == 0 {
+		return nil
+	}
+
+	go func(interval time.Duration) {
+		tick := time.Tick(interval)
+		for range tick {
+			_, _ = daemon.SdNotify(false, daemon.SdNotifyWatchdog)
+		}
+	}(interval / 2) //nolint:gomnd
+
+	return nil
 }
