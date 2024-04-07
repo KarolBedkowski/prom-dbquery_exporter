@@ -18,7 +18,7 @@ type (
 	// Cache with per item expire time.
 	Cache[T any] struct {
 		name      string
-		cache     map[string]*cacheItem[T]
+		cache     map[string]cacheItem[T]
 		cacheLock sync.Mutex
 	}
 
@@ -32,7 +32,7 @@ type (
 func NewCache[T any](name string) *Cache[T] {
 	return &Cache[T]{
 		name:  name,
-		cache: make(map[string]*cacheItem[T]),
+		cache: make(map[string]cacheItem[T]),
 	}
 }
 
@@ -65,7 +65,7 @@ func (r *Cache[T]) Put(key string, ttl time.Duration, data T) {
 	r.cacheLock.Lock()
 	defer r.cacheLock.Unlock()
 
-	r.cache[key] = &cacheItem[T]{
+	r.cache[key] = cacheItem[T]{
 		expireTS: time.Now().Add(ttl),
 		content:  data,
 	}

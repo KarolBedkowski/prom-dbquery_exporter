@@ -45,7 +45,7 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 	llog := log.Ctx(ctx)
 	llog.Debug().Msg("format result")
 
-	res := &resultTmplData{
+	res := resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,
 		R:              qRes.Records,
@@ -58,7 +58,7 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 
 	var buf bytes.Buffer
 
-	if err := query.MetricTpl.Execute(&buf, res); err != nil {
+	if err := query.MetricTpl.Execute(&buf, &res); err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 

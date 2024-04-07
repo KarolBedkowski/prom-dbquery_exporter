@@ -69,7 +69,7 @@ func (g *genericDatabase) configureConnection(ctx context.Context) {
 		if pool.ConnMaxLifeTime > 0 {
 			llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
 				Msg("connection max life time set")
-			g.conn.SetConnMaxLifetime(time.Duration(pool.ConnMaxLifeTime) * time.Second)
+			g.conn.SetConnMaxLifetime(pool.ConnMaxLifeTime)
 		}
 	}
 }

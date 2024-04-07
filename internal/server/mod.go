@@ -80,7 +80,7 @@ func (w *WebHandler) Run() error {
 
 	rwTimeout := defaultRwTimeout
 	if w.cfg.Global.RequestTimeout > 0 {
-		rwTimeout = time.Duration(w.cfg.Global.RequestTimeout) * time.Second
+		rwTimeout = w.cfg.Global.RequestTimeout
 	}
 
 	w.server = &http.Server{

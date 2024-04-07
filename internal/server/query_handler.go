@@ -282,7 +282,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		logger.Debug().Msgf("set request timeout %d", t)
 
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, time.Duration(t)*time.Second)
+		ctx, cancel = context.WithTimeout(ctx, t)
 
 		defer cancel()
 	}

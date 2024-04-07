@@ -42,7 +42,7 @@ type MissingFieldError struct {
 }
 
 func (e MissingFieldError) Error() string {
-	return fmt.Sprintf("missing field %s", e.Field)
+	return "missing field " + e.Field
 }
 
 // InvalidFieldError is error generated when validation of `field` with `value` failed.

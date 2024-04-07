@@ -9,9 +9,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-systemd/v22/daemon"
 	// _ "github.com/denisenkom/go-mssqldb"
 	// _ "github.com/go-sql-driver/mysql".
-	"github.com/coreos/go-systemd/v22/daemon"
+	// _ "github.com/sijms/go-ora/v2".
 	_ "github.com/glebarez/go-sqlite"
 	_ "github.com/lib/pq"
 	"github.com/oklog/run"
@@ -19,7 +20,6 @@ import (
 	cversion "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
 	"github.com/rs/zerolog/log"
-	_ "github.com/sijms/go-ora/v2"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
@@ -33,7 +33,7 @@ func init() {
 }
 
 // Main is main function for cli.
-func main() { //nolint:funlen
+func main() {
 	var (
 		showVersion = flag.Bool("version", false, "Print version information.")
 		configFile  = flag.String("config.file", "dbquery.yaml",
@@ -53,8 +53,7 @@ func main() { //nolint:funlen
 	flag.Parse()
 
 	if *showVersion {
-		_, _ = fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
-
+		fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
 		os.Exit(0)
 	}
 
@@ -87,64 +86,66 @@ func main() { //nolint:funlen
 
 	collectors.CollectorsPool.UpdateConf(cfg)
 
+	if err := start(cfg, *configFile, *listenAddress, *webConfig, *disableCache, *validateOutput); err != nil {
+		log.Logger.Fatal().Err(err).Msg("Start failed")
+		os.Exit(1)
+	}
+
+	log.Logger.Info().Msg("finished..")
+}
+
+func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
+	disableCache, validateOutput bool,
+) error {
 	cache := support.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, *listenAddress, *webConfig, *disableCache, *validateOutput, cache)
+	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, disableCache, validateOutput, cache)
 	sched := scheduler.NewScheduler(cache, cfg)
 
 	var runGroup run.Group
-	{
-		// Termination handler.
-		term := make(chan os.Signal, 1)
-		signal.Notify(term, os.Interrupt, syscall.SIGTERM)
-		runGroup.Add(
-			func() error {
-				<-term
-				log.Logger.Warn().Msg("Received SIGTERM, exiting...")
-				daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
-				collectors.CollectorsPool.Close()
 
-				return nil
-			},
-			func(err error) {
-				_ = err
+	// Termination handler.
+	term := make(chan os.Signal, 1)
+	signal.Notify(term, os.Interrupt, syscall.SIGTERM)
+	runGroup.Add(
+		func() error {
+			<-term
+			log.Logger.Warn().Msg("Received SIGTERM, exiting...")
+			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
+			collectors.CollectorsPool.Close()
 
-				close(term)
-			},
-		)
-	}
-	{
-		// Reload handler.
-		hup := make(chan os.Signal, 1)
-		signal.Notify(hup, syscall.SIGHUP)
-		runGroup.Add(
-			func() error {
-				for range hup {
-					log.Info().Msg("reloading configuration")
-					daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
+			return nil
+		},
+		func(_ error) {
+			close(term)
+		},
+	)
 
-					if newConf, err := conf.LoadConfiguration(*configFile); err == nil {
-						webHandler.ReloadConf(newConf)
-						sched.ReloadConf(newConf)
-						collectors.CollectorsPool.UpdateConf(newConf)
-						metrics.UpdateConfLoadTime()
-						log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
-					} else {
-						log.Logger.Error().Err(err).
-							Msg("reloading configuration error; using old configuration")
-					}
+	// Reload handler.
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	runGroup.Add(
+		func() error {
+			for range hup {
+				log.Info().Msg("reloading configuration")
+
+				if newConf, err := conf.LoadConfiguration(configFile); err == nil {
+					webHandler.ReloadConf(newConf)
+					sched.ReloadConf(newConf)
+					collectors.CollectorsPool.UpdateConf(newConf)
+					metrics.UpdateConfLoadTime()
+					log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
+				} else {
+					log.Logger.Error().Err(err).
+						Msg("reloading configuration error; using old configuration")
 				}
+			}
 
-				daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
-
-				return nil
-			},
-			func(err error) {
-				_ = err
-
-				close(hup)
-			},
-		)
-	}
+			return nil
+		},
+		func(_ error) {
+			close(hup)
+		},
+	)
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
 	runGroup.Add(sched.Run, sched.Close)
@@ -152,12 +153,7 @@ func main() { //nolint:funlen
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 	daemon.SdNotify(false, "STATUS=ready")       //nolint:errcheck
 
-	if err := runGroup.Run(); err != nil {
-		log.Logger.Fatal().Err(err).Msg("Start failed")
-		os.Exit(1)
-	}
-
-	log.Logger.Info().Msg("finished..")
+	return runGroup.Run() //nolint:wrapcheck
 }
 
 func enableSDNotify() error {

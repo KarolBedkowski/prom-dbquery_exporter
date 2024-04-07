@@ -12,7 +12,6 @@ require (
 	github.com/prometheus/common v0.52.2
 	github.com/prometheus/exporter-toolkit v0.11.0
 	github.com/rs/zerolog v1.32.0
-	github.com/sijms/go-ora/v2 v2.8.10
 	golang.org/x/crypto v0.22.0
 	golang.org/x/net v0.24.0
 	gopkg.in/yaml.v2 v2.4.0

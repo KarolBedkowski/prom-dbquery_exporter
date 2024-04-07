@@ -15,7 +15,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-func newPostgresLoader(cfg *conf.Database) (Database, error) {
+func newPostgresLoader(cfg *conf.Database) (*genericDatabase, error) {
 	var connStr string
 	if val, ok := cfg.Connection["connstr"]; ok && val != "" {
 		connStr, ok = val.(string)
@@ -49,7 +49,7 @@ func newPostgresLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func newSqliteLoader(cfg *conf.Database) (Database, error) {
+func newSqliteLoader(cfg *conf.Database) (*genericDatabase, error) {
 	params := url.Values{}
 
 	var dbname string
@@ -94,7 +94,7 @@ func newSqliteLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func newMysqlLoader(cfg *conf.Database) (Database, error) {
+func newMysqlLoader(cfg *conf.Database) (*genericDatabase, error) {
 	params := &standardParams{
 		host: "localhost",
 		port: "3306",
@@ -177,7 +177,7 @@ func (s *standardParams) load(cfg map[string]any) {
 	}
 }
 
-func newOracleLoader(cfg *conf.Database) (Database, error) {
+func newOracleLoader(cfg *conf.Database) (*genericDatabase, error) {
 	params := newStandardParams(cfg.Connection)
 
 	if params.dbname == "" {
@@ -222,7 +222,7 @@ func newOracleLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func newMssqlLoader(cfg *conf.Database) (Database, error) {
+func newMssqlLoader(cfg *conf.Database) (*genericDatabase, error) {
 	params := url.Values{}
 	databaseConfigured := false
 

@@ -22,7 +22,7 @@ type QueryResult struct {
 	// query start time
 	Start time.Time
 	// all query parameters
-	Params map[string]interface{}
+	Params map[string]any
 }
 
 // Record is one record (row) loaded from database.
