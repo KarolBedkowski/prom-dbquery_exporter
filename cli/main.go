@@ -10,10 +10,12 @@ import (
 
 	// _ "github.com/denisenkom/go-mssqldb"
 	// _ "github.com/go-sql-driver/mysql".
+
 	_ "github.com/glebarez/go-sqlite"
 	_ "github.com/lib/pq"
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
+	cversion "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
 	"github.com/rs/zerolog/log"
 	_ "github.com/sijms/go-ora/v2"
@@ -26,7 +28,7 @@ import (
 )
 
 func init() {
-	prometheus.MustRegister(version.NewCollector("dbquery_exporter"))
+	prometheus.MustRegister(cversion.NewCollector("dbquery_exporter"))
 }
 
 // Main is main function for cli.
@@ -98,6 +100,8 @@ func main() { //nolint:funlen
 				return nil
 			},
 			func(err error) {
+				_ = err
+
 				close(term)
 			},
 		)
@@ -126,6 +130,8 @@ func main() { //nolint:funlen
 				return nil
 			},
 			func(err error) {
+				_ = err
+
 				close(hup)
 			},
 		)
