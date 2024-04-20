@@ -11,17 +11,17 @@ import "fmt"
 
 // ConfigurationError is error returned when load configuration failed.
 type ConfigurationError struct {
-	Message string
 	Err     error
+	Message string
 }
 
 func newConfigurationError(msg string) ConfigurationError {
-	return ConfigurationError{msg, nil}
+	return ConfigurationError{nil, msg}
 }
 
 // Wrap error with ConfigurationError.
 func (c ConfigurationError) Wrap(err error) ConfigurationError {
-	return ConfigurationError{c.Message, err}
+	return ConfigurationError{err, c.Message}
 }
 
 func (c ConfigurationError) Error() string {

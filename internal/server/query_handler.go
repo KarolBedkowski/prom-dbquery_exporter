@@ -27,8 +27,8 @@ import (
 const defaultMaxLockTime = 20 * time.Minute
 
 type lockInfo struct {
-	key string
 	ts  time.Time
+	key string
 }
 
 func (l lockInfo) String() string {
@@ -36,10 +36,9 @@ func (l lockInfo) String() string {
 }
 
 type locker struct {
-	sync.Mutex
-	maxLockTime time.Duration
-
 	runningQuery map[string]lockInfo
+	maxLockTime  time.Duration
+	sync.Mutex
 }
 
 func newLocker() locker {
@@ -72,13 +71,12 @@ func (l *locker) unlock(queryKey string) {
 
 // queryHandler handle all request for metrics.
 type queryHandler struct {
-	configuration         *conf.Configuration
+	configuration    *conf.Configuration
+	queryResultCache *support.Cache[[]byte]
+	// runningQuery lock the same request for running twice
+	queryLocker           locker
 	disableCache          bool
 	validateOutputEnabled bool
-
-	// runningQuery lock the same request for running twice
-	queryLocker      locker
-	queryResultCache *support.Cache[[]byte]
 }
 
 func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bool,

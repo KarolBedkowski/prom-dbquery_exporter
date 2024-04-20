@@ -15,14 +15,14 @@ import (
 
 // QueryResult is result of Loader.Query.
 type QueryResult struct {
-	// rows
-	Records []Record
-	// query duration
-	Duration float64
 	// query start time
 	Start time.Time
 	// all query parameters
 	Params map[string]any
+	// rows
+	Records []Record
+	// query duration
+	Duration float64
 }
 
 // Record is one record (row) loaded from database.

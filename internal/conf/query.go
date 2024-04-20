@@ -19,24 +19,23 @@ import (
 
 // Query is definition of single query.
 type Query struct {
+	// Query params
+	Params map[string]interface{}
+	// Parsed template  (internal)
+	MetricTpl *template.Template `yaml:"-"`
 	// SQL script to launch
 	SQL string
 	// Template to generate from query result
 	Metrics string
-	// Query params
-	Params map[string]interface{}
+	// Query name for internal use
+	Name string `yaml:"-"`
+
+	// Groups define group names that query belong to
+	Groups []string `yaml:"groups"`
 	// Result caching time
 	CachingTime time.Duration `yaml:"caching_time"`
 	// Max time for query result
 	Timeout time.Duration `yaml:"timeout"`
-
-	// Groups define group names that query belong to
-	Groups []string `yaml:"groups"`
-
-	// Parsed template  (internal)
-	MetricTpl *template.Template `yaml:"-"`
-	// Query name for internal use
-	Name string `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.

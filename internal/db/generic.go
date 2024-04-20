@@ -25,11 +25,11 @@ const (
 )
 
 type genericDatabase struct {
+	conn                   *sqlx.DB
+	dbConf                 *conf.Database
 	connStr                string
 	driver                 string
-	conn                   *sqlx.DB
 	initialSQL             []string
-	dbConf                 *conf.Database
 	lock                   sync.RWMutex
 	totalOpenedConnections uint32
 	totalFailedConnections uint32

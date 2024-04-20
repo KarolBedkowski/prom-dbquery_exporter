@@ -21,20 +21,19 @@ import (
 
 // resultTmplData keep query result and some metadata parsed to template.
 type resultTmplData struct {
-	// Records (rows)
-	R []db.Record
 	// Parameters
 	P map[string]interface{}
 	// Labels
 	L map[string]interface{}
-
-	QueryStartTime int64
-	QueryDuration  float64
-	Count          int
 	// Query name
 	Query string
 	// Database name
 	Database string
+	// Records (rows)
+	R              []db.Record
+	QueryStartTime int64
+	QueryDuration  float64
+	Count          int
 }
 
 // FormatResult format query result using template from query configuration.
@@ -70,9 +69,9 @@ type Number interface {
 }
 
 type bucketGenerator[T Number] struct {
-	buckets   []T
 	converter func(any) (T, bool)
 	formatter func(T) string
+	buckets   []T
 }
 
 func (b *bucketGenerator[T]) generate(input []db.Record, valueKey string) []db.Record {

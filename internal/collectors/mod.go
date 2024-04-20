@@ -19,12 +19,10 @@ import (
 
 // Collectors is collection of all configured databases.
 type Collectors struct {
-	sync.Mutex
-
+	log        zerolog.Logger
 	cfg        *conf.Configuration
 	collectors map[string]*collector
-
-	log zerolog.Logger
+	sync.Mutex
 }
 
 // newCollectors create new Databases object.

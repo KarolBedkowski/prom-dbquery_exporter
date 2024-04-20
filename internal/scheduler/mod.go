@@ -19,17 +19,17 @@ import (
 )
 
 type scheduledJob struct {
-	job     conf.Job
 	nextRun time.Time
+	job     conf.Job
 }
 
 // Scheduler is background process that load configured data into cache in some intervals.
 type Scheduler struct {
+	log   zerolog.Logger
 	cfg   *conf.Configuration
-	jobs  []*scheduledJob
 	cache *support.Cache[[]byte]
 	stop  chan struct{}
-	log   zerolog.Logger
+	jobs  []*scheduledJob
 }
 
 // NewScheduler create new scheduler that use `cache` and initial `cfg` configuration.

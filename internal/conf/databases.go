@@ -44,26 +44,24 @@ func (p *PoolConfiguration) validate() error {
 
 // Database define database connection.
 type Database struct {
-	// Driver name - see sql-agent
-	Driver string
 	// Connection params - see sql-agent
 	Connection map[string]interface{}
 	// Labels configured per database; may be used in templates
 	Labels map[string]interface{}
-	// InitialQuery allow run custom query or set some parameters after
-	// connect and before target query
-	InitialQuery []string `yaml:"initial_query"`
-
-	// Default timeout for all queries
-	Timeout time.Duration `yaml:"timeout"`
-
-	// Connection and ping timeout
-	ConnectTimeout time.Duration `yaml:"connect_timeout"`
 
 	Pool *PoolConfiguration `yaml:"pool"`
 
+	// Driver name - see sql-agent
+	Driver string
 	// Database name for internal use
 	Name string `yaml:"-"`
+	// InitialQuery allow run custom query or set some parameters after
+	// connect and before target query
+	InitialQuery []string `yaml:"initial_query"`
+	// Default timeout for all queries
+	Timeout time.Duration `yaml:"timeout"`
+	// Connection and ping timeout
+	ConnectTimeout time.Duration `yaml:"connect_timeout"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.

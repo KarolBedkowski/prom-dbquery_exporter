@@ -13,14 +13,13 @@ import (
 
 // Configuration keep application configuration.
 type Configuration struct {
-	// Global application settings
-	Global GlobalConf
 	// Databases
 	Database map[string]*Database
 	// Queries
 	Query map[string]*Query
-
-	Jobs []Job
+	Jobs  []Job
+	// Global application settings
+	Global GlobalConf
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.

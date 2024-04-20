@@ -18,18 +18,14 @@ import (
 
 // Task is query to perform.
 type Task struct {
+	RequestStart time.Time
 	// Ctx is context used for cancellation.
-	Ctx context.Context //nolint:containedctx
-
+	Ctx       context.Context //nolint:containedctx
+	Query     *conf.Query
+	Params    map[string]any
+	Output    chan *TaskResult
 	DBName    string
 	QueryName string
-
-	Query  *conf.Query
-	Params map[string]any
-
-	Output chan *TaskResult
-
-	RequestStart time.Time
 }
 
 func (d *Task) newResult(err error, result []byte) *TaskResult {
@@ -56,9 +52,8 @@ func (d Task) MarshalZerologObject(e *zerolog.Event) {
 // TaskResult is query result.
 type TaskResult struct {
 	Error  error
+	Task   *Task
 	Result []byte
-
-	Task *Task
 }
 
 // NewSimpleTaskResult create new TaskResult with basic data.

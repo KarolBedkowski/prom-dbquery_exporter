@@ -25,13 +25,9 @@ import (
 
 // collector handle task for one collector (loader).
 type collector struct {
-	sync.Mutex
-
-	dbName string
+	log    zerolog.Logger
 	loader db.Database
 	cfg    *conf.Database
-	log    zerolog.Logger
-	active bool
 	// tasks is queue task to schedule
 	tasks chan *Task
 	// workQueue is chan that distribute task to workers
@@ -40,6 +36,9 @@ type collector struct {
 	newConfCh chan *conf.Database
 	// stopCh stopping main worker.
 	stopCh chan struct{}
+	dbName string
+	sync.Mutex
+	active bool
 }
 
 const tasksQueueSize = 10

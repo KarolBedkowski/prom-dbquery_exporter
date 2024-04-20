@@ -13,8 +13,8 @@ import (
 
 // LockError is error returned when lock failed.
 type LockError struct {
-	msg string
 	err error
+	msg string
 }
 
 func (l LockError) Error() string {
@@ -54,7 +54,7 @@ func NewSyncer() Syncer {
 func (s *Syncer) Lock(ctx context.Context, info ...string) error {
 	select {
 	case <-ctx.Done():
-		return LockError{s.info, ctx.Err()}
+		return LockError{ctx.Err(), s.info}
 
 	case <-s.locker:
 		if len(info) == 0 {

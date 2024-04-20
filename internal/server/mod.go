@@ -32,9 +32,9 @@ type WebHandler struct {
 	handler       *queryHandler
 	infoHandler   *infoHandler
 	server        *http.Server
+	cfg           *conf.Configuration
 	listenAddress string
 	webConfig     string
-	cfg           *conf.Configuration
 }
 
 // NewWebHandler create new WebHandler.

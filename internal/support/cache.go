@@ -17,8 +17,8 @@ import (
 type (
 	// Cache with per item expire time.
 	Cache[T any] struct {
-		name      string
 		cache     map[string]cacheItem[T]
+		name      string
 		cacheLock sync.Mutex
 	}
 

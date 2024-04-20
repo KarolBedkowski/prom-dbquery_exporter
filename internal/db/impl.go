@@ -140,10 +140,12 @@ func newMysqlLoader(cfg *conf.Database) (*genericDatabase, error) {
 }
 
 type standardParams struct {
-	dbname     string
-	user, pass string
-	host, port string
-	params     url.Values
+	params url.Values
+	dbname string
+	user   string
+	pass   string
+	host   string
+	port   string
 }
 
 func newStandardParams(cfg map[string]any) *standardParams {
