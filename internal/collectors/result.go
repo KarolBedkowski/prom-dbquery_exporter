@@ -7,7 +7,6 @@ package collectors
 // Distributed under terms of the GPLv3 license.
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -56,27 +55,10 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 		Count:          len(qRes.Records),
 	}
 
-	var buf bytes.Buffer
-
-	if err := query.MetricTpl.Execute(&buf, &res); err != nil {
-		return nil, fmt.Errorf("execute template error: %w", err)
-	}
-
-	// trim lines
 	var output bytes.Buffer
 
-	scanner := bufio.NewScanner(&buf)
-	for scanner.Scan() {
-		line := bytes.Trim(scanner.Bytes(), "\n\r\t ")
-
-		if len(line) > 0 {
-			output.Write(line)
-			output.WriteRune('\n')
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("scan result error: %w", err)
+	if err := query.MetricTpl.Execute(&output, &res); err != nil {
+		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 
 	return output.Bytes(), nil

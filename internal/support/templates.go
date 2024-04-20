@@ -5,6 +5,7 @@
 package support
 
 import (
+	"bufio"
 	"fmt"
 	"strconv"
 	"strings"
@@ -14,7 +15,28 @@ import (
 
 // TemplateCompile try to compile template.
 func TemplateCompile(name, tmpl string) (*template.Template, error) {
-	t, err := template.New(name).Funcs(FuncMap).Parse(tmpl)
+	var buf strings.Builder
+
+	// trim white characters in each line
+	scanner := bufio.NewScanner(strings.NewReader(tmpl))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+
+		if _, err := buf.WriteString(line); err != nil {
+			return nil, fmt.Errorf("template %s trim error: %w", name, err)
+		}
+
+		buf.WriteRune('\n')
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("template %s trim error: %w", name, err)
+	}
+
+	t, err := template.New(name).Funcs(FuncMap).Parse(buf.String())
 	if err != nil {
 		return nil, fmt.Errorf("template %s compile error: %w", name, err)
 	}
