@@ -54,6 +54,8 @@ func (q *Query) validate() error {
 		return MissingFieldError{"sql"}
 	}
 
+	q.SQL = strings.TrimSpace(q.SQL)
+
 	m := strings.TrimSpace(q.Metrics) + "\n"
 	if m == "" {
 		return MissingFieldError{"metrics template"}
