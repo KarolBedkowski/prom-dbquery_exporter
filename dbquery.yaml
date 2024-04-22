@@ -320,9 +320,9 @@ query:
     sql: >
       SELECT 'postmaster_start_unix' AS name, '' AS key, EXTRACT(EPOCH FROM pg_postmaster_start_time) AS val FROM pg_postmaster_start_time()
       UNION ALL
-      SELECT 'databases_count', '' AS key, count(*) AS val FROM pg_database
+      SELECT 'databases_count' as name, '' AS key, count(*) AS val FROM pg_database
       UNION ALL
-      SELECT 'version', version() as key, 1 as val
+      SELECT 'version' as name, version() as key, 1 as val
     metrics: |
       {{- range .R }}
         {{- if (ne .key "") }}
