@@ -20,7 +20,7 @@ import (
 // Query is definition of single query.
 type Query struct {
 	// Query params
-	Params map[string]interface{}
+	Params map[string]any
 	// Parsed template  (internal)
 	MetricTpl *template.Template `yaml:"-"`
 	// Parsed template for error response (internal)

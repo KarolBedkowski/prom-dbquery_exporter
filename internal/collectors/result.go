@@ -22,9 +22,9 @@ import (
 // resultTmplData keep query result and some metadata parsed to template.
 type resultTmplData struct {
 	// Parameters
-	P map[string]interface{}
+	P map[string]any
 	// Labels
-	L map[string]interface{}
+	L map[string]any
 	// Query name
 	Query string
 	// Database name
@@ -196,7 +196,7 @@ func tmplFuncBucketsInt(input []db.Record, valueKey string, buckets ...int) []db
 			case uint32:
 				value = int(val)
 			case uint64:
-				value = int(val)
+				value = int(val) //nolint:gosec
 			case int32:
 				value = int(val)
 			case int64:

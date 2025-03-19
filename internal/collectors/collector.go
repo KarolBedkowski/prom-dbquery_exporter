@@ -272,6 +272,7 @@ func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
 				llog.Error().Err(err).Msg("format error result error")
 			} else {
 				llog.Debug().Bytes("output", output).Msg("result")
+
 				return task.newResult(nil, output)
 			}
 		}

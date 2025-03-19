@@ -182,7 +182,7 @@ func enableSDNotify() error {
 		for range tick {
 			_, _ = daemon.SdNotify(false, daemon.SdNotifyWatchdog)
 		}
-	}(interval / 2) //nolint:gomnd
+	}(interval / 2) //nolint:mnd
 
 	return nil
 }
