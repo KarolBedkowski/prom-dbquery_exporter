@@ -31,6 +31,7 @@ type resultTmplData struct {
 	Database string
 	// Records (rows)
 	R              []db.Record
+	Error          string
 	QueryStartTime int64
 	QueryDuration  float64
 	Count          int
@@ -57,6 +58,28 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 	var output bytes.Buffer
 
 	if err := query.MetricTpl.Execute(&output, &res); err != nil {
+		return nil, fmt.Errorf("execute template error: %w", err)
+	}
+
+	return output.Bytes(), nil
+}
+
+func formatError(ctx context.Context, err error, query *conf.Query,
+	db *conf.Database,
+) ([]byte, error) {
+	llog := log.Ctx(ctx)
+	llog.Debug().Object("query", query).Msg("format result on error")
+
+	res := resultTmplData{
+		Query:    query.Name,
+		Database: db.Name,
+		L:        db.Labels,
+		Error:    err.Error(),
+	}
+
+	var output bytes.Buffer
+
+	if err := query.OnErrorTpl.Execute(&output, &res); err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
 	}
 

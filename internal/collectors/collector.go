@@ -265,6 +265,17 @@ func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
 	if err != nil {
 		metrics.IncProcessErrorsCnt("query")
 
+		if task.Query.OnErrorTpl != nil {
+			llog.Warn().Err(err).Msg("query error handled by on error template")
+
+			if output, err := formatError(ctx, err, task.Query, c.cfg); err != nil {
+				llog.Error().Err(err).Msg("format error result error")
+			} else {
+				llog.Debug().Bytes("output", output).Msg("result")
+				return task.newResult(nil, output)
+			}
+		}
+
 		return task.newResult(fmt.Errorf("query error: %w", err), nil)
 	}
 

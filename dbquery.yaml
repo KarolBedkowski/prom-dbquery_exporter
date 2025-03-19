@@ -77,6 +77,8 @@ query:
     # use current database name
     metrics: |
       ping{database="{{ .Database }}"} 1
+    on_error:
+      ping{database="{{ .Database }}"} 0
 
   testq1:
     # Characters like `:` must be doubled to prevent binding paramaters.

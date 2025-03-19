@@ -23,10 +23,14 @@ type Query struct {
 	Params map[string]interface{}
 	// Parsed template  (internal)
 	MetricTpl *template.Template `yaml:"-"`
+	// Parsed template for error response (internal)
+	OnErrorTpl *template.Template `yaml:"-"`
 	// SQL script to launch
 	SQL string
 	// Template to generate from query result
 	Metrics string
+	// Template to generate result on error
+	OnError string `yaml:"on_error"`
 	// Query name for internal use
 	Name string `yaml:"-"`
 
@@ -42,6 +46,7 @@ type Query struct {
 func (q Query) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("sql", q.SQL).
 		Str("metrics", q.Metrics).
+		Str("onerror", q.OnError).
 		Interface("params", q.Params).
 		Dur("caching_time", q.CachingTime).
 		Dur("timeout", q.Timeout).
@@ -67,6 +72,17 @@ func (q *Query) validate() error {
 	}
 
 	q.MetricTpl = tmpl
+
+	// parse template for error response (if configured)
+	merr := strings.TrimSpace(q.OnError)
+	if merr != "" {
+		tmpl, err := support.TemplateCompile(q.Name, merr+"\n")
+		if err != nil {
+			return NewInvalidFieldError("on error template", "").WithMsg(err.Error())
+		}
+
+		q.OnErrorTpl = tmpl
+	}
 
 	if q.Timeout.Seconds() < 1 && q.Timeout > 0 {
 		log.Logger.Warn().Msgf("query %v: timeout < 1s: %v", q.Name, q.Timeout)
