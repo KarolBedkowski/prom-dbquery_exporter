@@ -61,12 +61,12 @@ func (q *Query) validate() error {
 
 	q.SQL = strings.TrimSpace(q.SQL)
 
-	m := strings.TrimSpace(q.Metrics) + "\n"
+	m := strings.TrimSpace(q.Metrics)
 	if m == "" {
 		return MissingFieldError{"metrics template"}
 	}
 
-	tmpl, err := support.TemplateCompile(q.Name, m)
+	tmpl, err := support.TemplateCompile(q.Name, m+"\n")
 	if err != nil {
 		return NewInvalidFieldError("metrics template", "").WithMsg(err.Error())
 	}
