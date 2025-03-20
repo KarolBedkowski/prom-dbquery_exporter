@@ -265,6 +265,7 @@ func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
 	if err != nil {
 		metrics.IncProcessErrorsCnt("query")
 
+		// When OnError is defined - generate metrics according to this template
 		if task.Query.OnErrorTpl != nil {
 			llog.Warn().Err(err).Msg("query error handled by on error template")
 

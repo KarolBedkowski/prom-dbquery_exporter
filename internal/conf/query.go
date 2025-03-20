@@ -29,7 +29,7 @@ type Query struct {
 	SQL string
 	// Template to generate from query result
 	Metrics string
-	// Template to generate result on error
+	// Template to generate result on query error
 	OnError string `yaml:"on_error"`
 	// Query name for internal use
 	Name string `yaml:"-"`
