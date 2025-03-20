@@ -77,7 +77,8 @@ query:
     # use current database name
     metrics: |
       ping{database="{{ .Database }}"} 1
-    on_error:
+    # this is returned on query error
+    on_error: |
       ping{database="{{ .Database }}"} 0
 
   testq1:
