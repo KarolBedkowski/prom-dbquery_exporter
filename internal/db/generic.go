@@ -172,9 +172,6 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	}
 	defer conn.Close()
 
-	g.lock.RLock()
-	defer g.lock.RUnlock()
-
 	// prepare query parameters; combine parameters from query and params
 	queryParams := support.CloneMap(query.Params, params)
 	timeout := g.queryTimeout(query)
