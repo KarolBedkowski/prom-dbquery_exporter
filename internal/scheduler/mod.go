@@ -62,7 +62,7 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	defer close(output)
 
 	task := collectors.Task{
-		Ctx:          ctx,
+		Ctx:          logger.WithContext(ctx),
 		DBName:       dbName,
 		QueryName:    queryName,
 		Params:       nil,
