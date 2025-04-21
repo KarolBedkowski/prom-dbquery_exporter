@@ -34,8 +34,9 @@ database:
       port: 5432
     pool:
       max_connections: 3
-      max_idle_connections: 2
-    timeout: 2s
+      max_idle_connections: 1
+    timeout: 60s
+    background_workers: 1
   testdbpgsql2:
     driver: postgres
     connection:
@@ -350,6 +351,12 @@ query:
       oracle_v_sysmetric_{{ .NAME | keepAlfaNumUnderlineSpace | trim | replaceSpaces | toLower }} {{ .VALUE }}
       {{- end  }}
 
+  pg_long_query:
+    sql: >
+        select pg_sleep(60)
+    metrics: |
+      pg_long_query_result 1
+
 # run this quieries in background and fill the cache
 jobs:
   - query: pg_locks
@@ -358,3 +365,6 @@ jobs:
   - query: pg_locks_db
     database: testdbpgsql
     interval: 15s
+  - query: pg_long_query
+    database: testdbpgsql
+    interval: 30s

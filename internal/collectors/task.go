@@ -26,6 +26,8 @@ type Task struct {
 	Output    chan *TaskResult
 	DBName    string
 	QueryName string
+
+	IsScheduledJob bool
 }
 
 func (d *Task) newResult(err error, result []byte) *TaskResult {
@@ -40,6 +42,7 @@ func (d *Task) newResult(err error, result []byte) *TaskResult {
 func (d Task) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("db", d.DBName).
 		Str("query", d.QueryName).
+		Bool("is_job", d.IsScheduledJob).
 		Interface("params", d.Params)
 
 	if d.Ctx != nil {

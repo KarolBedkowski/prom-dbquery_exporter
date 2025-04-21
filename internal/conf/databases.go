@@ -62,6 +62,11 @@ type Database struct {
 	Timeout time.Duration `yaml:"timeout"`
 	// Connection and ping timeout
 	ConnectTimeout time.Duration `yaml:"connect_timeout"`
+
+	// Number of connection dedicated to run only jobs by scheduler
+	BackgroundWorkers int `yaml:"background_workers"`
+	// Max workers is defined by pool max_connections-background_workers
+	MaxWorkers int `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
@@ -72,6 +77,8 @@ func (d Database) MarshalZerologObject(event *zerolog.Event) {
 		Dur("timeout", d.Timeout).
 		Dur("connect_timeout", d.ConnectTimeout).
 		Interface("pool", d.Pool).
+		Int("background_workers", d.BackgroundWorkers).
+		Int("max_workers", d.MaxWorkers).
 		Str("name", d.Name)
 
 	conn := zerolog.Dict()
@@ -101,6 +108,25 @@ func (d *Database) validatePG() error {
 	if err := d.CheckConnectionParam("user"); err != nil {
 		return err
 	}
+
+	// FIXME: move defaults
+	d.MaxWorkers = 10
+
+	if d.Pool != nil {
+		if d.Pool.MaxIdleConnections > 0 {
+			d.MaxWorkers = d.Pool.MaxConnections
+		}
+
+		if d.BackgroundWorkers >= d.MaxWorkers {
+			log.Logger.Warn().Msg("number of background workers must be lower than max_connections; disabling background jobs")
+
+			d.BackgroundWorkers = 0
+		} else {
+			d.MaxWorkers -= d.BackgroundWorkers
+		}
+	}
+
+	log.Logger.Error().Object("conf", d).Msg("conf")
 
 	return nil
 }

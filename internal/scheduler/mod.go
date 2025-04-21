@@ -69,6 +69,8 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 		Output:       output,
 		Query:        query,
 		RequestStart: time.Now(),
+
+		IsScheduledJob: true,
 	}
 
 	logger.Debug().Object("task", &task).Msg("schedule task")
