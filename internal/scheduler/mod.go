@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/net/trace"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/support"
@@ -52,6 +53,12 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	tr := trace.New("dbquery_exporter.scheduler", "scheduler: "+dbName+"/"+queryName)
+	tr.SetMaxEvents(20)
+	defer tr.Finish()
+
+	ctx = trace.NewContext(ctx, tr)
 
 	logger := s.log.With().Str("dbname", dbName).Str("query", queryName).Logger()
 	logger.Debug().Msg("job processing start")
