@@ -131,24 +131,23 @@ func (c *collector) recreateLoader(cfg *conf.Database) {
 func (c *collector) mainWorker() {
 	group := sync.WaitGroup{}
 	// rwCh receive worker-stopped events.
-	rwCh := make(chan struct{})
-	rwBgCh := make(chan struct{})
+	rwCh := make(chan bool)
 	runningWorkers := 0
 	runningBgWorkers := 0
 
 	defer close(rwCh)
-	defer close(rwBgCh)
 
 	support.SetGoroutineLabels(context.Background(), "main_worker", c.dbName)
 
 loop:
 	for c.active && c.tasks != nil {
 		select {
-		case <-rwCh:
-			runningWorkers--
-
-		case <-rwBgCh:
-			runningBgWorkers--
+		case isBg := <-rwCh:
+			if isBg {
+				runningBgWorkers--
+			} else {
+				runningWorkers--
+			}
 
 		case cfg := <-c.newConfCh:
 			c.Lock()
@@ -182,7 +181,7 @@ loop:
 						c.worker(rw, workQueue, true)
 						group.Done()
 
-						rwBgCh <- struct{}{}
+						rwCh <- true
 					}(runningBgWorkers, c.workBgQueue)
 				}
 			} else {
@@ -196,7 +195,7 @@ loop:
 						c.worker(rw, workQueue, false)
 						group.Done()
 
-						rwCh <- struct{}{}
+						rwCh <- false
 					}(runningWorkers, c.workQueue)
 				}
 			}

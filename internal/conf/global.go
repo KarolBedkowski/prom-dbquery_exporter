@@ -19,12 +19,12 @@ type GlobalConf struct {
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
-func (g GlobalConf) MarshalZerologObject(e *zerolog.Event) {
+func (g *GlobalConf) MarshalZerologObject(e *zerolog.Event) {
 	e.Dur("request_timeout", g.RequestTimeout)
 }
 
 //nolint:unparam
-func (g GlobalConf) validate() error {
+func (g *GlobalConf) validate() error {
 	if g.RequestTimeout.Seconds() < 1 && g.RequestTimeout > 0 {
 		log.Logger.Warn().Msgf("FGlobal request_timeout < 1s: %v", g.RequestTimeout)
 	}
