@@ -13,6 +13,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/net/trace"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/support"
@@ -53,6 +54,14 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	if support.TraceMaxEvents > 0 {
+		tr := trace.New("dbquery_exporter.scheduler", "scheduler: "+dbName+"/"+queryName)
+		tr.SetMaxEvents(support.TraceMaxEvents)
+		defer tr.Finish()
+
+		ctx = trace.NewContext(ctx, tr)
+	}
+
 	logger := s.log.With().Str("dbname", dbName).Str("query", queryName).Logger()
 	logger.Debug().Msg("job processing start")
 
@@ -61,19 +70,21 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	output := make(chan *collectors.TaskResult, 1)
 	defer close(output)
 
-	task := collectors.Task{
-		Ctx:          ctx,
+	task := &collectors.Task{
+		Ctx:          logger.WithContext(ctx),
 		DBName:       dbName,
 		QueryName:    queryName,
 		Params:       nil,
 		Output:       output,
 		Query:        query,
 		RequestStart: time.Now(),
+
+		IsScheduledJob: true,
 	}
 
-	logger.Debug().Object("task", &task).Msg("schedule task")
+	logger.Debug().Object("task", task).Msg("schedule task")
 
-	if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
+	if err := collectors.CollectorsPool.ScheduleTask(task); err != nil {
 		support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 		logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 			Msg("start task error")

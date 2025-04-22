@@ -172,7 +172,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 
 			logger.Debug().Object("task", &task).Msg("schedule task")
 
-			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
+			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil { //nolint: contextcheck
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
@@ -277,7 +277,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	if t := q.configuration.Global.RequestTimeout; t > 0 {
-		logger.Debug().Msgf("set request timeout %d", t)
+		logger.Debug().Msgf("set request timeout %s", t)
 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, t)

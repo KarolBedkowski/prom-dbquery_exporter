@@ -68,6 +68,6 @@ func (s *Syncer) Lock(ctx context.Context, info ...string) error {
 }
 
 // Unlock free lock.
-func (s Syncer) Unlock() {
+func (s *Syncer) Unlock() {
 	s.locker <- struct{}{}
 }

@@ -16,6 +16,11 @@ import (
 	"net/http"
 )
 
+const (
+	// TraceMaxEvents is max events gathered in trace; 0 = disabled.
+	TraceMaxEvents = 0
+)
+
 // SetGoroutineLabels is dummy method.
 func SetGoroutineLabels(ctx context.Context, labels ...string) { //nolint:all
 	// ignore

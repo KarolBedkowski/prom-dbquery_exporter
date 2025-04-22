@@ -23,6 +23,11 @@ import (
 	"golang.org/x/net/trace"
 )
 
+const (
+	// TraceMaxEvents is max events gathered in trace
+	TraceMaxEvents = 25
+)
+
 // SetGoroutineLabels set debug labels for current goroutine.
 func SetGoroutineLabels(ctx context.Context, labels ...string) {
 	pprof.SetGoroutineLabels(pprof.WithLabels(ctx, pprof.Labels(labels...)))
@@ -72,7 +77,7 @@ func NewTraceMiddleware(name string) func(next http.Handler) http.Handler {
 			tr := trace.New(name, url)
 			defer tr.Finish()
 
-			tr.SetMaxEvents(20)
+			tr.SetMaxEvents(TraceMaxEvents)
 
 			ctx = trace.NewContext(ctx, tr)
 			req = req.WithContext(ctx)

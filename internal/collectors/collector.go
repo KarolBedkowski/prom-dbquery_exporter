@@ -32,6 +32,8 @@ type collector struct {
 	tasks chan *Task
 	// workQueue is chan that distribute task to workers
 	workQueue chan *Task
+	// workBgQueue is chan that distribute task to workers created by scheduler
+	workBgQueue chan *Task
 	// newConfCh bring new configuration
 	newConfCh chan *conf.Database
 	// stopCh stopping main worker.
@@ -53,11 +55,12 @@ func newCollector(name string, cfg *conf.Database) (*collector, error) {
 		dbName: name,
 		loader: loader,
 
-		workQueue: make(chan *Task, tasksQueueSize),
-		newConfCh: make(chan *conf.Database, 1),
-		stopCh:    make(chan struct{}, 1),
-		cfg:       cfg,
-		log:       log.Logger.With().Str("dbname", name).Logger(),
+		workQueue:   make(chan *Task, tasksQueueSize),
+		workBgQueue: make(chan *Task, tasksQueueSize),
+		newConfCh:   make(chan *conf.Database, 1),
+		stopCh:      make(chan struct{}, 1),
+		cfg:         cfg,
+		log:         log.Logger.With().Str("dbname", name).Logger(),
 	}
 
 	return c, nil
@@ -128,8 +131,9 @@ func (c *collector) recreateLoader(cfg *conf.Database) {
 func (c *collector) mainWorker() {
 	group := sync.WaitGroup{}
 	// rwCh receive worker-stopped events.
-	rwCh := make(chan struct{})
+	rwCh := make(chan bool)
 	runningWorkers := 0
+	runningBgWorkers := 0
 
 	defer close(rwCh)
 
@@ -138,8 +142,12 @@ func (c *collector) mainWorker() {
 loop:
 	for c.active && c.tasks != nil {
 		select {
-		case <-rwCh:
-			runningWorkers--
+		case isBg := <-rwCh:
+			if isBg {
+				runningBgWorkers--
+			} else {
+				runningWorkers--
+			}
 
 		case cfg := <-c.newConfCh:
 			c.Lock()
@@ -162,18 +170,34 @@ loop:
 			break loop
 
 		case task := <-c.tasks:
-			c.workQueue <- task
+			if task.IsScheduledJob && c.cfg.BackgroundWorkers > 0 {
+				c.workBgQueue <- task
 
-			if runningWorkers < c.cfg.Pool.MaxConnections && len(c.workQueue) > 0 {
-				group.Add(1)
-				runningWorkers++
+				if runningBgWorkers < c.cfg.BackgroundWorkers && len(c.workBgQueue) > 0 {
+					group.Add(1)
+					runningBgWorkers++
 
-				go func(rw int) {
-					c.worker(rw)
-					group.Done()
+					go func(rw int, workQueue chan *Task) {
+						c.worker(rw, workQueue, true)
+						group.Done()
 
-					rwCh <- struct{}{}
-				}(runningWorkers)
+						rwCh <- true
+					}(runningBgWorkers, c.workBgQueue)
+				}
+			} else {
+				c.workQueue <- task
+
+				if runningWorkers < c.cfg.MaxWorkers && len(c.workQueue) > 0 {
+					group.Add(1)
+					runningWorkers++
+
+					go func(rw int, workQueue chan *Task) {
+						c.worker(rw, workQueue, false)
+						group.Done()
+
+						rwCh <- false
+					}(runningWorkers, c.workQueue)
+				}
 			}
 		}
 	}
@@ -181,13 +205,14 @@ loop:
 	c.log.Debug().Msg("main worker exit")
 }
 
-func (c *collector) worker(idx int) {
-	wlog := c.log.With().Int("worker_idx", idx).Logger()
+func (c *collector) worker(idx int, workQueue chan *Task, isBg bool) {
+	wlog := c.log.With().Bool("bg", isBg).Int("worker_idx", idx).Logger()
 
 	workersCreatedCnt.WithLabelValues(c.dbName).Inc()
-	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx), "db", c.dbName)
+	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx),
+		"db", c.dbName, "bg", strconv.FormatBool(isBg))
 
-	wlog.Debug().Msgf("start worker %d", idx)
+	wlog.Debug().Msgf("start worker %d  bg=%v", idx, isBg)
 
 	// stop worker after 1 second of inactivty
 	shutdownTimer := time.NewTimer(time.Second)
@@ -206,8 +231,8 @@ loop:
 		shutdownTimer.Reset(time.Second)
 
 		select {
-		case task := <-c.workQueue:
-			wlog.Debug().Object("task", task).Int("queue_len", len(c.workQueue)).Msg("handle task")
+		case task := <-workQueue:
+			wlog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("handle task")
 			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", strconv.Itoa(idx), "db", c.dbName)
 			tasksQueueWaitTime.WithLabelValues(c.dbName).Observe(time.Since(task.RequestStart).Seconds())
 
@@ -297,6 +322,17 @@ func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
 	return task.newResult(nil, output)
 }
 
-func (c *collector) stats() *db.DatabaseStats {
-	return c.loader.Stats()
+type collectorStats struct {
+	dbstats *db.DatabaseStats
+
+	queueLength   int
+	queueBgLength int
+}
+
+func (c *collector) stats() collectorStats {
+	return collectorStats{
+		dbstats:       c.loader.Stats(),
+		queueLength:   len(c.workQueue),
+		queueBgLength: len(c.workBgQueue),
+	}
 }

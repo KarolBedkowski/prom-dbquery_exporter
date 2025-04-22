@@ -107,6 +107,11 @@ var (
 		"Total number of failed connections per loader",
 		[]string{"loader"}, nil,
 	)
+	collectorQueueLengthDesc = prometheus.NewDesc(
+		"dbquery_exporter_collector_queue_len",
+		"Number of task in queue",
+		[]string{"loader", "queue"}, nil,
+	)
 )
 
 func (l loggersPoolCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -118,9 +123,10 @@ func (l loggersPoolCollector) Collect(resCh chan<- prometheus.Metric) { //nolint
 		return
 	}
 
-	stats := CollectorsPool.stats()
+	cstats := CollectorsPool.stats()
 
-	for _, stat := range stats {
+	for _, cstat := range cstats {
+		stat := cstat.dbstats
 		resCh <- prometheus.MustNewConstMetric(
 			dbpoolOpenConnsDesc,
 			prometheus.GaugeValue,
@@ -186,6 +192,21 @@ func (l loggersPoolCollector) Collect(resCh chan<- prometheus.Metric) { //nolint
 			prometheus.CounterValue,
 			float64(stat.TotalFailedConnections),
 			stat.Name,
+		)
+
+		resCh <- prometheus.MustNewConstMetric(
+			collectorQueueLengthDesc,
+			prometheus.GaugeValue,
+			float64(cstat.queueLength),
+			stat.Name,
+			"main",
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			collectorQueueLengthDesc,
+			prometheus.GaugeValue,
+			float64(cstat.queueBgLength),
+			stat.Name,
+			"bg",
 		)
 	}
 }

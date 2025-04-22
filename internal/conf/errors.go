@@ -32,7 +32,7 @@ func (c ConfigurationError) Error() string {
 	return c.Message
 }
 
-func (c *ConfigurationError) Unwrap() error {
+func (c ConfigurationError) Unwrap() error {
 	return c.Err
 }
 

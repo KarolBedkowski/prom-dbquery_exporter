@@ -1,3 +1,10 @@
+//
+// databases.go
+// Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
+//
+// Distributed under terms of the GPLv3 license.
+//
+
 package conf
 
 import (
@@ -8,12 +15,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-//
-// databases.go
-// Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
-//
-// Distributed under terms of the GPLv3 license.
-//
+const (
+	defaultMaxWorkers = 10
+)
 
 // PoolConfiguration configure database connection pool.
 type PoolConfiguration struct {
@@ -45,9 +49,9 @@ func (p *PoolConfiguration) validate() error {
 // Database define database connection.
 type Database struct {
 	// Connection params - see sql-agent
-	Connection map[string]interface{}
+	Connection map[string]any
 	// Labels configured per database; may be used in templates
-	Labels map[string]interface{}
+	Labels map[string]any
 
 	Pool *PoolConfiguration `yaml:"pool"`
 
@@ -62,16 +66,23 @@ type Database struct {
 	Timeout time.Duration `yaml:"timeout"`
 	// Connection and ping timeout
 	ConnectTimeout time.Duration `yaml:"connect_timeout"`
+
+	// Number of connection dedicated to run only jobs by scheduler
+	BackgroundWorkers int `yaml:"background_workers"`
+	// Max workers is defined by pool max_connections-background_workers
+	MaxWorkers int `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
-func (d Database) MarshalZerologObject(event *zerolog.Event) {
+func (d *Database) MarshalZerologObject(event *zerolog.Event) {
 	event.Str("driver", d.Driver).
 		Interface("labels", d.Labels).
 		Strs("initial_query", d.InitialQuery).
 		Dur("timeout", d.Timeout).
 		Dur("connect_timeout", d.ConnectTimeout).
 		Interface("pool", d.Pool).
+		Int("background_workers", d.BackgroundWorkers).
+		Int("max_workers", d.MaxWorkers).
 		Str("name", d.Name)
 
 	conn := zerolog.Dict()
@@ -100,6 +111,22 @@ func (d *Database) validatePG() error {
 
 	if err := d.CheckConnectionParam("user"); err != nil {
 		return err
+	}
+
+	d.MaxWorkers = defaultMaxWorkers
+
+	if d.Pool != nil {
+		if d.Pool.MaxIdleConnections > 0 {
+			d.MaxWorkers = d.Pool.MaxConnections
+		}
+
+		if d.BackgroundWorkers >= d.MaxWorkers {
+			log.Logger.Warn().Msg("number of background workers must be lower than max_connections; disabling background jobs")
+
+			d.BackgroundWorkers = 0
+		} else {
+			d.MaxWorkers -= d.BackgroundWorkers
+		}
 	}
 
 	return nil
@@ -140,11 +167,11 @@ func (d *Database) validate() error {
 	}
 
 	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
-		log.Logger.Warn().Msgf("database %v: timeout < 1s: %v", d.Name, d.Timeout)
+		log.Logger.Warn().Msgf("database %v: timeout < 1s: %s", d.Name, d.Timeout)
 	}
 
 	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
-		log.Logger.Warn().Msgf("database %v: connect_timeout < 1s: %v", d.Name, d.ConnectTimeout)
+		log.Logger.Warn().Msgf("database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
 	}
 
 	return err

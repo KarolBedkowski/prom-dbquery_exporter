@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	defaultTimeout         = 300 * time.Second // sec
-	defaultConnMaxLifetime = 600 * time.Second
+	defaultTimeout         = time.Duration(300) * time.Second // sec
+	defaultConnMaxLifetime = time.Duration(600) * time.Second
 	defaultMaxOpenConns    = 10
 	defaultMaxIdleConns    = 2
 )
@@ -171,9 +171,6 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
 	defer conn.Close()
-
-	g.lock.RLock()
-	defer g.lock.RUnlock()
 
 	// prepare query parameters; combine parameters from query and params
 	queryParams := support.CloneMap(query.Params, params)
