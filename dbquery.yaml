@@ -338,6 +338,52 @@ query:
         {{- end }}
       {{- end }}
 
+  pg_wal:
+    groups:
+      - pg
+    sql: >
+      SELECT count(*) AS segments, sum(size) AS size
+      FROM pg_ls_waldir()
+      WHERE name ~ '^[0-9A-F]{24}$'
+    metrics: |
+      {{- range .R }}
+      pg-wal_size_bytes {{ .size }}
+      pg_wal_segments {{ .segments }}
+      {{- end }}
+
+  pg_statio_user_tables:
+    groups:
+      - pg
+    sql: >
+      SELECT current_database() datname,
+        schemaname, relname,
+        heap_blks_read, heap_blks_hit, idx_blks_read, idx_blks_hit,
+        toast_blks_read, toast_blks_hit, tidx_blks_read, tidx_blks_hit
+      FROM pg_statio_user_tables
+    metrics: |
+      {{- range .R }}
+      pg_statio_user_tables_heap_blocks_read{datname="{{ .datname }}",schemaname="{{ .schemaname }}",relname="{{ .relname }}"} {{ .heap_blks_read }}
+      pg_statio_user_tables_heap_blocks_hit{datname="{{ .datname }}",schemaname="{{ .schemaname }}",relname="{{ .relname }}"} {{ .heap_blks_hit }}
+      pg_statio_user_tables_idx_blocks_read{datname="{{ .datname }}",schemaname="{{ .schemaname }}",relname="{{ .relname }}"} {{ .idx_blks_read }}
+      pg_statio_user_tables_idx_blocks_hit{datname="{{ .datname }}",schemaname="{{ .schemaname }}",relname="{{ .relname }}"} {{ .idx_blks_hit }}
+      pg_statio_user_tables_toast_blocks_read{datname="{{ .datname }}",schemaname="{{ .schemaname }}",relname="{{ .relname }}"} {{ .toast_blks_read }}
+      pg_statio_user_tables_toast_blocks_hit{datname="{{ .datname }}",schemaname="{{ .schemaname }}",relname="{{ .relname }}"} {{ .toast_blks_hit }}
+      pg_statio_user_tables_tidx_blocks_read{datname="{{ .datname }}",schemaname="{{ .schemaname }}",relname="{{ .relname }}"} {{ .tidx_blks_read }}
+      pg_statio_user_tables_tidx_blocks_hit{datname="{{ .datname }}",schemaname="{{ .schemaname }}",relname="{{ .relname }}"} {{ .tidx_blks_hit }}
+      {{- end }}
+
+  pg_statio_user_indexes:
+    groups:
+      - pg
+    sql: >
+      SELECT schemaname, relname, indexrelname, idx_blks_read, idx_blks_hit FROM pg_statio_user_indexes
+    metrics: |
+      {{- range .R }}
+      pg_statio_user_indexes_idx_blks_read_total{schemaname="{{ .schemaname }}",relname="{{ .relname }}",indexrelname="{{ .indexrelname }}"} {{ .idx_blks_read }}
+      pg_statio_user_indexes_idx_blks_hit_total{schemaname="{{ .schemaname }}",relname="{{ .relname }}",indexrelname="{{ .indexrelname }}"} {{ .idx_blks_hit }}
+      {{- end }}
+
+
   oracle_v_sysmetric:
     groups:
       - oracle
@@ -353,6 +399,7 @@ query:
       oracle_v_sysmetric_{{ .NAME | keepAlfaNumUnderlineSpace | trim | replaceSpaces | toLower }} {{ .VALUE }}
       {{- end  }}
 
+  # for tests
   pg_long_query:
     sql: >
         select pg_sleep(60)
