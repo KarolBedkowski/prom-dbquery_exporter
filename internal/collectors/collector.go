@@ -323,6 +323,17 @@ func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
 	return task.newResult(nil, output)
 }
 
-func (c *collector) stats() *db.DatabaseStats {
-	return c.loader.Stats()
+type collectorStats struct {
+	dbstats *db.DatabaseStats
+
+	queueLength   int
+	queueBgLength int
+}
+
+func (c *collector) stats() collectorStats {
+	return collectorStats{
+		dbstats:       c.loader.Stats(),
+		queueLength:   len(c.workQueue),
+		queueBgLength: len(c.workBgQueue),
+	}
 }

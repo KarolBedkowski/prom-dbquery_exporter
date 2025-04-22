@@ -14,7 +14,6 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/db"
 )
 
 // Collectors is collection of all configured databases.
@@ -151,16 +150,14 @@ func (cs *Collectors) collectorsLen() float64 {
 }
 
 // stats return stats for each loaders.
-func (cs *Collectors) stats() []*db.DatabaseStats {
+func (cs *Collectors) stats() []collectorStats {
 	cs.Lock()
 	defer cs.Unlock()
 
-	var stats []*db.DatabaseStats
+	stats := make([]collectorStats, 0, len(cs.collectors))
 
 	for _, l := range cs.collectors {
-		if s := l.stats(); s != nil {
-			stats = append(stats, s)
-		}
+		stats = append(stats, l.stats())
 	}
 
 	return stats
