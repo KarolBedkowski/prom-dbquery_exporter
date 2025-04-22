@@ -54,11 +54,13 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	tr := trace.New("dbquery_exporter.scheduler", "scheduler: "+dbName+"/"+queryName)
-	tr.SetMaxEvents(20)
-	defer tr.Finish()
+	if support.TraceMaxEvents > 0 {
+		tr := trace.New("dbquery_exporter.scheduler", "scheduler: "+dbName+"/"+queryName)
+		tr.SetMaxEvents(support.TraceMaxEvents)
+		defer tr.Finish()
 
-	ctx = trace.NewContext(ctx, tr)
+		ctx = trace.NewContext(ctx, tr)
+	}
 
 	logger := s.log.With().Str("dbname", dbName).Str("query", queryName).Logger()
 	logger.Debug().Msg("job processing start")
@@ -68,7 +70,7 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	output := make(chan *collectors.TaskResult, 1)
 	defer close(output)
 
-	task := collectors.Task{
+	task := &collectors.Task{
 		Ctx:          logger.WithContext(ctx),
 		DBName:       dbName,
 		QueryName:    queryName,
@@ -80,9 +82,9 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 		IsScheduledJob: true,
 	}
 
-	logger.Debug().Object("task", &task).Msg("schedule task")
+	logger.Debug().Object("task", task).Msg("schedule task")
 
-	if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
+	if err := collectors.CollectorsPool.ScheduleTask(task); err != nil {
 		support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 		logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 			Msg("start task error")

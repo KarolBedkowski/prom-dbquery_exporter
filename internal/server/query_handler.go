@@ -277,7 +277,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	if t := q.configuration.Global.RequestTimeout; t > 0 {
-		logger.Debug().Msgf("set request timeout %d", t)
+		logger.Debug().Msgf("set request timeout %s", t)
 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, t)

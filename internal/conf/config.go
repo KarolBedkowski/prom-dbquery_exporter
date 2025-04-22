@@ -23,7 +23,7 @@ type Configuration struct {
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
-func (c Configuration) MarshalZerologObject(event *zerolog.Event) {
+func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	event.Object("global", c.Global).
 		Interface("jobs", c.Jobs)
 

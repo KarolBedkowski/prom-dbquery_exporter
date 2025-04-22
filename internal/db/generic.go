@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	defaultTimeout         = 300 * time.Second // sec
-	defaultConnMaxLifetime = 600 * time.Second
+	defaultTimeout         = time.Duration(300) * time.Second // sec
+	defaultConnMaxLifetime = time.Duration(600) * time.Second
 	defaultMaxOpenConns    = 10
 	defaultMaxIdleConns    = 2
 )

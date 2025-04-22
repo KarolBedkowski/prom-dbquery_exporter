@@ -23,8 +23,9 @@ func (g GlobalConf) MarshalZerologObject(e *zerolog.Event) {
 	e.Dur("request_timeout", g.RequestTimeout)
 }
 
-func (g *GlobalConf) validate() error {
-	if g.RequestTimeout.Seconds() < 0 && g.RequestTimeout > 0 {
+//nolint:unparam
+func (g GlobalConf) validate() error {
+	if g.RequestTimeout.Seconds() < 1 && g.RequestTimeout > 0 {
 		log.Logger.Warn().Msgf("FGlobal request_timeout < 1s: %v", g.RequestTimeout)
 	}
 

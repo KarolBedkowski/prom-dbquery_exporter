@@ -1,3 +1,10 @@
+//
+// databases.go
+// Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
+//
+// Distributed under terms of the GPLv3 license.
+//
+
 package conf
 
 import (
@@ -8,12 +15,9 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-//
-// databases.go
-// Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
-//
-// Distributed under terms of the GPLv3 license.
-//
+const (
+	defaultMaxWorkers = 10
+)
 
 // PoolConfiguration configure database connection pool.
 type PoolConfiguration struct {
@@ -45,9 +49,9 @@ func (p *PoolConfiguration) validate() error {
 // Database define database connection.
 type Database struct {
 	// Connection params - see sql-agent
-	Connection map[string]interface{}
+	Connection map[string]any
 	// Labels configured per database; may be used in templates
-	Labels map[string]interface{}
+	Labels map[string]any
 
 	Pool *PoolConfiguration `yaml:"pool"`
 
@@ -70,7 +74,7 @@ type Database struct {
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
-func (d Database) MarshalZerologObject(event *zerolog.Event) {
+func (d *Database) MarshalZerologObject(event *zerolog.Event) {
 	event.Str("driver", d.Driver).
 		Interface("labels", d.Labels).
 		Strs("initial_query", d.InitialQuery).
@@ -109,8 +113,7 @@ func (d *Database) validatePG() error {
 		return err
 	}
 
-	// FIXME: move defaults
-	d.MaxWorkers = 10
+	d.MaxWorkers = defaultMaxWorkers
 
 	if d.Pool != nil {
 		if d.Pool.MaxIdleConnections > 0 {
@@ -125,8 +128,6 @@ func (d *Database) validatePG() error {
 			d.MaxWorkers -= d.BackgroundWorkers
 		}
 	}
-
-	log.Logger.Error().Object("conf", d).Msg("conf")
 
 	return nil
 }
@@ -166,11 +167,11 @@ func (d *Database) validate() error {
 	}
 
 	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
-		log.Logger.Warn().Msgf("database %v: timeout < 1s: %v", d.Name, d.Timeout)
+		log.Logger.Warn().Msgf("database %v: timeout < 1s: %s", d.Name, d.Timeout)
 	}
 
 	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
-		log.Logger.Warn().Msgf("database %v: connect_timeout < 1s: %v", d.Name, d.ConnectTimeout)
+		log.Logger.Warn().Msgf("database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
 	}
 
 	return err

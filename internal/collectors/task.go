@@ -39,7 +39,7 @@ func (d *Task) newResult(err error, result []byte) *TaskResult {
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
-func (d Task) MarshalZerologObject(e *zerolog.Event) {
+func (d *Task) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("db", d.DBName).
 		Str("query", d.QueryName).
 		Bool("is_job", d.IsScheduledJob).
@@ -71,7 +71,7 @@ func NewSimpleTaskResult(res []byte, dbName, queryName string) *TaskResult {
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
-func (t TaskResult) MarshalZerologObject(e *zerolog.Event) {
+func (t *TaskResult) MarshalZerologObject(e *zerolog.Event) {
 	e.Object("task", t.Task).
 		Err(t.Error).
 		Int("result_size", len(t.Result))

@@ -43,7 +43,7 @@ type Query struct {
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
-func (q Query) MarshalZerologObject(e *zerolog.Event) {
+func (q *Query) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("sql", q.SQL).
 		Str("metrics", q.Metrics).
 		Str("onerror", q.OnError).

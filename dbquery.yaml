@@ -305,6 +305,7 @@ query:
       pg_locks{mode="{{ .mode }}"} {{ .cnt }}
       {{- end }}
 
+  # long running
   pg_tx:
     groups:
       - pgstats
@@ -312,6 +313,7 @@ query:
       SELECT min(EXTRACT(EPOCH FROM xact_start)) AS oldesttx, count(*) AS cnt
       FROM pg_stat_activity
       WHERE state IS DISTINCT FROM 'idle' AND query NOT LIKE 'autovacuum%'
+        AND xact_start IS NOT NULL
     metrics: |
       {{- range .R }}
       pg_tx_oldest {{ .oldesttx }}
