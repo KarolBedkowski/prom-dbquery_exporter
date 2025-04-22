@@ -41,12 +41,13 @@ build_arm64:
 .PHONY: run
 
 run:
-	go run -v cli/main.go -log.level debug
+	go run --tags debug -v cli/main.go -log.level debug
 
 
 .PHONY: check
 lint:
-	golangci-lint run --fix
+	golangci-lint run
+	#--fix
 	# go install go.uber.org/nilaway/cmd/nilaway@latest
 	nilaway ./...
 
