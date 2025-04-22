@@ -1,3 +1,11 @@
+v0.11.0 2025-04-22
+* feat: scheduled queries may run in separate workers pool that don't
+  block normal requests
+* feat: new example queries for postgresql based on postgresql_exporter
+* fix: fix broken concurrent requests caused by redundant locking
+* fix: fix logging and support traces for scheduled queries
+* bump: update deps
+
 v0.10.0 2025-03-20
 * feat: support metrics generated on query error
 * fix: handle configuration error - missing metrics template
