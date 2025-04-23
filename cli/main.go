@@ -100,7 +100,7 @@ func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
 ) error {
 	cache := support.NewCache[[]byte]("query_cache")
 	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, disableCache, validateOutput, cache)
-	sched := scheduler.NewScheduler(cache, cfg, enableSchedulerParallel)
+	sched := scheduler.NewScheduler(cache, cfg)
 
 	var runGroup run.Group
 
@@ -149,7 +149,11 @@ func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
 	)
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
-	runGroup.Add(sched.Run, sched.Close)
+	if enableSchedulerParallel {
+		runGroup.Add(sched.RunParallel, sched.Close)
+	} else {
+		runGroup.Add(sched.Run, sched.Close)
+	}
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 	daemon.SdNotify(false, "STATUS=ready")       //nolint:errcheck
