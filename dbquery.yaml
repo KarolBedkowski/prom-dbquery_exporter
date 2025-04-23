@@ -347,7 +347,7 @@ query:
       WHERE name ~ '^[0-9A-F]{24}$'
     metrics: |
       {{- range .R }}
-      pg-wal_size_bytes {{ .size }}
+      pg_wal_size_bytes {{ .size }}
       pg_wal_segments {{ .segments }}
       {{- end }}
 
