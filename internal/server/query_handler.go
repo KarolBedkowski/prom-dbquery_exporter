@@ -14,7 +14,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
@@ -78,41 +77,18 @@ type queryHandler struct {
 	queryLocker           locker
 	disableCache          bool
 	validateOutputEnabled bool
-
-	cacheHit  prometheus.Counter
-	cacheMiss prometheus.Counter
 }
 
 func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bool,
 	cache *support.Cache[[]byte],
 ) *queryHandler {
-	qh := &queryHandler{
+	return &queryHandler{
 		configuration:         c,
 		queryLocker:           newLocker(),
 		disableCache:          disableCache,
 		validateOutputEnabled: validateOutput,
 		queryResultCache:      cache,
-
-		cacheHit: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "cache_hit",
-				Help:      "Total number of result received from cache.",
-			},
-		),
-		cacheMiss: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "cache_miss",
-				Help:      "Total number of result not found in cache.",
-			},
-		),
 	}
-
-	prometheus.MustRegister(qh.cacheHit)
-	prometheus.MustRegister(qh.cacheMiss)
-
-	return qh
 }
 
 func (q *queryHandler) Handler() http.Handler {
@@ -179,13 +155,10 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			if data, ok := q.getFromCache(query, dbName); ok {
 				logger.Debug().Str("dbname", dbName).Str("query", queryName).Msg("query result from cache")
 				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
-				q.cacheHit.Inc()
 				writer(data)
 
 				continue
 			}
-
-			q.cacheMiss.Inc()
 
 			task := collectors.Task{
 				Ctx:          ctx,
@@ -199,7 +172,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 
 			logger.Debug().Object("task", &task).Msg("schedule task")
 
-			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil { //nolint: contextcheck
+			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("start task error")
