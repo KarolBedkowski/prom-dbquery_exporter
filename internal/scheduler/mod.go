@@ -9,37 +9,61 @@ package scheduler
 
 import (
 	"context"
+	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/trace"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/support"
 )
 
 type scheduledJob struct {
-	nextRun time.Time
-	job     conf.Job
+	nextRun   time.Time
+	job       conf.Job
+	isRunning bool
+	runID     int
 }
+
+type scheduledJobResult struct {
+	jobIdx   int
+	runID    int
+	success  bool
+	duration time.Duration
+}
+
+var scheduledTasksCnt = prometheus.NewCounter(
+	prometheus.CounterOpts{
+		Namespace: metrics.MetricsNamespace,
+		Name:      "task_scheduled_total",
+		Help:      "Total number of scheduled tasks",
+	},
+)
 
 // Scheduler is background process that load configured data into cache in some intervals.
 type Scheduler struct {
-	log   zerolog.Logger
-	cfg   *conf.Configuration
-	cache *support.Cache[[]byte]
-	stop  chan struct{}
-	jobs  []*scheduledJob
+	log      zerolog.Logger
+	cfg      *conf.Configuration
+	cache    *support.Cache[[]byte]
+	stop     chan struct{}
+	jobs     []*scheduledJob
+	parallel bool
 }
 
 // NewScheduler create new scheduler that use `cache` and initial `cfg` configuration.
-func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration) *Scheduler {
+func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration, parallel bool) *Scheduler {
+	prometheus.MustRegister(scheduledTasksCnt)
+
 	scheduler := &Scheduler{
-		cfg:   cfg,
-		cache: cache,
-		stop:  make(chan struct{}),
-		log:   log.Logger.With().Str("module", "scheduler").Logger(),
+		cfg:      cfg,
+		cache:    cache,
+		stop:     make(chan struct{}),
+		log:      log.Logger.With().Str("module", "scheduler").Logger(),
+		parallel: parallel,
 	}
 	scheduler.ReloadConf(cfg)
 
@@ -49,10 +73,8 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration) *Schedu
 func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	queryName := j.job.Query
 	dbName := j.job.Database
-	timeout := j.job.Interval
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
+	ctx := context.Background()
 
 	if support.TraceMaxEvents > 0 {
 		tr := trace.New("dbquery_exporter.scheduler", "scheduler: "+dbName+"/"+queryName)
@@ -115,12 +137,69 @@ func (s *Scheduler) handleJob(j *scheduledJob) bool {
 	return true
 }
 
+func (s *Scheduler) runJobBg(jobIdx int, runID int, job *scheduledJob, resultsCh chan scheduledJobResult) {
+	res := scheduledJobResult{
+		jobIdx: jobIdx,
+		runID:  runID,
+	}
+	startTS := time.Now()
+	res.success = s.handleJob(job)
+	res.duration = time.Since(startTS)
+	resultsCh <- res
+}
+
+func (s *Scheduler) runJob(jobIdx int, runID int, job *scheduledJob) scheduledJobResult {
+	res := scheduledJobResult{
+		jobIdx: jobIdx,
+		runID:  runID,
+	}
+	startTS := time.Now()
+	res.success = s.handleJob(job)
+	res.duration = time.Since(startTS)
+	return res
+}
+
+func (s *Scheduler) handleResult(res scheduledJobResult) {
+	if res.jobIdx >= len(s.jobs) {
+		s.log.Warn().Msgf("invalid result for job id %d", res.jobIdx)
+
+		return
+	}
+
+	job := s.jobs[res.jobIdx]
+	if job.runID != res.runID {
+		s.log.Warn().Msgf("invalid runID for job id %d; expected %d, got %d", res.jobIdx, job.runID, res.runID)
+
+		return
+	}
+
+	interval := job.job.Interval
+	if interval < res.duration {
+		s.log.Warn().Dur("duration", res.duration).Interface("task", job.job).
+			Msgf("scheduled task run longer than defined interval (%s)", interval)
+	}
+
+	if !res.success {
+		interval *= 2
+	}
+
+	job.nextRun = time.Now().Add(interval)
+	job.isRunning = false
+}
+
 // Run scheduler process.
 func (s *Scheduler) Run() error {
-	log.Logger.Debug().Msg("starting scheduler")
+	s.log.Debug().Msgf("starting scheduler; parallel=%v", s.parallel)
 
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
+
+	group := sync.WaitGroup{}
+
+	results := make(chan scheduledJobResult)
+	defer close(results)
+
+	lastRunID := 0
 
 	for {
 		if !timer.Stop() {
@@ -134,22 +213,33 @@ func (s *Scheduler) Run() error {
 
 		select {
 		case <-s.stop:
-			log.Logger.Debug().Msg("scheduler stopped")
+			s.log.Debug().Msg("scheduler stopping")
+			group.Wait()
+			s.log.Debug().Msg("scheduler stopped")
 
 			return nil
 
+		case res := <-results:
+			s.handleResult(res)
+			group.Done()
+
 		case <-timer.C:
-			for _, job := range s.jobs {
-				if time.Now().Before(job.nextRun) {
-					continue
-				}
+			for jobIdx, job := range s.jobs {
+				if !job.isRunning && time.Now().After(job.nextRun) {
+					scheduledTasksCnt.Inc()
 
-				interval := job.job.Interval
-				if !s.handleJob(job) {
-					interval *= 2
-				}
+					lastRunID++
+					job.isRunning = true
+					job.runID = lastRunID
 
-				job.nextRun = time.Now().Add(interval)
+					if s.parallel {
+						group.Add(1)
+
+						go s.runJobBg(jobIdx, lastRunID, job, results)
+					} else {
+						s.handleResult(s.runJob(jobIdx, lastRunID, job))
+					}
+				}
 			}
 		}
 	}
@@ -167,7 +257,7 @@ func (s *Scheduler) Close(err error) {
 func (s *Scheduler) ReloadConf(cfg *conf.Configuration) {
 	jobs := make([]*scheduledJob, 0, len(cfg.Jobs))
 
-	for _, job := range cfg.Jobs {
+	for idx, job := range cfg.Jobs {
 		if job.Interval.Seconds() <= 1 {
 			continue
 		}
@@ -184,10 +274,10 @@ func (s *Scheduler) ReloadConf(cfg *conf.Configuration) {
 			continue
 		}
 
-		jobs = append(jobs, &scheduledJob{
-			job:     job,
-			nextRun: time.Now(),
-		})
+		// add some offset to prevent all tasks start in the same time
+		nextRun := time.Now().Add(time.Duration(idx*7) * time.Second) //noqa:mnd
+
+		jobs = append(jobs, &scheduledJob{job: job, nextRun: nextRun, isRunning: false})
 	}
 
 	s.jobs = jobs

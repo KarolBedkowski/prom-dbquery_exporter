@@ -46,8 +46,9 @@ func main() {
 			"Logging log format (logfmt, json).")
 		webConfig = flag.String("web.config", "",
 			"Path to config yaml file that can enable TLS or authentication.")
-		disableCache   = flag.Bool("no-cache", false, "Disable query result caching")
-		validateOutput = flag.Bool("validate-output", false, "Enable output validation")
+		disableCache            = flag.Bool("no-cache", false, "Disable query result caching")
+		enableSchedulerParallel = flag.Bool("parallel-scheduler", false, "Run scheduler ask parallel")
+		validateOutput          = flag.Bool("validate-output", false, "Enable output validation")
 	)
 
 	flag.Parse()
@@ -86,7 +87,7 @@ func main() {
 
 	collectors.CollectorsPool.UpdateConf(cfg)
 
-	if err := start(cfg, *configFile, *listenAddress, *webConfig, *disableCache, *validateOutput); err != nil {
+	if err := start(cfg, *configFile, *listenAddress, *webConfig, *disableCache, *validateOutput, *enableSchedulerParallel); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
@@ -95,11 +96,11 @@ func main() {
 }
 
 func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
-	disableCache, validateOutput bool,
+	disableCache, validateOutput bool, enableSchedulerParallel bool,
 ) error {
 	cache := support.NewCache[[]byte]("query_cache")
 	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, disableCache, validateOutput, cache)
-	sched := scheduler.NewScheduler(cache, cfg)
+	sched := scheduler.NewScheduler(cache, cfg, enableSchedulerParallel)
 
 	var runGroup run.Group
 
