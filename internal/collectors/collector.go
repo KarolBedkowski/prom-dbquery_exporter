@@ -179,9 +179,9 @@ loop:
 
 					go func(rw int, workQueue chan *Task) {
 						c.worker(rw, workQueue, true)
-						group.Done()
-
 						rwCh <- true
+
+						group.Done()
 					}(runningBgWorkers, c.workBgQueue)
 				}
 			} else {
@@ -193,9 +193,9 @@ loop:
 
 					go func(rw int, workQueue chan *Task) {
 						c.worker(rw, workQueue, false)
-						group.Done()
-
 						rwCh <- false
+
+						group.Done()
 					}(runningWorkers, c.workQueue)
 				}
 			}
