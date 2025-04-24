@@ -121,6 +121,8 @@ func (cs *Collectors) UpdateConf(cfg *conf.Configuration) {
 	}
 
 	cs.cfg = cfg
+
+	cs.log.Debug().Msg("update configuration finished")
 }
 
 // Close database.

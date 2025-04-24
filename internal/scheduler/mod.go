@@ -90,6 +90,7 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration) *Schedu
 	return scheduler
 }
 
+// handleJobWithMetrics wrap handleJob to gather some metrics and log errors.
 func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	startTS := time.Now()
 
@@ -125,6 +126,7 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	}
 }
 
+// handleJob request data and wait for response. On success put result into cache.
 func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	queryName := j.Query
 	dbName := j.Database
@@ -168,6 +170,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	return nil
 }
 
+// / runJobInLoop run in goroutine and get data from data for one job in defined intervals.
 func (s *Scheduler) runJobInLoop(ctx context.Context, job conf.Job) {
 	llog := s.log.With().Int("job", job.Idx).Logger()
 	llog.Debug().Object("job", &job).Msg("scheduler: starting worker")
@@ -201,9 +204,11 @@ func (s *Scheduler) runJobInLoop(ctx context.Context, job conf.Job) {
 	}
 }
 
-// Run scheduler process.
+// Run scheduler process that get data for all defined jobs sequential.
 func (s *Scheduler) Run() error {
 	s.log.Debug().Msgf("scheduler: starting serial scheduler")
+
+	s.resheduleTasks()
 
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
@@ -226,6 +231,7 @@ func (s *Scheduler) Run() error {
 
 		case cfg := <-s.newCfgCh:
 			s.updateConfig(cfg)
+			s.resheduleTasks()
 
 		case <-timer.C:
 			for _, job := range s.tasks {
@@ -238,7 +244,7 @@ func (s *Scheduler) Run() error {
 	}
 }
 
-// RunParallel scheduler process.
+// RunParallel run scheduler in parallel mode that spawn goroutine for each defined job.
 func (s *Scheduler) RunParallel() error {
 	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
 
@@ -292,34 +298,39 @@ func (s *Scheduler) ReloadConf(cfg *conf.Configuration) {
 	s.newCfgCh <- cfg
 }
 
+// updateConfig load new configuration (only valid entries).
 func (s *Scheduler) updateConfig(cfg *conf.Configuration) {
 	tasks := make([]*scheduledTask, 0, len(cfg.Jobs))
 
 	for _, job := range cfg.Jobs {
+		// skip disabled jobs
 		if job.Interval.Seconds() <= 1 {
 			continue
 		}
 
+		// skip unknown queries
 		if _, ok := (s.cfg.Query)[job.Query]; !ok {
-			s.log.Error().Msgf("scheduler: reload cfg error: unknown query: %s", job.Query)
-
 			continue
 		}
 
+		// skip unknown databases
 		if _, ok := s.cfg.Database[job.Database]; !ok {
-			s.log.Error().Msgf("scheduler: reload cfg error: unknown database: %s", job.Database)
-
 			continue
 		}
 
-		// add some offset to prevent all tasks start in the same time
-		nextRun := time.Now().Add(time.Duration(job.Idx*7) * time.Second) //nolint:mnd
-
-		tasks = append(tasks, &scheduledTask{job: job, nextRun: nextRun})
+		tasks = append(tasks, &scheduledTask{job: job})
 	}
 
 	s.tasks = tasks
 	s.cfg = cfg
 
 	s.log.Info().Msgf("scheduler: configuration updated; tasks: %d", len(s.tasks))
+}
+
+// resheduleTasks set next run time for all tasks.
+func (s *Scheduler) resheduleTasks() {
+	// add some offset to prevent all tasks start in the same time
+	for _, task := range s.tasks {
+		task.nextRun = time.Now().Add(time.Duration(task.job.Idx*7) * time.Second) //nolint:mnd
+	}
 }
