@@ -54,7 +54,7 @@ func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
 			return li.String(), false
 		}
 
-		log.Logger.Warn().Str("reqID", li.key).Msgf("lock after maxLockTime, since %s", li.ts)
+		log.Logger.Warn().Str("reqID", li.key).Msgf("queryhandler: lock after maxLockTime, since %s", li.ts)
 	}
 
 	l.runningQuery[queryKey] = lockInfo{key: reqID, ts: time.Now()}
@@ -134,7 +134,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	queryNames []string, params map[string]any, writer func([]byte),
 ) (chan *collectors.TaskResult, int) {
 	logger := zerolog.Ctx(ctx)
-	logger.Debug().Msg("database processing start")
+	logger.Debug().Msg("queryhandler: database processing start")
 
 	output := make(chan *collectors.TaskResult, len(dbNames)*len(queryNames))
 
@@ -145,7 +145,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 		for _, queryName := range queryNames {
 			query, ok := (q.configuration.Query)[queryName]
 			if !ok {
-				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("unknown query")
+				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("queryhandler: unknown query")
 
 				continue
 			}
@@ -153,7 +153,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 			metrics.IncQueryTotalCnt(queryName, dbName)
 
 			if data, ok := q.getFromCache(query, dbName); ok {
-				logger.Debug().Str("dbname", dbName).Str("query", queryName).Msg("query result from cache")
+				logger.Debug().Str("dbname", dbName).Str("query", queryName).Msg("queryhandler: query result from cache")
 				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
 				writer(data)
 
@@ -170,12 +170,12 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				RequestStart: now,
 			}
 
-			logger.Debug().Object("task", &task).Msg("schedule task")
+			logger.Debug().Object("task", &task).Msg("queryhandler: schedule task")
 
 			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
-					Msg("start task error")
+					Msg("queryhandler: start task error")
 			} else {
 				support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
 
@@ -191,7 +191,7 @@ func (q *queryHandler) writeResult(ctx context.Context, output chan *collectors.
 	writer func([]byte),
 ) {
 	logger := log.Ctx(ctx)
-	logger.Debug().Msgf("write result start; waiting for %d results", scheduled)
+	logger.Debug().Msgf("queryhandler: write result start; waiting for %d results", scheduled)
 
 loop:
 	for scheduled > 0 {
@@ -202,7 +202,7 @@ loop:
 			task := res.Task
 
 			if res.Error != nil {
-				logger.Error().Err(res.Error).Object("task", task).Msg("processing query error")
+				logger.Error().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
 				support.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
 
 				msg := fmt.Sprintf("# query %q in %q processing error: %q\n",
@@ -212,7 +212,7 @@ loop:
 				continue
 			}
 
-			logger.Debug().Object("res", res).Msg("write result")
+			logger.Debug().Object("res", res).Msg("queryhandler: write result")
 			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
 
 			writer(res.Result)
@@ -224,7 +224,7 @@ loop:
 
 		case <-ctx.Done():
 			err := ctx.Err()
-			logger.Error().Err(err).Msg("result error")
+			logger.Error().Err(err).Msg("queryhandler: result error")
 			metrics.IncProcessErrorsCnt("cancel")
 			support.TraceErrorf(ctx, "result error: %s", err)
 
@@ -258,7 +258,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	for _, g := range req.URL.Query()["group"] {
 		q := q.configuration.GroupQueries(g)
 		if len(q) > 0 {
-			logger.Debug().Str("group", g).Interface("queries", q).Msg("add queries from group")
+			logger.Debug().Str("group", g).Interface("queries", q).Msg("queryhandler: add queries from group")
 			queryNames = append(queryNames, q...)
 		}
 	}
@@ -277,7 +277,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	if t := q.configuration.Global.RequestTimeout; t > 0 {
-		logger.Debug().Msgf("set request timeout %s", t)
+		logger.Debug().Msgf("queryhandler: set request timeout %s", t)
 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, t)
@@ -288,7 +288,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	successProcessed := 0
 	writeResult := func(data []byte) {
 		if _, err := writer.Write(data); err != nil {
-			logger.Error().Err(err).Msg("write error")
+			logger.Error().Err(err).Msg("queryhandler: write error")
 			support.TraceErrorf(ctx, "write error: %s", err)
 			metrics.IncProcessErrorsCnt("write")
 		} else {
@@ -306,7 +306,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 	logger.Debug().Int("successProcessed", successProcessed).
 		Err(ctx.Err()).
-		Msg("all database queries finished")
+		Msg("queryhandler: all database queries finished")
 
 	if successProcessed == 0 {
 		metrics.IncProcessErrorsCnt("bad_requests")

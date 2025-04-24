@@ -74,7 +74,7 @@ func (c *collector) stop() error {
 		return ErrLoaderStopped
 	}
 
-	c.log.Debug().Msgf("stopping...")
+	c.log.Debug().Msgf("collector: stopping...")
 	c.stopCh <- struct{}{}
 
 	return nil
@@ -85,7 +85,7 @@ func (c *collector) addTask(task *Task) {
 	defer c.Unlock()
 
 	if !c.active {
-		c.log.Debug().Msg("starting")
+		c.log.Debug().Msg("collector: starting")
 
 		c.active = true
 
@@ -96,12 +96,12 @@ func (c *collector) addTask(task *Task) {
 		go c.mainWorker()
 	}
 
-	c.log.Debug().Msgf("add new task; queue size: %d", len(c.tasks))
+	c.log.Debug().Msgf("collector: add new task; queue size: %d", len(c.tasks))
 
 	if c.tasks != nil {
 		c.tasks <- task
 	} else {
-		c.log.Warn().Msg("try add new task to closed queue")
+		c.log.Warn().Msg("collector: try add new task to closed queue")
 	}
 }
 
@@ -118,13 +118,13 @@ func (c *collector) updateConf(cfg *conf.Database) bool {
 func (c *collector) recreateLoader(cfg *conf.Database) {
 	newLoader, err := db.CreateLoader(cfg)
 	if err != nil || newLoader == nil {
-		c.log.Error().Err(err).Msg("create loader with new configuration error")
-		c.log.Error().Msg("configuration not updated!")
+		c.log.Error().Err(err).Msg("collector: create loader with new configuration error")
+		c.log.Error().Msg("collector: configuration not updated!")
 	} else {
 		c.cfg = cfg
 		c.loader = newLoader
 
-		c.log.Debug().Msg("conf updated")
+		c.log.Debug().Msg("collector: configuration updated")
 	}
 }
 
@@ -151,21 +151,21 @@ loop:
 
 		case cfg := <-c.newConfCh:
 			c.Lock()
-			c.log.Debug().Msg("wait for workers finish its current task...")
+			c.log.Debug().Msg("collector: wait for workers finish its current task...")
 			group.Wait()
-			c.log.Debug().Msg("stopped workers")
+			c.log.Debug().Msg("collector: workers stopped")
 
 			c.loader.Close(c.log.WithContext(context.Background()))
 			c.recreateLoader(cfg)
 			c.Unlock()
 
 		case <-c.stopCh:
-			c.log.Debug().Msg("stopping workers...")
+			c.log.Debug().Msg("collector: stopping workers...")
 			c.active = false
 			close(c.tasks)
 			c.tasks = nil
 			group.Wait()
-			c.log.Debug().Msg("stopped")
+			c.log.Debug().Msg("collector: workers stopped")
 
 			break loop
 
@@ -202,7 +202,7 @@ loop:
 		}
 	}
 
-	c.log.Debug().Msg("main worker exit")
+	c.log.Debug().Msg("collector: main worker exit")
 }
 
 func (c *collector) worker(idx int, workQueue chan *Task, isBg bool) {
@@ -212,7 +212,7 @@ func (c *collector) worker(idx int, workQueue chan *Task, isBg bool) {
 	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx),
 		"db", c.dbName, "bg", strconv.FormatBool(isBg))
 
-	wlog.Debug().Msgf("start worker %d  bg=%v", idx, isBg)
+	wlog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
 
 	// stop worker after 1 second of inactivty
 	shutdownTimer := time.NewTimer(time.Second)
@@ -232,7 +232,7 @@ loop:
 
 		select {
 		case task := <-workQueue:
-			wlog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("handle task")
+			wlog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
 			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", strconv.Itoa(idx), "db", c.dbName)
 			tasksQueueWaitTime.WithLabelValues(c.dbName).Observe(time.Since(task.RequestStart).Seconds())
 
@@ -244,7 +244,7 @@ loop:
 		}
 	}
 
-	wlog.Debug().Msg("worker stopped")
+	wlog.Debug().Msg("collector: worker stopped")
 }
 
 func (c *collector) handleTask(wlog zerolog.Logger, task *Task) {
@@ -252,7 +252,7 @@ func (c *collector) handleTask(wlog zerolog.Logger, task *Task) {
 
 	select {
 	case <-task.Ctx.Done():
-		llog.Warn().Msg("task cancelled before processing")
+		llog.Warn().Msg("collector: task cancelled before processing")
 
 		return
 	default:
@@ -266,14 +266,14 @@ func (c *collector) handleTask(wlog zerolog.Logger, task *Task) {
 
 	select {
 	case <-task.Ctx.Done():
-		llog.Warn().Msg("task cancelled after processing")
+		llog.Warn().Msg("collector: task cancelled after processing")
 
 		return
 	default:
 	}
 
 	if task.Ctx.Err() != nil {
-		llog.Warn().Msg("can't send output")
+		llog.Warn().Msg("collector: can't send output")
 
 		return
 	}
@@ -292,10 +292,10 @@ func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
 
 		// When OnError is defined - generate metrics according to this template
 		if task.Query.OnErrorTpl != nil {
-			llog.Warn().Err(err).Msg("query error handled by on error template")
+			llog.Warn().Err(err).Msg("collector: query error handled by on error template")
 
 			if output, err := formatError(ctx, err, task.Query, c.cfg); err != nil {
-				llog.Error().Err(err).Msg("format error result error")
+				llog.Error().Err(err).Msg("collector: format error result error")
 			} else {
 				llog.Debug().Bytes("output", output).Msg("result")
 
@@ -306,7 +306,7 @@ func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
 		return task.newResult(fmt.Errorf("query error: %w", err), nil)
 	}
 
-	llog.Debug().Msg("result received")
+	llog.Debug().Msg("collector: result received")
 	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
 
 	output, err := formatResult(ctx, result, task.Query, c.cfg)
@@ -316,7 +316,7 @@ func (c *collector) doQuery(llog zerolog.Logger, task *Task) *TaskResult {
 		return task.newResult(fmt.Errorf("format error: %w", err), nil)
 	}
 
-	llog.Debug().Msg("result formatted")
+	llog.Debug().Msg("collector: result formatted")
 	support.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
 
 	return task.newResult(nil, output)

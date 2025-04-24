@@ -76,7 +76,7 @@ func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig stri
 
 // Run webhandler.
 func (w *WebHandler) Run() error {
-	log.Logger.Info().Msgf("Listening on %s", w.listenAddress)
+	log.Logger.Info().Msgf("webhandler: listening on %s", w.listenAddress)
 
 	rwTimeout := defaultRwTimeout
 	if w.cfg.Global.RequestTimeout > 0 {
@@ -101,7 +101,7 @@ func (w *WebHandler) Run() error {
 func (w *WebHandler) Close(err error) {
 	_ = err
 
-	log.Logger.Debug().Msg("web handler close")
+	log.Logger.Debug().Msg("webhandler: closing")
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
 	defer cancel()

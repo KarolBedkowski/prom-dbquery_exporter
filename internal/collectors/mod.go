@@ -45,7 +45,7 @@ func (cs *Collectors) createCollector(dbName string) (*collector, error) {
 
 	c, err := newCollector(dbName, dconf)
 	if err != nil {
-		return nil, fmt.Errorf("create dbloader error: %w", err)
+		return nil, fmt.Errorf("collectors: create dbloader error: %w", err)
 	}
 
 	cs.collectors[dbName] = c
@@ -64,7 +64,7 @@ func (cs *Collectors) ScheduleTask(task *Task) error {
 	if !ok {
 		var err error
 
-		cs.log.Debug().Str("dbname", dbName).Msg("creating collector")
+		cs.log.Debug().Str("dbname", dbName).Msg("collectors: creating collector")
 
 		dbloader, err = cs.createCollector(dbName)
 		if err != nil {
@@ -92,13 +92,13 @@ func (cs *Collectors) UpdateConf(cfg *conf.Configuration) {
 		return
 	}
 
-	cs.log.Debug().Msg("update configuration begin")
+	cs.log.Debug().Msg("collectors: update configuration begin")
 
 	// update existing
 	for k, dbConf := range cfg.Database {
 		if db, ok := cs.collectors[k]; ok {
 			if db.updateConf(dbConf) {
-				cs.log.Info().Str("db", k).Msg("configuration changed")
+				cs.log.Info().Str("db", k).Msg("collectors: database configuration changed")
 			}
 		}
 	}
@@ -108,7 +108,7 @@ func (cs *Collectors) UpdateConf(cfg *conf.Configuration) {
 	// stop not existing anymore
 	for k, db := range cs.collectors {
 		if _, ok := cfg.Database[k]; !ok {
-			cs.log.Info().Str("db", k).Msgf("db %s not found in new conf; removing", k)
+			cs.log.Info().Str("db", k).Msgf("collectors: database %s not found in new conf; removing", k)
 
 			_ = db.stop()
 
@@ -122,7 +122,7 @@ func (cs *Collectors) UpdateConf(cfg *conf.Configuration) {
 
 	cs.cfg = cfg
 
-	cs.log.Debug().Msg("update configuration finished")
+	cs.log.Debug().Msg("collectors: update configuration finished")
 }
 
 // Close database.
@@ -130,10 +130,10 @@ func (cs *Collectors) Close() {
 	cs.Lock()
 	defer cs.Unlock()
 
-	cs.log.Debug().Msg("closing databases")
+	cs.log.Debug().Msg("collectors: closing databases")
 
 	for k, db := range cs.collectors {
-		cs.log.Info().Str("db", k).Msg("stopping db")
+		cs.log.Info().Str("db", k).Msg("collectors: stopping database")
 
 		_ = db.stop()
 	}

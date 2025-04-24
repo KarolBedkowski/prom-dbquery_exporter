@@ -39,7 +39,7 @@ func (j *Job) validate(cfg *Configuration) error {
 	}
 
 	if j.Interval.Seconds() < 1 {
-		log.Logger.Warn().Msgf("job %d (%v, %v): interval < 1s: %v", j.Idx, j.Database, j.Query, j.Interval)
+		log.Logger.Warn().Msgf("configuration: job %d (%v, %v): interval < 1s: %v", j.Idx, j.Database, j.Query, j.Interval)
 	}
 
 	return nil

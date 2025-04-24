@@ -40,7 +40,7 @@ func (p *PoolConfiguration) validate() error {
 	}
 
 	if p.ConnMaxLifeTime.Seconds() < 1 && p.ConnMaxLifeTime > 0 {
-		log.Logger.Warn().Msgf("pool configuration conn_max_life_time < 1s: %v", p.ConnMaxLifeTime)
+		log.Logger.Warn().Msgf("configuration: pool configuration conn_max_life_time < 1s: %v", p.ConnMaxLifeTime)
 	}
 
 	return nil
@@ -121,7 +121,7 @@ func (d *Database) validatePG() error {
 		}
 
 		if d.BackgroundWorkers >= d.MaxWorkers {
-			log.Logger.Warn().Msg("number of background workers must be lower than max_connections; disabling background jobs")
+			log.Logger.Warn().Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
 
 			d.BackgroundWorkers = 0
 		} else {
@@ -167,11 +167,11 @@ func (d *Database) validate() error {
 	}
 
 	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
-		log.Logger.Warn().Msgf("database %v: timeout < 1s: %s", d.Name, d.Timeout)
+		log.Logger.Warn().Msgf("configuration: database %v: timeout < 1s: %s", d.Name, d.Timeout)
 	}
 
 	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
-		log.Logger.Warn().Msgf("database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
+		log.Logger.Warn().Msgf("configuration: database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
 	}
 
 	return err

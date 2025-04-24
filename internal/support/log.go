@@ -23,7 +23,7 @@ func InitializeLogger(level string, format string) {
 
 	switch format {
 	default:
-		log.Error().Msg("unknown log format; using logfmt")
+		log.Error().Msg("logger: unknown log format; using logfmt")
 
 		fallthrough
 	case "logfmt":
@@ -48,7 +48,7 @@ func InitializeLogger(level string, format string) {
 	case "fatal":
 		zerolog.SetGlobalLevel(zerolog.FatalLevel)
 	default:
-		log.Error().Msgf("unknown log level '%s'; using debug", level)
+		log.Error().Msgf("logger: unknown log level '%s'; using debug", level)
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 

@@ -57,18 +57,18 @@ func (g *genericDatabase) configureConnection(ctx context.Context) {
 		llog := log.Ctx(ctx)
 
 		if pool.MaxConnections > 0 {
-			llog.Debug().Int("max-conn", pool.MaxConnections).Msg("max connection set")
+			llog.Debug().Int("max-conn", pool.MaxConnections).Msg("db: max connection set")
 			g.conn.SetMaxOpenConns(pool.MaxConnections)
 		}
 
 		if pool.MaxIdleConnections > 0 {
-			llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("max idle connection set")
+			llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("db: max idle connection set")
 			g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
 		}
 
 		if pool.ConnMaxLifeTime > 0 {
 			llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
-				Msg("connection max life time set")
+				Msg("db: connection max life time set")
 			g.conn.SetConnMaxLifetime(pool.ConnMaxLifeTime)
 		}
 	}
@@ -85,7 +85,7 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 
 	llog := log.Ctx(ctx)
 	llog.Debug().Str("connstr", g.connStr).Str("driver", g.driver).
-		Msg("genericQuery connecting")
+		Msg("db: genericQuery connecting")
 
 	var err error
 	if g.conn, err = sqlx.Open(g.driver, g.connStr); err != nil {
@@ -102,14 +102,13 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 		return fmt.Errorf("ping error: %w", err)
 	}
 
-	llog.Debug().Msg("genericQuery connected")
+	llog.Debug().Msg("db: genericQuery connected")
 
 	return nil
 }
 
 func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error) {
 	llog := log.Ctx(ctx)
-	llog.Debug().Interface("conn", g.conn).Msg("conn")
 
 	// connect to database if not connected
 	if err := g.openConnection(ctx); err != nil {
@@ -129,7 +128,7 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 
 	// launch initial sqls if defined
 	for idx, sql := range g.initialSQL {
-		llog.Debug().Str("sql", sql).Msg("genericQuery execute initial sql")
+		llog.Debug().Str("sql", sql).Msg("db: genericQuery execute initial sql")
 
 		if err := g.executeInitialQuery(ctx, sql, conn); err != nil {
 			conn.Close()
@@ -180,7 +179,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	defer cancel()
 
 	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", queryParams).
-		Msg("genericQuery start execute")
+		Msg("db: genericQuery start execute")
 
 	tx, err := conn.BeginTxx(ctx, nil)
 	if err != nil {
@@ -198,7 +197,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 
 	if e := llog.Debug(); e.Enabled() {
 		if cols, err := rows.Columns(); err == nil {
-			e.Interface("cols", cols).Msg("genericQuery columns")
+			e.Interface("cols", cols).Msg("db: genericQuery columns")
 		} else {
 			return nil, fmt.Errorf("get columns error: %w", err)
 		}
@@ -222,7 +221,7 @@ func (g *genericDatabase) Close(ctx context.Context) error {
 	defer g.lock.Unlock()
 
 	log.Ctx(ctx).Debug().Interface("conn", g.conn).
-		Str("db", g.dbConf.Name).Msg("genericQuery close conn")
+		Str("db", g.dbConf.Name).Msg("db: genericQuery close conn")
 
 	if g.conn == nil {
 		return nil
