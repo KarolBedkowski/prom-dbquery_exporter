@@ -87,7 +87,8 @@ func main() {
 
 	collectors.CollectorsPool.UpdateConf(cfg)
 
-	if err := start(cfg, *configFile, *listenAddress, *webConfig, *disableCache, *validateOutput, *enableSchedulerParallel); err != nil {
+	if err := start(cfg, *configFile, *listenAddress, *webConfig, *disableCache, *validateOutput,
+		*enableSchedulerParallel); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
@@ -149,6 +150,7 @@ func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
 	)
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
+
 	if enableSchedulerParallel {
 		runGroup.Add(sched.RunParallel, sched.Close)
 	} else {

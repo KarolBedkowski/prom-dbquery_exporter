@@ -121,7 +121,8 @@ func (d *Database) validatePG() error {
 		}
 
 		if d.BackgroundWorkers >= d.MaxWorkers {
-			log.Logger.Warn().Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
+			log.Logger.Warn().
+				Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
 
 			d.BackgroundWorkers = 0
 		} else {

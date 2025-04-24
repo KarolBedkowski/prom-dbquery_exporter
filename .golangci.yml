@@ -56,3 +56,4 @@ linters-settings:
       - stdlib
       - Database
       - ObserverVec
+      - generic

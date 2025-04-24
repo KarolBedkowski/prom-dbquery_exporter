@@ -41,7 +41,7 @@ build_arm64:
 .PHONY: run
 
 run:
-	go run --tags debug -v cli/main.go -log.level debug
+	go run --tags debug -v cli/main.go -log.level debug -parallel-scheduler true
 
 
 .PHONY: check

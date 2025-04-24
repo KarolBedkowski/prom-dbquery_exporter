@@ -147,7 +147,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 		IsScheduledJob: true,
 	}
 
-	if err := collectors.CollectorsPool.ScheduleTask(task); err != nil {
+	if err := collectors.CollectorsPool.ScheduleTask(task); err != nil { //nolint:contextcheck
 		return fmt.Errorf("start task error: %w", err)
 	}
 
