@@ -3,6 +3,7 @@ package conf
 import (
 	"time"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -42,4 +43,12 @@ func (j *Job) validate(cfg *Configuration) error {
 	}
 
 	return nil
+}
+
+// MarshalZerologObject implements LogObjectMarshaler.
+func (j *Job) MarshalZerologObject(event *zerolog.Event) {
+	event.Int("idx", j.Idx).
+		Str("query", j.Query).
+		Str("database", j.Database).
+		Dur("interval", j.Interval)
 }
