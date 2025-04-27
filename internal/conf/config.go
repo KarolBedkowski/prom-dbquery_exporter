@@ -18,7 +18,7 @@ type Configuration struct {
 	Database map[string]*Database
 	// Queries
 	Query map[string]*Query
-	Jobs  []Job
+	Jobs  []*Job
 	// Global application settings
 	Global GlobalConf
 

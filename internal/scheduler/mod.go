@@ -318,7 +318,7 @@ func (s *Scheduler) updateConfig(cfg *conf.Configuration) {
 			continue
 		}
 
-		tasks = append(tasks, &scheduledTask{job: job})
+		tasks = append(tasks, &scheduledTask{job: *job})
 	}
 
 	s.tasks = tasks
