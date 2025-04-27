@@ -38,7 +38,12 @@ func printVersion() {
 	}
 }
 
-func checkDatabases() {
+func printWelcome() {
+	log.Logger.Info().
+		Str("version", version.Info()).
+		Str("build_ctx", version.BuildContext()).
+		Msg("Starting DBQuery exporter")
+
 	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
 		log.Logger.Fatal().Msg("no databases supported, check compile flags")
 	} else {
@@ -75,11 +80,7 @@ func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	support.InitializeLogger(*loglevel, *logformat)
-	log.Logger.Info().
-		Str("version", version.Info()).
-		Str("build_ctx", version.BuildContext()).
-		Msg("Starting DBQuery exporter")
-	checkDatabases()
+	printWelcome()
 
 	if err := enableSDNotify(); err != nil {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
