@@ -41,6 +41,9 @@ type collector struct {
 	dbName string
 	sync.Mutex
 	active bool
+
+	runningWorkers   int
+	runningBgWorkers int
 }
 
 const tasksQueueSize = 10
@@ -129,12 +132,12 @@ func (c *collector) recreateLoader(cfg *conf.Database) {
 }
 
 func (c *collector) mainWorker() {
+	c.runningBgWorkers = 0
+	c.runningWorkers = 0
+
 	group := sync.WaitGroup{}
 	// rwCh receive worker-stopped events.
 	rwCh := make(chan bool)
-	runningWorkers := 0
-	runningBgWorkers := 0
-
 	defer close(rwCh)
 
 	support.SetGoroutineLabels(context.Background(), "main_worker", c.dbName)
@@ -143,18 +146,14 @@ loop:
 	for c.active && c.tasks != nil {
 		select {
 		case isBg := <-rwCh:
-			if isBg {
-				runningBgWorkers--
-			} else {
-				runningWorkers--
-			}
+			c.removeWorker(isBg)
+			group.Done()
 
 		case cfg := <-c.newConfCh:
 			c.Lock()
 			c.log.Debug().Msg("collector: wait for workers finish its current task...")
 			group.Wait()
 			c.log.Debug().Msg("collector: workers stopped")
-
 			c.loader.Close(c.log.WithContext(context.Background()))
 			c.recreateLoader(cfg)
 			c.Unlock()
@@ -172,37 +171,53 @@ loop:
 		case task := <-c.tasks:
 			if task.IsScheduledJob && c.cfg.BackgroundWorkers > 0 {
 				c.workBgQueue <- task
-
-				if runningBgWorkers < c.cfg.BackgroundWorkers && len(c.workBgQueue) > 0 {
-					group.Add(1)
-					runningBgWorkers++
-
-					go func(rw int, workQueue chan *Task) {
-						c.worker(rw, workQueue, true)
-						rwCh <- true
-
-						group.Done()
-					}(runningBgWorkers, c.workBgQueue)
-				}
+				c.spawnBgWorker(&group, rwCh)
 			} else {
 				c.workQueue <- task
-
-				if runningWorkers < c.cfg.MaxWorkers && len(c.workQueue) > 0 {
-					group.Add(1)
-					runningWorkers++
-
-					go func(rw int, workQueue chan *Task) {
-						c.worker(rw, workQueue, false)
-						rwCh <- false
-
-						group.Done()
-					}(runningWorkers, c.workQueue)
-				}
+				c.spawnWorker(&group, rwCh)
 			}
 		}
 	}
 
 	c.log.Debug().Msg("collector: main worker exit")
+}
+
+func (c *collector) removeWorker(isBg bool) {
+	if isBg {
+		c.runningBgWorkers--
+	} else {
+		c.runningWorkers--
+	}
+}
+
+func (c *collector) spawnWorker(group *sync.WaitGroup, rwCh chan bool) {
+	if c.runningWorkers >= c.cfg.MaxWorkers {
+		return
+	}
+
+	group.Add(1)
+
+	c.runningWorkers++
+
+	go func(rw int, workQueue chan *Task) {
+		c.worker(rw, workQueue, false)
+		rwCh <- false
+	}(c.runningWorkers, c.workQueue)
+}
+
+func (c *collector) spawnBgWorker(group *sync.WaitGroup, rwCh chan bool) {
+	if c.runningBgWorkers >= c.cfg.BackgroundWorkers {
+		return
+	}
+
+	group.Add(1)
+
+	c.runningBgWorkers++
+
+	go func(rw int, workQueue chan *Task) {
+		c.worker(rw, workQueue, true)
+		rwCh <- true
+	}(c.runningBgWorkers, c.workBgQueue)
 }
 
 func (c *collector) worker(idx int, workQueue chan *Task, isBg bool) {
