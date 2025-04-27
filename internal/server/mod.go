@@ -38,10 +38,9 @@ type WebHandler struct {
 }
 
 // NewWebHandler create new WebHandler.
-func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string,
-	disableCache bool, validateOutput bool, cache *support.Cache[[]byte],
+func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string, cache *support.Cache[[]byte],
 ) *WebHandler {
-	qh := newQueryHandler(cfg, disableCache, validateOutput, cache)
+	qh := newQueryHandler(cfg, cache)
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)

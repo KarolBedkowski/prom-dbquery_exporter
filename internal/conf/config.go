@@ -20,6 +20,13 @@ type Configuration struct {
 	Jobs  []Job
 	// Global application settings
 	Global GlobalConf
+
+	// Runtime configuration
+
+	ConfigFilename    string `yaml:"-"`
+	DisableCache      bool   `yaml:"-"`
+	ParallelScheduler bool   `yaml:"-"`
+	ValidateOutput    bool   `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
@@ -42,6 +49,12 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	}
 
 	event.Dict("query", qd)
+
+	event.Dict("cli", zerolog.Dict().
+		Str("config_filename", c.ConfigFilename).
+		Bool("disable_cache", c.DisableCache).
+		Bool("parallel_scheduler", c.ParallelScheduler).
+		Bool("validateOutput", c.ValidateOutput))
 }
 
 // GroupQueries return queries that belong to given group.
@@ -100,7 +113,9 @@ func (c *Configuration) validate() error {
 
 // LoadConfiguration from filename.
 func LoadConfiguration(filename string) (*Configuration, error) {
-	conf := &Configuration{}
+	conf := &Configuration{
+		ConfigFilename: filename,
+	}
 
 	b, err := os.ReadFile(filename) // #nosec
 	if err != nil {
@@ -128,4 +143,24 @@ func LoadConfiguration(filename string) (*Configuration, error) {
 	}
 
 	return conf, nil
+}
+
+func (c *Configuration) CopyRuntimeOptions(oldcfg *Configuration) {
+	c.DisableCache = oldcfg.DisableCache
+	c.ParallelScheduler = oldcfg.ParallelScheduler
+	c.ValidateOutput = oldcfg.ValidateOutput
+}
+
+func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateOutput *bool) {
+	if disableCache != nil {
+		c.DisableCache = *disableCache
+	}
+
+	if parallelScheduler != nil {
+		c.ParallelScheduler = *parallelScheduler
+	}
+
+	if validateOutput != nil {
+		c.ValidateOutput = *validateOutput
+	}
 }

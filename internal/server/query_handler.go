@@ -8,6 +8,7 @@ package server
 //
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
@@ -74,20 +76,14 @@ type queryHandler struct {
 	configuration    *conf.Configuration
 	queryResultCache *support.Cache[[]byte]
 	// runningQuery lock the same request for running twice
-	queryLocker           locker
-	disableCache          bool
-	validateOutputEnabled bool
+	queryLocker locker
 }
 
-func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bool,
-	cache *support.Cache[[]byte],
-) *queryHandler {
+func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte]) *queryHandler {
 	return &queryHandler{
-		configuration:         c,
-		queryLocker:           newLocker(),
-		disableCache:          disableCache,
-		validateOutputEnabled: validateOutput,
-		queryResultCache:      cache,
+		configuration:    c,
+		queryLocker:      newLocker(),
+		queryResultCache: cache,
 	}
 }
 
@@ -112,7 +108,7 @@ func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 }
 
 func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, bool) {
-	if query.CachingTime > 0 && !q.disableCache {
+	if query.CachingTime > 0 && !q.configuration.DisableCache {
 		queryKey := query.Name + "@" + dbName
 		if data, ok := q.queryResultCache.Get(queryKey); ok {
 			return data, ok
@@ -123,11 +119,22 @@ func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, b
 }
 
 func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byte) {
-	if query.CachingTime > 0 && !q.disableCache {
+	if query.CachingTime > 0 && !q.configuration.DisableCache {
 		queryKey := query.Name + "@" + dbName
 
 		q.queryResultCache.Put(queryKey, query.CachingTime, data)
 	}
+}
+
+func (q *queryHandler) validateOutput(output []byte) error {
+	if q.configuration.ValidateOutput {
+		var parser expfmt.TextParser
+		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
+			return fmt.Errorf("validate result error: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
@@ -214,6 +221,13 @@ loop:
 
 			logger.Debug().Object("res", res).Msg("queryhandler: write result")
 			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
+
+			if err := q.validateOutput(res.Result); err != nil {
+				logger.Error().Err(err).Object("task", task).Msg("queryhandler: validate output error")
+				support.TracePrintf(ctx, "validate result of query %q from %q: %v", task.QueryName, task.DBName, err)
+
+				continue
+			}
 
 			writer(res.Result)
 

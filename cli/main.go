@@ -28,6 +28,24 @@ func init() {
 	prometheus.MustRegister(cversion.NewCollector("dbquery_exporter"))
 }
 
+func printVersion() {
+	fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
+
+	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
+		fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
+	} else {
+		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
+	}
+}
+
+func checkDatabases() {
+	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
+		log.Logger.Fatal().Msg("no databases supported, check compile flags")
+	} else {
+		log.Logger.Info().Msgf("supported databases: %s", sdb)
+	}
+}
+
 // Main is main function for cli.
 func main() {
 	var (
@@ -49,17 +67,8 @@ func main() {
 
 	flag.Parse()
 
-	sdb := db.SupportedDatabases()
-
 	if *showVersion {
-		fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
-
-		if len(sdb) == 0 {
-			fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
-		} else {
-			fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
-		}
-
+		printVersion()
 		os.Exit(0)
 	}
 
@@ -70,12 +79,7 @@ func main() {
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
-
-	if len(sdb) == 0 {
-		log.Logger.Panic().Msg("no databases supported, check compile flags")
-	} else {
-		log.Logger.Info().Msgf("supported databases: %s", sdb)
-	}
+	checkDatabases()
 
 	if err := enableSDNotify(); err != nil {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
@@ -89,6 +93,8 @@ func main() {
 			Msg("load config file error")
 	}
 
+	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput)
+
 	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
 	metrics.UpdateConfLoadTime()
 
@@ -98,8 +104,7 @@ func main() {
 
 	collectors.CollectorsPool.UpdateConf(cfg)
 
-	if err := start(cfg, *configFile, *listenAddress, *webConfig, *disableCache, *validateOutput,
-		*enableSchedulerParallel); err != nil {
+	if err := start(cfg, *listenAddress, *webConfig); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
@@ -107,11 +112,9 @@ func main() {
 	log.Logger.Info().Msg("finished..")
 }
 
-func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
-	disableCache, validateOutput bool, enableSchedulerParallel bool,
-) error {
+func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 	cache := support.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, disableCache, validateOutput, cache)
+	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache)
 	sched := scheduler.NewScheduler(cache, cfg)
 
 	var runGroup run.Group
@@ -141,7 +144,8 @@ func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
 			for range hup {
 				log.Info().Msg("reloading configuration")
 
-				if newConf, err := conf.LoadConfiguration(configFile); err == nil {
+				if newConf, err := conf.LoadConfiguration(cfg.ConfigFilename); err == nil {
+					newConf.CopyRuntimeOptions(cfg)
 					webHandler.ReloadConf(newConf)
 					sched.ReloadConf(newConf)
 					collectors.CollectorsPool.UpdateConf(newConf)
@@ -162,7 +166,7 @@ func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
 
-	if enableSchedulerParallel {
+	if cfg.ParallelScheduler {
 		runGroup.Add(sched.RunParallel, sched.Close)
 	} else {
 		runGroup.Add(sched.Run, sched.Close)
