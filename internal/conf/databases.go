@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
@@ -27,23 +28,25 @@ type PoolConfiguration struct {
 }
 
 func (p *PoolConfiguration) validate() error {
+	var err *multierror.Error
+
 	if p.MaxConnections < 0 {
-		return NewInvalidFieldError("max_connections", p.MaxConnections)
+		err = multierror.Append(err, NewInvalidFieldError("max_connections", p.MaxConnections))
 	}
 
 	if p.MaxIdleConnections < 0 {
-		return NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections)
+		err = multierror.Append(err, NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections))
 	}
 
 	if p.ConnMaxLifeTime < 0 {
-		return NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections)
+		err = multierror.Append(err, NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections))
 	}
 
 	if p.ConnMaxLifeTime.Seconds() < 1 && p.ConnMaxLifeTime > 0 {
 		log.Logger.Warn().Msgf("configuration: pool configuration conn_max_life_time < 1s: %v", p.ConnMaxLifeTime)
 	}
 
-	return nil
+	return err.ErrorOrNil()
 }
 
 // Database define database connection.
@@ -103,14 +106,16 @@ func (d *Database) validatePG() error {
 		return nil
 	}
 
+	var errs *multierror.Error
+
 	if err := d.CheckConnectionParam("database"); err != nil {
 		if err := d.CheckConnectionParam("dbname"); err != nil {
-			return MissingFieldError{"'database' or 'dbname'"}
+			errs = multierror.Append(errs, MissingFieldError{"'database' or 'dbname'"})
 		}
 	}
 
 	if err := d.CheckConnectionParam("user"); err != nil {
-		return err
+		errs = multierror.Append(errs, err)
 	}
 
 	d.MaxWorkers = defaultMaxWorkers
@@ -130,41 +135,16 @@ func (d *Database) validatePG() error {
 		}
 	}
 
-	return nil
+	return errs.ErrorOrNil()
 }
 
 func (d *Database) validateCommon() error {
+	var errs *multierror.Error
+
 	if port, ok := d.Connection["port"]; ok {
 		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
-			return NewInvalidFieldError("port", port)
+			errs = multierror.Append(errs, NewInvalidFieldError("port", port))
 		}
-	}
-
-	return nil
-}
-
-func (d *Database) validate() error {
-	var err error
-
-	switch d.Driver {
-	case "":
-		err = MissingFieldError{"driver"}
-	case "postgresql", "postgres", "cockroach", "cockroachdb":
-		err = d.validatePG()
-	case "mysql", "mariadb", "tidb", "oracle", "oci8":
-		err = d.CheckConnectionParam("database", "host", "port", "user", "password")
-	case "sqlite3", "sqlite", "mssql":
-		err = d.CheckConnectionParam("database")
-	default:
-		err = NewInvalidFieldError("database", "d.Driver").WithMsg("unknown database")
-	}
-
-	if err == nil && d.Pool != nil {
-		err = d.Pool.validate()
-	}
-
-	if err == nil {
-		err = d.validateCommon()
 	}
 
 	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
@@ -175,7 +155,32 @@ func (d *Database) validate() error {
 		log.Logger.Warn().Msgf("configuration: database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
 	}
 
-	return err
+	return errs.ErrorOrNil()
+}
+
+func (d *Database) validate() error {
+	var err *multierror.Error
+
+	switch d.Driver {
+	case "":
+		return MissingFieldError{"driver"}
+	case "postgresql", "postgres", "cockroach", "cockroachdb":
+		err = multierror.Append(err, d.validatePG())
+	case "mysql", "mariadb", "tidb", "oracle", "oci8":
+		err = multierror.Append(err, d.CheckConnectionParam("database", "host", "port", "user", "password"))
+	case "sqlite3", "sqlite", "mssql":
+		err = multierror.Append(err, d.CheckConnectionParam("database"))
+	default:
+		return NewInvalidFieldError("database", d.Driver).WithMsg("unknown database")
+	}
+
+	if d.Pool != nil {
+		err = multierror.Append(err, d.Pool.validate())
+	}
+
+	err = multierror.Append(err, d.validateCommon())
+
+	return err.ErrorOrNil()
 }
 
 // CheckConnectionParam return true when all keys exists

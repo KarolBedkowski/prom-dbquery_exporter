@@ -26,6 +26,7 @@ linters-settings:
       - .WithMessagef(
       - .WithStack(
       - multierror.Append(
+      - .ErrorOrNil()
 
   varnamelen:
     # The longest distance, in source lines, that is being considered a "small scope".
