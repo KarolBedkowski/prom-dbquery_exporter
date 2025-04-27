@@ -90,6 +90,100 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration) *Schedu
 	return scheduler
 }
 
+// Run scheduler process that get data for all defined jobs sequential.
+func (s *Scheduler) Run() error {
+	s.log.Debug().Msgf("scheduler: starting serial scheduler")
+
+	s.rescheduleTask()
+
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+
+	for {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+
+		timer.Reset(time.Second)
+
+		select {
+		case <-s.stop:
+			s.log.Debug().Msg("scheduler: stopped")
+
+			return nil
+
+		case cfg := <-s.newCfgCh:
+			s.updateConfig(cfg)
+			s.rescheduleTask()
+
+		case <-timer.C:
+			for _, job := range s.tasks {
+				if time.Now().After(job.nextRun) {
+					s.handleJobWithMetrics(context.Background(), job.job)
+					job.nextRun = time.Now().Add(job.job.Interval)
+				}
+			}
+		}
+	}
+}
+
+// RunParallel run scheduler in parallel mode that spawn goroutine for each defined job.
+func (s *Scheduler) RunParallel() error {
+	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
+
+	group := sync.WaitGroup{}
+
+	for {
+		ctx, cancel := context.WithCancel(context.Background())
+
+		// spawn background workers
+		for _, job := range s.tasks {
+			group.Add(1)
+
+			go func() {
+				s.runJobInLoop(ctx, job.job)
+				group.Done()
+			}()
+		}
+
+		select {
+		case <-s.stop:
+			s.log.Debug().Msg("scheduler: stopping")
+			cancel()
+			group.Wait()
+			s.log.Debug().Msg("scheduler: stopped")
+
+			return nil
+
+		case cfg := <-s.newCfgCh:
+			s.log.Debug().Msg("scheduler: stopping workers for config reload")
+			cancel()
+			group.Wait()
+			s.log.Debug().Msg("scheduler: all workers stopped")
+			s.updateConfig(cfg)
+
+			continue
+		}
+	}
+}
+
+// Close scheduler.
+func (s *Scheduler) Close(err error) {
+	_ = err
+
+	log.Logger.Debug().Msg("scheduler: stopping")
+	close(s.stop)
+	close(s.newCfgCh)
+}
+
+// ReloadConf load new configuration.
+func (s *Scheduler) ReloadConf(cfg *conf.Configuration) {
+	s.newCfgCh <- cfg
+}
+
 // handleJobWithMetrics wrap handleJob to gather some metrics and log errors.
 func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	startTS := time.Now()
@@ -206,100 +300,6 @@ func (s *Scheduler) runJobInLoop(ctx context.Context, job conf.Job) {
 			interval = job.Interval
 		}
 	}
-}
-
-// Run scheduler process that get data for all defined jobs sequential.
-func (s *Scheduler) Run() error {
-	s.log.Debug().Msgf("scheduler: starting serial scheduler")
-
-	s.rescheduleTask()
-
-	timer := time.NewTimer(time.Second)
-	defer timer.Stop()
-
-	for {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-
-		timer.Reset(time.Second)
-
-		select {
-		case <-s.stop:
-			s.log.Debug().Msg("scheduler: stopped")
-
-			return nil
-
-		case cfg := <-s.newCfgCh:
-			s.updateConfig(cfg)
-			s.rescheduleTask()
-
-		case <-timer.C:
-			for _, job := range s.tasks {
-				if time.Now().After(job.nextRun) {
-					s.handleJobWithMetrics(context.Background(), job.job)
-					job.nextRun = time.Now().Add(job.job.Interval)
-				}
-			}
-		}
-	}
-}
-
-// RunParallel run scheduler in parallel mode that spawn goroutine for each defined job.
-func (s *Scheduler) RunParallel() error {
-	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
-
-	group := sync.WaitGroup{}
-
-	for {
-		ctx, cancel := context.WithCancel(context.Background())
-
-		// spawn background workers
-		for _, job := range s.tasks {
-			group.Add(1)
-
-			go func() {
-				s.runJobInLoop(ctx, job.job)
-				group.Done()
-			}()
-		}
-
-		select {
-		case <-s.stop:
-			s.log.Debug().Msg("scheduler: stopping")
-			cancel()
-			group.Wait()
-			s.log.Debug().Msg("scheduler: stopped")
-
-			return nil
-
-		case cfg := <-s.newCfgCh:
-			s.log.Debug().Msg("scheduler: stopping workers for config reload")
-			cancel()
-			group.Wait()
-			s.log.Debug().Msg("scheduler: all workers stopped")
-			s.updateConfig(cfg)
-
-			continue
-		}
-	}
-}
-
-// Close scheduler.
-func (s *Scheduler) Close(err error) {
-	_ = err
-
-	log.Logger.Debug().Msg("scheduler: stopping")
-	close(s.stop)
-	close(s.newCfgCh)
-}
-
-// ReloadConf load new configuration.
-func (s *Scheduler) ReloadConf(cfg *conf.Configuration) {
-	s.newCfgCh <- cfg
 }
 
 // updateConfig load new configuration (only valid entries).

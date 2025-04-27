@@ -75,45 +75,6 @@ outerloop:
 	return queries
 }
 
-func (c *Configuration) validate() error {
-	var errs *multierror.Error
-
-	if len(c.Database) == 0 {
-		errs = multierror.Append(errs, newConfigurationError("no database configured"))
-	}
-
-	if err := c.Global.validate(); err != nil {
-		errs = multierror.Append(errs, newConfigurationError("validate global settings error").Wrap(err))
-	}
-
-	if len(c.Query) == 0 {
-		errs = multierror.Append(errs, newConfigurationError("no query configured"))
-	}
-
-	for name, query := range c.Query {
-		if err := query.validate(); err != nil {
-			errs = multierror.Append(errs, newConfigurationError(
-				fmt.Sprintf("validate query '%s' error", name)).Wrap(err))
-		}
-	}
-
-	for name, db := range c.Database {
-		if err := db.validate(); err != nil {
-			errs = multierror.Append(errs, newConfigurationError(
-				fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
-		}
-	}
-
-	for i, job := range c.Jobs {
-		if err := job.validate(c); err != nil {
-			errs = multierror.Append(errs, newConfigurationError(
-				fmt.Sprintf("validate job %d error", i+1)).Wrap(err))
-		}
-	}
-
-	return errs.ErrorOrNil()
-}
-
 // LoadConfiguration from filename.
 func LoadConfiguration(filename string) (*Configuration, error) {
 	conf := &Configuration{
@@ -166,4 +127,43 @@ func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateO
 	if validateOutput != nil {
 		c.ValidateOutput = *validateOutput
 	}
+}
+
+func (c *Configuration) validate() error {
+	var errs *multierror.Error
+
+	if len(c.Database) == 0 {
+		errs = multierror.Append(errs, newConfigurationError("no database configured"))
+	}
+
+	if err := c.Global.validate(); err != nil {
+		errs = multierror.Append(errs, newConfigurationError("validate global settings error").Wrap(err))
+	}
+
+	if len(c.Query) == 0 {
+		errs = multierror.Append(errs, newConfigurationError("no query configured"))
+	}
+
+	for name, query := range c.Query {
+		if err := query.validate(); err != nil {
+			errs = multierror.Append(errs, newConfigurationError(
+				fmt.Sprintf("validate query '%s' error", name)).Wrap(err))
+		}
+	}
+
+	for name, db := range c.Database {
+		if err := db.validate(); err != nil {
+			errs = multierror.Append(errs, newConfigurationError(
+				fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
+		}
+	}
+
+	for i, job := range c.Jobs {
+		if err := job.validate(c); err != nil {
+			errs = multierror.Append(errs, newConfigurationError(
+				fmt.Sprintf("validate job %d error", i+1)).Wrap(err))
+		}
+	}
+
+	return errs.ErrorOrNil()
 }

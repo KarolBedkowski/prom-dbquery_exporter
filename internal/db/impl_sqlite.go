@@ -30,7 +30,7 @@ func newSqliteLoader(cfg *conf.Database) (*genericDatabase, error) {
 			vstr = fmt.Sprintf("%v", v)
 		}
 
-		if k == "database" {
+		if k == "database" { //nolint: goconst,nolintlint
 			dbname = vstr
 		} else {
 			params.Add(k, vstr)

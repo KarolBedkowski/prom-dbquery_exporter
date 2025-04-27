@@ -107,6 +107,85 @@ func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	q.queryResultCache.Clear()
 }
 
+func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) { //nolint:funlen
+	ctx := req.Context()
+	logger := log.Ctx(ctx)
+
+	queryNames := req.URL.Query()["query"]
+	dbNames := req.URL.Query()["database"]
+	requestID, _ := hlog.IDFromCtx(ctx)
+
+	support.SetGoroutineLabels(ctx, "requestID", requestID.String(), "req", req.URL.String())
+
+	// prevent to run the same request twice
+	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
+		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
+		support.TraceErrorf(ctx, "query locked by %s", locker)
+
+		return
+	}
+
+	defer q.queryLocker.unlock(req.URL.RawQuery)
+
+	for _, g := range req.URL.Query()["group"] {
+		q := q.configuration.GroupQueries(g)
+		if len(q) > 0 {
+			logger.Debug().Str("group", g).Interface("queries", q).Msg("queryhandler: add queries from group")
+			queryNames = append(queryNames, q...)
+		}
+	}
+
+	if len(queryNames) == 0 || len(dbNames) == 0 {
+		http.Error(writer, "missing required parameters", http.StatusBadRequest)
+		support.TraceErrorf(ctx, "bad request")
+
+		return
+	}
+
+	params := paramsFromQuery(req)
+	queryNames = deduplicateStringList(queryNames)
+	dbNames = deduplicateStringList(dbNames)
+
+	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+
+	if t := q.configuration.Global.RequestTimeout; t > 0 {
+		logger.Debug().Msgf("queryhandler: set request timeout %s", t)
+
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, t)
+
+		defer cancel()
+	}
+
+	successProcessed := 0
+	writeResult := func(data []byte) {
+		if _, err := writer.Write(data); err != nil {
+			logger.Error().Err(err).Msg("queryhandler: write error")
+			support.TraceErrorf(ctx, "write error: %s", err)
+			metrics.IncProcessErrorsCnt("write")
+		} else {
+			successProcessed++
+		}
+	}
+
+	support.TracePrintf(ctx, "start querying db")
+
+	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params, writeResult)
+
+	support.TracePrintf(ctx, "start reading data, scheduled: %d", scheduled)
+
+	q.writeResult(ctx, out, scheduled, writeResult)
+
+	logger.Debug().Int("successProcessed", successProcessed).
+		Err(ctx.Err()).
+		Msg("queryhandler: all database queries finished")
+
+	if successProcessed == 0 {
+		metrics.IncProcessErrorsCnt("bad_requests")
+		http.Error(writer, "error", http.StatusBadRequest)
+	}
+}
+
 func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, bool) {
 	if query.CachingTime > 0 && !q.configuration.DisableCache {
 		queryKey := query.Name + "@" + dbName
@@ -247,85 +326,6 @@ loop:
 	}
 
 	close(output)
-}
-
-func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) { //nolint:funlen
-	ctx := req.Context()
-	logger := log.Ctx(ctx)
-
-	queryNames := req.URL.Query()["query"]
-	dbNames := req.URL.Query()["database"]
-	requestID, _ := hlog.IDFromCtx(ctx)
-
-	support.SetGoroutineLabels(ctx, "requestID", requestID.String(), "req", req.URL.String())
-
-	// prevent to run the same request twice
-	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
-		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
-		support.TraceErrorf(ctx, "query locked by %s", locker)
-
-		return
-	}
-
-	defer q.queryLocker.unlock(req.URL.RawQuery)
-
-	for _, g := range req.URL.Query()["group"] {
-		q := q.configuration.GroupQueries(g)
-		if len(q) > 0 {
-			logger.Debug().Str("group", g).Interface("queries", q).Msg("queryhandler: add queries from group")
-			queryNames = append(queryNames, q...)
-		}
-	}
-
-	if len(queryNames) == 0 || len(dbNames) == 0 {
-		http.Error(writer, "missing required parameters", http.StatusBadRequest)
-		support.TraceErrorf(ctx, "bad request")
-
-		return
-	}
-
-	params := paramsFromQuery(req)
-	queryNames = deduplicateStringList(queryNames)
-	dbNames = deduplicateStringList(dbNames)
-
-	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
-
-	if t := q.configuration.Global.RequestTimeout; t > 0 {
-		logger.Debug().Msgf("queryhandler: set request timeout %s", t)
-
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, t)
-
-		defer cancel()
-	}
-
-	successProcessed := 0
-	writeResult := func(data []byte) {
-		if _, err := writer.Write(data); err != nil {
-			logger.Error().Err(err).Msg("queryhandler: write error")
-			support.TraceErrorf(ctx, "write error: %s", err)
-			metrics.IncProcessErrorsCnt("write")
-		} else {
-			successProcessed++
-		}
-	}
-
-	support.TracePrintf(ctx, "start querying db")
-
-	out, scheduled := q.queryDatabases(ctx, dbNames, queryNames, params, writeResult)
-
-	support.TracePrintf(ctx, "start reading data, scheduled: %d", scheduled)
-
-	q.writeResult(ctx, out, scheduled, writeResult)
-
-	logger.Debug().Int("successProcessed", successProcessed).
-		Err(ctx.Err()).
-		Msg("queryhandler: all database queries finished")
-
-	if successProcessed == 0 {
-		metrics.IncProcessErrorsCnt("bad_requests")
-		http.Error(writer, "error", http.StatusBadRequest)
-	}
 }
 
 func paramsFromQuery(req *http.Request) map[string]any {

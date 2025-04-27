@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	defaultMaxWorkers = 10
+	defaultMaxWorkers       = 10
+	defaultConnectioTimeout = 15 * time.Second
 )
 
 // PoolConfiguration configure database connection pool.
@@ -101,6 +102,38 @@ func (d *Database) MarshalZerologObject(event *zerolog.Event) {
 	event.Dict("connection", conn)
 }
 
+// CheckConnectionParam return true when all keys exists
+// and is not empty.
+func (d *Database) CheckConnectionParam(keys ...string) error {
+	var missing []string
+
+	for _, key := range keys {
+		val, ok := d.Connection[key]
+		if !ok {
+			missing = append(missing, key)
+		} else if val, ok := val.(string); ok {
+			if strings.TrimSpace(val) == "" {
+				missing = append(missing, key)
+			}
+		}
+	}
+
+	if len(missing) > 0 {
+		return MissingFieldError{strings.Join(missing, ", ")}
+	}
+
+	return nil
+}
+
+// GetConnectTimeout return connection timeout from configuration or default.
+func (d *Database) GetConnectTimeout() time.Duration {
+	if d.ConnectTimeout > 0 {
+		return d.ConnectTimeout
+	}
+
+	return defaultConnectioTimeout
+}
+
 func (d *Database) validatePG() error {
 	if d.CheckConnectionParam("connstr") == nil {
 		return nil
@@ -181,38 +214,4 @@ func (d *Database) validate() error {
 	err = multierror.Append(err, d.validateCommon())
 
 	return err.ErrorOrNil()
-}
-
-// CheckConnectionParam return true when all keys exists
-// and is not empty.
-func (d *Database) CheckConnectionParam(keys ...string) error {
-	var missing []string
-
-	for _, key := range keys {
-		val, ok := d.Connection[key]
-		if !ok {
-			missing = append(missing, key)
-		} else if val, ok := val.(string); ok {
-			if strings.TrimSpace(val) == "" {
-				missing = append(missing, key)
-			}
-		}
-	}
-
-	if len(missing) > 0 {
-		return MissingFieldError{strings.Join(missing, ", ")}
-	}
-
-	return nil
-}
-
-const defaultConnectioTimeout = 15 * time.Second
-
-// GetConnectTimeout return connection timeout from configuration or default.
-func (d *Database) GetConnectTimeout() time.Duration {
-	if d.ConnectTimeout > 0 {
-		return d.ConnectTimeout
-	}
-
-	return defaultConnectioTimeout
 }

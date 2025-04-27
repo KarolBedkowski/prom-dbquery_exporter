@@ -24,6 +24,14 @@ type Job struct {
 	Idx int `yaml:"-"`
 }
 
+// MarshalZerologObject implements LogObjectMarshaler.
+func (j *Job) MarshalZerologObject(event *zerolog.Event) {
+	event.Int("idx", j.Idx).
+		Str("query", j.Query).
+		Str("database", j.Database).
+		Dur("interval", j.Interval)
+}
+
 func (j *Job) validate(cfg *Configuration) error {
 	var errs *multierror.Error
 
@@ -46,12 +54,4 @@ func (j *Job) validate(cfg *Configuration) error {
 	}
 
 	return errs.ErrorOrNil()
-}
-
-// MarshalZerologObject implements LogObjectMarshaler.
-func (j *Job) MarshalZerologObject(event *zerolog.Event) {
-	event.Int("idx", j.Idx).
-		Str("query", j.Query).
-		Str("database", j.Database).
-		Dur("interval", j.Interval)
 }

@@ -33,26 +33,6 @@ func newCollectors() *Collectors {
 	}
 }
 
-func (cs *Collectors) createCollector(dbName string) (*collector, error) {
-	if cs.cfg == nil {
-		return nil, ErrAppNotConfigured
-	}
-
-	dconf, ok := cs.cfg.Database[dbName]
-	if !ok {
-		return nil, ErrUnknownDatabase
-	}
-
-	c, err := newCollector(dbName, dconf)
-	if err != nil {
-		return nil, fmt.Errorf("collectors: create dbloader error: %w", err)
-	}
-
-	cs.collectors[dbName] = c
-
-	return c, nil
-}
-
 // ScheduleTask schedule new task to process in this database.
 func (cs *Collectors) ScheduleTask(task *Task) error {
 	cs.Lock()
@@ -137,6 +117,26 @@ func (cs *Collectors) Close() {
 
 		_ = db.stop()
 	}
+}
+
+func (cs *Collectors) createCollector(dbName string) (*collector, error) {
+	if cs.cfg == nil {
+		return nil, ErrAppNotConfigured
+	}
+
+	dconf, ok := cs.cfg.Database[dbName]
+	if !ok {
+		return nil, ErrUnknownDatabase
+	}
+
+	c, err := newCollector(dbName, dconf)
+	if err != nil {
+		return nil, fmt.Errorf("collectors: create dbloader error: %w", err)
+	}
+
+	cs.collectors[dbName] = c
+
+	return c, nil
 }
 
 // collectorsLen return number or loaders in pool.

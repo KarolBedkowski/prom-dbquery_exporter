@@ -48,6 +48,98 @@ func (g *genericDatabase) Stats() *DatabaseStats {
 	return nil
 }
 
+// Query get data from database.
+func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
+) (*QueryResult, error) {
+	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger() //nolint:nilaway
+	ctx = llog.WithContext(ctx)
+	result := &QueryResult{Start: time.Now()}
+
+	support.TracePrintf(ctx, "db: opening connection")
+
+	conn, err := g.getConnection(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get connection error: %w", err)
+	}
+	defer conn.Close()
+
+	// prepare query parameters; combine parameters from query and params
+	queryParams := support.CloneMap(query.Params, params)
+	timeout := g.queryTimeout(query)
+
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", queryParams).
+		Msg("db: genericQuery start execute")
+
+	tx, err := conn.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx error: %w", err)
+	}
+
+	defer tx.Rollback() //nolint:errcheck
+
+	support.TracePrintf(ctx, "db: begin query %q", query.Name)
+
+	rows, err := tx.NamedQuery(query.SQL, queryParams)
+	if err != nil {
+		return nil, fmt.Errorf("execute query error: %w", err)
+	}
+
+	if e := llog.Debug(); e.Enabled() {
+		if cols, err := rows.Columns(); err == nil {
+			e.Interface("cols", cols).Msg("db: genericQuery columns")
+		} else {
+			return nil, fmt.Errorf("get columns error: %w", err)
+		}
+	}
+
+	result.Records, err = createRecords(rows)
+	if err != nil {
+		return nil, fmt.Errorf("create record error: %w", err)
+	}
+
+	result.Params = queryParams
+	result.Duration = time.Since(result.Start).Seconds()
+
+	return result, nil
+}
+
+// Close database connection.
+func (g *genericDatabase) Close(ctx context.Context) error {
+	// lock loader for write
+	g.lock.Lock()
+	defer g.lock.Unlock()
+
+	log.Ctx(ctx).Debug().Interface("conn", g.conn).
+		Str("db", g.dbConf.Name).Msg("db: genericQuery close conn")
+
+	if g.conn == nil {
+		return nil
+	}
+
+	err := g.conn.Close()
+	g.conn = nil
+
+	if err != nil {
+		return fmt.Errorf("close database errors: %w", err)
+	}
+
+	return nil
+}
+
+func (g *genericDatabase) UpdateConf(db *conf.Database) bool {
+	g.dbConf = db
+
+	return true
+}
+
+func (g *genericDatabase) String() string {
+	return fmt.Sprintf("genericLoader name='%s' driver='%s' connstr='%v' connected=%v",
+		g.dbConf.Name, g.driver, g.connStr, g.conn != nil)
+}
+
 func (g *genericDatabase) configureConnection(ctx context.Context) {
 	g.conn.SetConnMaxLifetime(defaultConnMaxLifetime)
 	g.conn.SetMaxOpenConns(defaultMaxOpenConns)
@@ -154,98 +246,6 @@ func (g *genericDatabase) executeInitialQuery(ctx context.Context, sql string, c
 	}
 
 	return nil
-}
-
-// Query get data from database.
-func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
-) (*QueryResult, error) {
-	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger() //nolint:nilaway
-	ctx = llog.WithContext(ctx)
-	result := &QueryResult{Start: time.Now()}
-
-	support.TracePrintf(ctx, "db: opening connection")
-
-	conn, err := g.getConnection(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("get connection error: %w", err)
-	}
-	defer conn.Close()
-
-	// prepare query parameters; combine parameters from query and params
-	queryParams := support.CloneMap(query.Params, params)
-	timeout := g.queryTimeout(query)
-
-	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", queryParams).
-		Msg("db: genericQuery start execute")
-
-	tx, err := conn.BeginTxx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx error: %w", err)
-	}
-
-	defer tx.Rollback() //nolint:errcheck
-
-	support.TracePrintf(ctx, "db: begin query %q", query.Name)
-
-	rows, err := tx.NamedQuery(query.SQL, queryParams)
-	if err != nil {
-		return nil, fmt.Errorf("execute query error: %w", err)
-	}
-
-	if e := llog.Debug(); e.Enabled() {
-		if cols, err := rows.Columns(); err == nil {
-			e.Interface("cols", cols).Msg("db: genericQuery columns")
-		} else {
-			return nil, fmt.Errorf("get columns error: %w", err)
-		}
-	}
-
-	result.Records, err = createRecords(rows)
-	if err != nil {
-		return nil, fmt.Errorf("create record error: %w", err)
-	}
-
-	result.Params = queryParams
-	result.Duration = time.Since(result.Start).Seconds()
-
-	return result, nil
-}
-
-// Close database connection.
-func (g *genericDatabase) Close(ctx context.Context) error {
-	// lock loader for write
-	g.lock.Lock()
-	defer g.lock.Unlock()
-
-	log.Ctx(ctx).Debug().Interface("conn", g.conn).
-		Str("db", g.dbConf.Name).Msg("db: genericQuery close conn")
-
-	if g.conn == nil {
-		return nil
-	}
-
-	err := g.conn.Close()
-	g.conn = nil
-
-	if err != nil {
-		return fmt.Errorf("close database errors: %w", err)
-	}
-
-	return nil
-}
-
-func (g *genericDatabase) UpdateConf(db *conf.Database) bool {
-	g.dbConf = db
-
-	return true
-}
-
-func (g *genericDatabase) String() string {
-	return fmt.Sprintf("genericLoader name='%s' driver='%s' connstr='%v' connected=%v",
-		g.dbConf.Name, g.driver, g.connStr, g.conn != nil)
 }
 
 func (g *genericDatabase) queryTimeout(q *conf.Query) time.Duration {
