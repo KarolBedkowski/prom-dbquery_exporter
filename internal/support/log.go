@@ -36,18 +36,9 @@ func InitializeLogger(level string, format string) {
 		llog = log.Logger
 	}
 
-	switch level {
-	case "debug":
-		zerolog.SetGlobalLevel(zerolog.DebugLevel)
-	case "info":
-		zerolog.SetGlobalLevel(zerolog.InfoLevel)
-	case "warn":
-		zerolog.SetGlobalLevel(zerolog.WarnLevel)
-	case "error":
-		zerolog.SetGlobalLevel(zerolog.ErrorLevel)
-	case "fatal":
-		zerolog.SetGlobalLevel(zerolog.FatalLevel)
-	default:
+	if l, err := zerolog.ParseLevel(level); err == nil {
+		zerolog.SetGlobalLevel(l)
+	} else {
 		log.Error().Msgf("logger: unknown log level '%s'; using debug", level)
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
