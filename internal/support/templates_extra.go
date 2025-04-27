@@ -49,7 +49,7 @@ func (r *reflectBucketGenerator[T]) generate(input any, valueKey string) []map[s
 	allCnt := 0
 	vk := reflect.ValueOf(valueKey)
 
-	for i := 0; i < inp.Len(); i++ {
+	for i := range inp.Len() {
 		rec := inp.Index(i)
 		val := rec.MapIndex(vk).Interface()
 
@@ -132,7 +132,11 @@ func bucketsInt(input any, valueKey string, buckets ...int) []map[string]any {
 			case uint32:
 				value = int(val)
 			case uint64:
-				value = int(val)
+				if val < uint64(math.MaxInt) {
+					value = int(val)
+				} else {
+					value = math.MaxInt
+				}
 			case int32:
 				value = int(val)
 			case int64:

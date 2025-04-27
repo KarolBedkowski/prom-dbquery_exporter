@@ -12,8 +12,8 @@ import (
 	"net/url"
 	"strings"
 
+	// import go-sqlite package only when sqlite tag is enabled.
 	_ "github.com/glebarez/go-sqlite"
-
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
@@ -30,7 +30,7 @@ func newSqliteLoader(cfg *conf.Database) (*genericDatabase, error) {
 			vstr = fmt.Sprintf("%v", v)
 		}
 
-		if k == "database" { //nolint:goconst
+		if k == "database" {
 			dbname = vstr
 		} else {
 			params.Add(k, vstr)

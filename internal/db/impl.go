@@ -12,7 +12,7 @@ import (
 	"net/url"
 )
 
-type standardParams struct { //nolint: unused
+type standardParams struct {
 	params url.Values
 	dbname string
 	user   string
@@ -21,14 +21,14 @@ type standardParams struct { //nolint: unused
 	port   string
 }
 
-func newStandardParams(cfg map[string]any) *standardParams { //nolint: unused
+func newStandardParams(cfg map[string]any) *standardParams {
 	s := &standardParams{}
 	s.load(cfg)
 
 	return s
 }
 
-func (s *standardParams) load(cfg map[string]any) { //nolint: unused
+func (s *standardParams) load(cfg map[string]any) {
 	for key, val := range cfg {
 		vstr := ""
 		if val != nil {
@@ -36,7 +36,7 @@ func (s *standardParams) load(cfg map[string]any) { //nolint: unused
 		}
 
 		switch key {
-		case "database":
+		case "database": //nolint: goconst
 			s.dbname = url.PathEscape(vstr)
 		case "host":
 			s.host = url.PathEscape(vstr)

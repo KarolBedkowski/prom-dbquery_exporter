@@ -11,8 +11,8 @@ import (
 	"fmt"
 	"strings"
 
+	// import pg package only when pg tag is enabled.
 	_ "github.com/lib/pq"
-
 	"prom-dbquery_exporter.app/internal/conf"
 )
 

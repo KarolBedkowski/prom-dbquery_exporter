@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/url"
 
+	// import go-mssqldb only when mssql tag is enabled.
 	_ "github.com/denisenkom/go-mssqldb"
 	"prom-dbquery_exporter.app/internal/conf"
 )

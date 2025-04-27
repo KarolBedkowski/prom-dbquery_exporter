@@ -65,7 +65,7 @@ lint:
 
 .PHONY: format
 format:
-	find internal cli -type d -exec wsl -fix ./{} ';'
+	# find internal cli -type d -exec wsl -fix prom-dbquery_exporter.app/{} ';'
 	find . -name '*.go' -type f -exec gofumpt -w {} ';'
 
 .PHONY: test

@@ -10,6 +10,7 @@ package db
 import (
 	"strings"
 
+	// import mysql package only when mysql tag is enabled.
 	_ "github.com/go-sql-driver/mysql"
 	"prom-dbquery_exporter.app/internal/conf"
 )

@@ -9,6 +9,16 @@ linters:
     # depricated
     - exhaustruct
     - tenv
+    - contextcheck
+
+run:
+  build-tags:
+    - pg
+    - mssql
+    - oracle
+    - mysql
+    - sqlite
+    - tmpl_extra_func
 
 linters-settings:
   wrapcheck:

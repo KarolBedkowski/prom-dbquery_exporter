@@ -10,8 +10,8 @@ package db
 import (
 	"strings"
 
+	// import go-ora package only when oracle tag is enabled.
 	_ "github.com/sijms/go-ora/v2"
-
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
