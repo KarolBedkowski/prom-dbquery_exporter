@@ -30,7 +30,7 @@ func CreateLoader(cfg *conf.Database) (Database, error) {
 		return newMssqlLoader(cfg)
 	}
 
-	return nil, InvalidConfigrationError(fmt.Sprintf("unsupported database type '%s'", cfg.Driver))
+	return nil, InvalidConfigurationError(fmt.Sprintf("unsupported database type '%s'", cfg.Driver))
 }
 
 // Database load data from database.

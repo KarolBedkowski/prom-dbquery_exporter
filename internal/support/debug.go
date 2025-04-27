@@ -16,7 +16,7 @@ import (
 	"net/http"
 	"runtime/pprof"
 
-	// setup pprof endpont
+	// setup pprof endpoint
 	_ "net/http/pprof"
 
 	"github.com/rs/zerolog/hlog"

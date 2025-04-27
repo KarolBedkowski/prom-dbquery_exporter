@@ -30,14 +30,6 @@ type Task struct {
 	IsScheduledJob bool
 }
 
-func (d *Task) newResult(err error, result []byte) *TaskResult {
-	return &TaskResult{
-		Error:  err,
-		Result: result,
-		Task:   d,
-	}
-}
-
 // MarshalZerologObject implements LogObjectMarshaler.
 func (d *Task) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("db", d.DBName).
@@ -49,6 +41,14 @@ func (d *Task) MarshalZerologObject(e *zerolog.Event) {
 		if rid, ok := hlog.IDFromCtx(d.Ctx); ok {
 			e.Str("req_id", rid.String())
 		}
+	}
+}
+
+func (d *Task) newResult(err error, result []byte) *TaskResult {
+	return &TaskResult{
+		Error:  err,
+		Result: result,
+		Task:   d,
 	}
 }
 

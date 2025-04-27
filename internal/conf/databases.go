@@ -11,12 +11,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 )
 
 const (
-	defaultMaxWorkers = 10
+	defaultMaxWorkers       = 10
+	defaultConnectioTimeout = 15 * time.Second
 )
 
 // PoolConfiguration configure database connection pool.
@@ -27,23 +29,25 @@ type PoolConfiguration struct {
 }
 
 func (p *PoolConfiguration) validate() error {
+	var err *multierror.Error
+
 	if p.MaxConnections < 0 {
-		return NewInvalidFieldError("max_connections", p.MaxConnections)
+		err = multierror.Append(err, NewInvalidFieldError("max_connections", p.MaxConnections))
 	}
 
 	if p.MaxIdleConnections < 0 {
-		return NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections)
+		err = multierror.Append(err, NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections))
 	}
 
 	if p.ConnMaxLifeTime < 0 {
-		return NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections)
+		err = multierror.Append(err, NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections))
 	}
 
 	if p.ConnMaxLifeTime.Seconds() < 1 && p.ConnMaxLifeTime > 0 {
-		log.Logger.Warn().Msgf("pool configuration conn_max_life_time < 1s: %v", p.ConnMaxLifeTime)
+		log.Logger.Warn().Msgf("configuration: pool configuration conn_max_life_time < 1s: %v", p.ConnMaxLifeTime)
 	}
 
-	return nil
+	return err.ErrorOrNil()
 }
 
 // Database define database connection.
@@ -98,85 +102,6 @@ func (d *Database) MarshalZerologObject(event *zerolog.Event) {
 	event.Dict("connection", conn)
 }
 
-func (d *Database) validatePG() error {
-	if d.CheckConnectionParam("connstr") == nil {
-		return nil
-	}
-
-	if err := d.CheckConnectionParam("database"); err != nil {
-		if err := d.CheckConnectionParam("dbname"); err != nil {
-			return MissingFieldError{"'database' or 'dbname'"}
-		}
-	}
-
-	if err := d.CheckConnectionParam("user"); err != nil {
-		return err
-	}
-
-	d.MaxWorkers = defaultMaxWorkers
-
-	if d.Pool != nil {
-		if d.Pool.MaxIdleConnections > 0 {
-			d.MaxWorkers = d.Pool.MaxConnections
-		}
-
-		if d.BackgroundWorkers >= d.MaxWorkers {
-			log.Logger.Warn().Msg("number of background workers must be lower than max_connections; disabling background jobs")
-
-			d.BackgroundWorkers = 0
-		} else {
-			d.MaxWorkers -= d.BackgroundWorkers
-		}
-	}
-
-	return nil
-}
-
-func (d *Database) validateCommon() error {
-	if port, ok := d.Connection["port"]; ok {
-		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
-			return NewInvalidFieldError("port", port)
-		}
-	}
-
-	return nil
-}
-
-func (d *Database) validate() error {
-	var err error
-
-	switch d.Driver {
-	case "":
-		err = MissingFieldError{"driver"}
-	case "postgresql", "postgres", "cockroach", "cockroachdb":
-		err = d.validatePG()
-	case "mysql", "mariadb", "tidb", "oracle", "oci8":
-		err = d.CheckConnectionParam("database", "host", "port", "user", "password")
-	case "sqlite3", "sqlite", "mssql":
-		err = d.CheckConnectionParam("database")
-	default:
-		err = NewInvalidFieldError("database", "d.Driver").WithMsg("unknown database")
-	}
-
-	if err == nil && d.Pool != nil {
-		err = d.Pool.validate()
-	}
-
-	if err == nil {
-		err = d.validateCommon()
-	}
-
-	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
-		log.Logger.Warn().Msgf("database %v: timeout < 1s: %s", d.Name, d.Timeout)
-	}
-
-	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
-		log.Logger.Warn().Msgf("database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
-	}
-
-	return err
-}
-
 // CheckConnectionParam return true when all keys exists
 // and is not empty.
 func (d *Database) CheckConnectionParam(keys ...string) error {
@@ -200,8 +125,6 @@ func (d *Database) CheckConnectionParam(keys ...string) error {
 	return nil
 }
 
-const defaultConnectioTimeout = 15 * time.Second
-
 // GetConnectTimeout return connection timeout from configuration or default.
 func (d *Database) GetConnectTimeout() time.Duration {
 	if d.ConnectTimeout > 0 {
@@ -209,4 +132,86 @@ func (d *Database) GetConnectTimeout() time.Duration {
 	}
 
 	return defaultConnectioTimeout
+}
+
+func (d *Database) validatePG() error {
+	if d.CheckConnectionParam("connstr") == nil {
+		return nil
+	}
+
+	var errs *multierror.Error
+
+	if err := d.CheckConnectionParam("database"); err != nil {
+		if err := d.CheckConnectionParam("dbname"); err != nil {
+			errs = multierror.Append(errs, MissingFieldError{"'database' or 'dbname'"})
+		}
+	}
+
+	if err := d.CheckConnectionParam("user"); err != nil {
+		errs = multierror.Append(errs, err)
+	}
+
+	d.MaxWorkers = defaultMaxWorkers
+
+	if d.Pool != nil {
+		if d.Pool.MaxIdleConnections > 0 {
+			d.MaxWorkers = d.Pool.MaxConnections
+		}
+
+		if d.BackgroundWorkers >= d.MaxWorkers {
+			log.Logger.Warn().
+				Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
+
+			d.BackgroundWorkers = 0
+		} else {
+			d.MaxWorkers -= d.BackgroundWorkers
+		}
+	}
+
+	return errs.ErrorOrNil()
+}
+
+func (d *Database) validateCommon() error {
+	var errs *multierror.Error
+
+	if port, ok := d.Connection["port"]; ok {
+		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
+			errs = multierror.Append(errs, NewInvalidFieldError("port", port))
+		}
+	}
+
+	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
+		log.Logger.Warn().Msgf("configuration: database %v: timeout < 1s: %s", d.Name, d.Timeout)
+	}
+
+	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
+		log.Logger.Warn().Msgf("configuration: database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
+	}
+
+	return errs.ErrorOrNil()
+}
+
+func (d *Database) validate() error {
+	var err *multierror.Error
+
+	switch d.Driver {
+	case "":
+		return MissingFieldError{"driver"}
+	case "postgresql", "postgres", "cockroach", "cockroachdb":
+		err = multierror.Append(err, d.validatePG())
+	case "mysql", "mariadb", "tidb", "oracle", "oci8":
+		err = multierror.Append(err, d.CheckConnectionParam("database", "host", "port", "user", "password"))
+	case "sqlite3", "sqlite", "mssql":
+		err = multierror.Append(err, d.CheckConnectionParam("database"))
+	default:
+		return NewInvalidFieldError("database", d.Driver).WithMsg("unknown database")
+	}
+
+	if d.Pool != nil {
+		err = multierror.Append(err, d.Pool.validate())
+	}
+
+	err = multierror.Append(err, d.validateCommon())
+
+	return err.ErrorOrNil()
 }

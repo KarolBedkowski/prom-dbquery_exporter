@@ -147,7 +147,7 @@ func IncQueryCacheMiss(name string) {
 	queryCacheMiss.WithLabelValues(name).Inc()
 }
 
-// NewReqDurationWraper create new ObserverVec for InstrumentHandlerDuration.
-func NewReqDurationWraper(handler string) prometheus.ObserverVec {
+// NewReqDurationWrapper create new ObserverVec for InstrumentHandlerDuration.
+func NewReqDurationWrapper(handler string) prometheus.ObserverVec {
 	return reqDuration.MustCurryWith(prometheus.Labels{"handler": handler})
 }

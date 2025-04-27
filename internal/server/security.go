@@ -28,7 +28,7 @@ import (
 )
 
 func serveHTTP(server *http.Server, listener net.Listener) error {
-	log.Logger.Info().Msg("TLS is disabled.")
+	log.Logger.Info().Msg("sechandler: TLS is disabled.")
 
 	if err := server.Serve(listener); err != nil {
 		return fmt.Errorf("server error: %w", err)
@@ -68,7 +68,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 			server.TLSNextProto = make(map[string]func(*http.Server, *tls.Conn, http.Handler))
 		}
 		// Valid TLS config.
-		log.Logger.Info().Msg("TLS is enabled.")
+		log.Logger.Info().Msg("sechandler: TLS is enabled.")
 	} else {
 		return serveHTTP(server, listener)
 	}
@@ -146,9 +146,9 @@ type secWebHandler struct {
 
 func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 	if cu := len(conf.Users); cu > 0 {
-		log.Logger.Info().Int("users", cu).Msg("Authorization enabled")
+		log.Logger.Info().Int("users", cu).Msg("sechandler: authorization enabled")
 	} else {
-		log.Logger.Info().Msg("Authorization disabled")
+		log.Logger.Info().Msg("sechandler: authorization disabled")
 	}
 
 	return &secWebHandler{

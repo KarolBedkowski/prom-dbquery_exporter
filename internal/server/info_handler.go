@@ -89,7 +89,7 @@ func newInfoHandler(conf *conf.Configuration) *infoHandler {
 func (q *infoHandler) Handler() http.Handler {
 	h := newLogMiddleware(
 		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWraper("info"),
+			metrics.NewReqDurationWrapper("info"),
 			q), "info", false)
 
 	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
@@ -108,6 +108,6 @@ func (q *infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	if err := q.tmpl.Execute(w, q.Configuration); err != nil {
-		log.Logger.Error().Err(err).Msg("executing template error")
+		log.Logger.Error().Err(err).Msg("infohandler: executing template error")
 	}
 }

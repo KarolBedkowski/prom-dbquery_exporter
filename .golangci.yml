@@ -1,58 +1,70 @@
+version: "2"
+run:
+  build-tags:
+    - pg
+    - mssql
+    - oracle
+    - mysql
+    - sqlite
+    - tmpl_extra_func
 linters:
-  enable-all: true
+  default: all
   disable:
+    - contextcheck
     - depguard
-    - tagliatelle
-    #- ireturn
+    - exhaustruct
     - gochecknoglobals
     - gochecknoinits
-    # depricated
-    - exhaustruct
-    - tenv
-
-linters-settings:
-  wrapcheck:
-    # An array of strings that specify substrings of signatures to ignore.
-    # If this set, it will override the default set of ignored signatures.
-    # See https://github.com/tomarrell/wrapcheck#configuration for more information.
-    # Default: [".Errorf(", "errors.New(", "errors.Unwrap(", ".Wrap(", ".Wrapf(", ".WithMessage(", ".WithMessagef(", ".WithStack("]
-    ignoreSigs:
-      - .Errorf(
-      - errors.New(
-      - errors.Unwrap(
-      - .Wrap(
-      - .Wrapf(
-      - .WithMessage(
-      - .WithMessagef(
-      - .WithStack(
-      - multierror.Append(
-
-  varnamelen:
-    # The longest distance, in source lines, that is being considered a "small scope".
-    # Variables used in at most this many lines will be ignored.
-    # Default: 5
-    max-distance: 12
-    ignore-decls:
-      - t testing.T
-      - T any
-      - tr trace.Trace
-
-  ireturn:
-    # ireturn does not allow using `allow` and `reject` settings at the same time.
-    # Both settings are lists of the keywords and regular expressions matched to interface or package names.
-    # keywords:
-    # - `empty` for `interface{}`
-    # - `error` for errors
-    # - `stdlib` for standard library
-    # - `anon` for anonymous interfaces
-    # - `generic` for generic interfaces added in go 1.18
-
-    # By default, it allows using errors, empty interfaces, anonymous interfaces,
-    # and interfaces provided by the standard library.
-    allow:
-      - anon
-      - error
-      - empty
-      - stdlib
-      - Database
-      - ObserverVec
+    - tagliatelle
+    - testpackage
+  settings:
+    ireturn:
+      allow:
+        - anon
+        - error
+        - empty
+        - stdlib
+        - Database
+        - ObserverVec
+        - generic
+    varnamelen:
+      max-distance: 12
+      ignore-decls:
+        - t testing.T
+        - T any
+        - tr trace.Trace
+    wrapcheck:
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithMessagef(
+        - .WithStack(
+        - multierror.Append(
+        - .ErrorOrNil()
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

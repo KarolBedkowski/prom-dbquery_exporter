@@ -70,7 +70,7 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 
 		llog.WithLevel(level).
 			Strs("agent", request.Header["User-Agent"]).
-			Msg("request start")
+			Msg("webhandler: request start")
 
 		responseData := &responseData{
 			status: 0,
@@ -94,7 +94,7 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 			Int("status", responseData.status).
 			Int("size", responseData.size).
 			Dur("duration", duration).
-			Msg("request finished")
+			Msg("webhandler: request finished")
 	}
 
 	return http.HandlerFunc(logFn)

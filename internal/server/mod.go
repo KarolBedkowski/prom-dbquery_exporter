@@ -27,7 +27,7 @@ const (
 	defaultShutdownTimeout = time.Duration(10) * time.Second
 )
 
-// WebHandler handle incomming requests.
+// WebHandler handle incoming requests.
 type WebHandler struct {
 	handler       *queryHandler
 	infoHandler   *infoHandler
@@ -38,10 +38,9 @@ type WebHandler struct {
 }
 
 // NewWebHandler create new WebHandler.
-func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string,
-	disableCache bool, validateOutput bool, cache *support.Cache[[]byte],
+func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string, cache *support.Cache[[]byte],
 ) *WebHandler {
-	qh := newQueryHandler(cfg, disableCache, validateOutput, cache)
+	qh := newQueryHandler(cfg, cache)
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)
@@ -76,7 +75,7 @@ func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig stri
 
 // Run webhandler.
 func (w *WebHandler) Run() error {
-	log.Logger.Info().Msgf("Listening on %s", w.listenAddress)
+	log.Logger.Info().Msgf("webhandler: listening on %s", w.listenAddress)
 
 	rwTimeout := defaultRwTimeout
 	if w.cfg.Global.RequestTimeout > 0 {
@@ -101,7 +100,7 @@ func (w *WebHandler) Run() error {
 func (w *WebHandler) Close(err error) {
 	_ = err
 
-	log.Logger.Debug().Msg("web handler close")
+	log.Logger.Debug().Msg("webhandler: closing")
 
 	ctx, cancel := context.WithTimeout(context.Background(), defaultShutdownTimeout)
 	defer cancel()

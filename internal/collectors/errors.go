@@ -7,18 +7,18 @@ package collectors
 
 import "errors"
 
-// InvalidConfigrationError is error generated when database configuration is invalid.
-type InvalidConfigrationError string
+// InvalidConfigurationError is error generated when database configuration is invalid.
+type InvalidConfigurationError string
 
-func (i InvalidConfigrationError) Error() string {
+func (i InvalidConfigurationError) Error() string {
 	return string(i)
 }
 
 var (
-	// ErrUnknownDatabase is generated when unknown database is requestes.
-	ErrUnknownDatabase = InvalidConfigrationError("unknown database")
+	// ErrUnknownDatabase is generated when unknown database is requests.
+	ErrUnknownDatabase = InvalidConfigurationError("unknown database")
 	// ErrLoaderStopped is generated on request to closed loader.
-	ErrLoaderStopped = InvalidConfigrationError("loader stopped")
+	ErrLoaderStopped = InvalidConfigurationError("loader stopped")
 	// ErrAppNotConfigured is returned when there is application is not configured yet.
 	ErrAppNotConfigured = errors.New("app not configured")
 )

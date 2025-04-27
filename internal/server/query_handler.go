@@ -8,6 +8,7 @@ package server
 //
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
@@ -54,7 +56,7 @@ func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
 			return li.String(), false
 		}
 
-		log.Logger.Warn().Str("reqID", li.key).Msgf("lock after maxLockTime, since %s", li.ts)
+		log.Logger.Warn().Str("reqID", li.key).Msgf("queryhandler: lock after maxLockTime, since %s", li.ts)
 	}
 
 	l.runningQuery[queryKey] = lockInfo{key: reqID, ts: time.Now()}
@@ -74,27 +76,21 @@ type queryHandler struct {
 	configuration    *conf.Configuration
 	queryResultCache *support.Cache[[]byte]
 	// runningQuery lock the same request for running twice
-	queryLocker           locker
-	disableCache          bool
-	validateOutputEnabled bool
+	queryLocker locker
 }
 
-func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bool,
-	cache *support.Cache[[]byte],
-) *queryHandler {
+func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte]) *queryHandler {
 	return &queryHandler{
-		configuration:         c,
-		queryLocker:           newLocker(),
-		disableCache:          disableCache,
-		validateOutputEnabled: validateOutput,
-		queryResultCache:      cache,
+		configuration:    c,
+		queryLocker:      newLocker(),
+		queryResultCache: cache,
 	}
 }
 
 func (q *queryHandler) Handler() http.Handler {
 	h := newLogMiddleware(
 		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWraper("query"),
+			metrics.NewReqDurationWrapper("query"),
 			q), "query", false)
 
 	h = support.NewTraceMiddleware("dbquery_exporter")(h)
@@ -109,130 +105,6 @@ func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
 	q.configuration = c
 
 	q.queryResultCache.Clear()
-}
-
-func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, bool) {
-	if query.CachingTime > 0 && !q.disableCache {
-		queryKey := query.Name + "@" + dbName
-		if data, ok := q.queryResultCache.Get(queryKey); ok {
-			return data, ok
-		}
-	}
-
-	return nil, false
-}
-
-func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byte) {
-	if query.CachingTime > 0 && !q.disableCache {
-		queryKey := query.Name + "@" + dbName
-
-		q.queryResultCache.Put(queryKey, query.CachingTime, data)
-	}
-}
-
-func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]any, writer func([]byte),
-) (chan *collectors.TaskResult, int) {
-	logger := zerolog.Ctx(ctx)
-	logger.Debug().Msg("database processing start")
-
-	output := make(chan *collectors.TaskResult, len(dbNames)*len(queryNames))
-
-	scheduled := 0
-	now := time.Now()
-
-	for _, dbName := range dbNames {
-		for _, queryName := range queryNames {
-			query, ok := (q.configuration.Query)[queryName]
-			if !ok {
-				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("unknown query")
-
-				continue
-			}
-
-			metrics.IncQueryTotalCnt(queryName, dbName)
-
-			if data, ok := q.getFromCache(query, dbName); ok {
-				logger.Debug().Str("dbname", dbName).Str("query", queryName).Msg("query result from cache")
-				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
-				writer(data)
-
-				continue
-			}
-
-			task := collectors.Task{
-				Ctx:          ctx,
-				DBName:       dbName,
-				QueryName:    queryName,
-				Params:       params,
-				Output:       output,
-				Query:        query,
-				RequestStart: now,
-			}
-
-			logger.Debug().Object("task", &task).Msg("schedule task")
-
-			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil { //nolint: contextcheck
-				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
-				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
-					Msg("start task error")
-			} else {
-				support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
-
-				scheduled++
-			}
-		}
-	}
-
-	return output, scheduled
-}
-
-func (q *queryHandler) writeResult(ctx context.Context, output chan *collectors.TaskResult, scheduled int,
-	writer func([]byte),
-) {
-	logger := log.Ctx(ctx)
-	logger.Debug().Msgf("write result start; waiting for %d results", scheduled)
-
-loop:
-	for scheduled > 0 {
-		select {
-		case res := <-output:
-			scheduled--
-
-			task := res.Task
-
-			if res.Error != nil {
-				logger.Error().Err(res.Error).Object("task", task).Msg("processing query error")
-				support.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
-
-				msg := fmt.Sprintf("# query %q in %q processing error: %q\n",
-					res.Task.QueryName, res.Task.DBName, res.Error.Error())
-				writer([]byte(msg))
-
-				continue
-			}
-
-			logger.Debug().Object("res", res).Msg("write result")
-			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
-
-			writer(res.Result)
-
-			// do not cache query with user params
-			if task.Query != nil && len(task.Params) == 0 {
-				q.putIntoCache(task.Query, task.DBName, res.Result)
-			}
-
-		case <-ctx.Done():
-			err := ctx.Err()
-			logger.Error().Err(err).Msg("result error")
-			metrics.IncProcessErrorsCnt("cancel")
-			support.TraceErrorf(ctx, "result error: %s", err)
-
-			break loop
-		}
-	}
-
-	close(output)
 }
 
 func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) { //nolint:funlen
@@ -258,7 +130,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	for _, g := range req.URL.Query()["group"] {
 		q := q.configuration.GroupQueries(g)
 		if len(q) > 0 {
-			logger.Debug().Str("group", g).Interface("queries", q).Msg("add queries from group")
+			logger.Debug().Str("group", g).Interface("queries", q).Msg("queryhandler: add queries from group")
 			queryNames = append(queryNames, q...)
 		}
 	}
@@ -277,7 +149,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	if t := q.configuration.Global.RequestTimeout; t > 0 {
-		logger.Debug().Msgf("set request timeout %s", t)
+		logger.Debug().Msgf("queryhandler: set request timeout %s", t)
 
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, t)
@@ -288,7 +160,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	successProcessed := 0
 	writeResult := func(data []byte) {
 		if _, err := writer.Write(data); err != nil {
-			logger.Error().Err(err).Msg("write error")
+			logger.Error().Err(err).Msg("queryhandler: write error")
 			support.TraceErrorf(ctx, "write error: %s", err)
 			metrics.IncProcessErrorsCnt("write")
 		} else {
@@ -306,12 +178,154 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 	logger.Debug().Int("successProcessed", successProcessed).
 		Err(ctx.Err()).
-		Msg("all database queries finished")
+		Msg("queryhandler: all database queries finished")
 
 	if successProcessed == 0 {
 		metrics.IncProcessErrorsCnt("bad_requests")
 		http.Error(writer, "error", http.StatusBadRequest)
 	}
+}
+
+func (q *queryHandler) getFromCache(query *conf.Query, dbName string) ([]byte, bool) {
+	if query.CachingTime > 0 && !q.configuration.DisableCache {
+		queryKey := query.Name + "@" + dbName
+		if data, ok := q.queryResultCache.Get(queryKey); ok {
+			return data, ok
+		}
+	}
+
+	return nil, false
+}
+
+func (q *queryHandler) putIntoCache(query *conf.Query, dbName string, data []byte) {
+	if query.CachingTime > 0 && !q.configuration.DisableCache {
+		queryKey := query.Name + "@" + dbName
+
+		q.queryResultCache.Put(queryKey, query.CachingTime, data)
+	}
+}
+
+func (q *queryHandler) validateOutput(output []byte) error {
+	if q.configuration.ValidateOutput {
+		var parser expfmt.TextParser
+		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
+			return fmt.Errorf("validate result error: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
+	queryNames []string, params map[string]any, writer func([]byte),
+) (chan *collectors.TaskResult, int) {
+	logger := zerolog.Ctx(ctx)
+	logger.Debug().Msg("queryhandler: database processing start")
+
+	output := make(chan *collectors.TaskResult, len(dbNames)*len(queryNames))
+
+	scheduled := 0
+	now := time.Now()
+
+	for _, dbName := range dbNames {
+		for _, queryName := range queryNames {
+			query, ok := (q.configuration.Query)[queryName]
+			if !ok {
+				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("queryhandler: unknown query")
+
+				continue
+			}
+
+			metrics.IncQueryTotalCnt(queryName, dbName)
+
+			if data, ok := q.getFromCache(query, dbName); ok {
+				logger.Debug().Str("dbname", dbName).Str("query", queryName).Msg("queryhandler: query result from cache")
+				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
+				writer(data)
+
+				continue
+			}
+
+			task := collectors.Task{
+				Ctx:          ctx,
+				DBName:       dbName,
+				QueryName:    queryName,
+				Params:       params,
+				Output:       output,
+				Query:        query,
+				RequestStart: now,
+			}
+
+			logger.Debug().Object("task", &task).Msg("queryhandler: schedule task")
+
+			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
+				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
+				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
+					Msg("queryhandler: start task error")
+			} else {
+				support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
+
+				scheduled++
+			}
+		}
+	}
+
+	return output, scheduled
+}
+
+func (q *queryHandler) writeResult(ctx context.Context, output chan *collectors.TaskResult, scheduled int,
+	writer func([]byte),
+) {
+	logger := log.Ctx(ctx)
+	logger.Debug().Msgf("queryhandler: write result start; waiting for %d results", scheduled)
+
+loop:
+	for scheduled > 0 {
+		select {
+		case res := <-output:
+			scheduled--
+
+			task := res.Task
+
+			if res.Error != nil {
+				logger.Error().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
+				support.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
+
+				msg := fmt.Sprintf("# query %q in %q processing error: %q\n",
+					res.Task.QueryName, res.Task.DBName, res.Error.Error())
+				writer([]byte(msg))
+
+				continue
+			}
+
+			logger.Debug().Object("res", res).Msg("queryhandler: write result")
+			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
+
+			if err := q.validateOutput(res.Result); err != nil {
+				logger.Error().Err(err).Object("task", task).Msg("queryhandler: validate output error")
+				support.TracePrintf(ctx, "validate result of query %q from %q: %v", task.QueryName, task.DBName, err)
+
+				continue
+			}
+
+			writer(res.Result)
+
+			// do not cache query with user params
+			if task.Query != nil && len(task.Params) == 0 {
+				q.putIntoCache(task.Query, task.DBName, res.Result)
+			}
+
+		case <-ctx.Done():
+			err := ctx.Err()
+			logger.Error().Err(err).Msg("queryhandler: result error")
+			metrics.IncProcessErrorsCnt("cancel")
+			support.TraceErrorf(ctx, "result error: %s", err)
+
+			break loop
+		}
+	}
+
+	close(output)
 }
 
 func paramsFromQuery(req *http.Request) map[string]any {

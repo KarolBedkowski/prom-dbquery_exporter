@@ -10,11 +10,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/daemon"
-	// _ "github.com/denisenkom/go-mssqldb"
-	// _ "github.com/go-sql-driver/mysql".
-	// _ "github.com/sijms/go-ora/v2".
-	_ "github.com/glebarez/go-sqlite"
-	_ "github.com/lib/pq"
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
 	cversion "github.com/prometheus/client_golang/prometheus/collectors/version"
@@ -22,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/scheduler"
 	"prom-dbquery_exporter.app/internal/server"
@@ -30,6 +26,29 @@ import (
 
 func init() {
 	prometheus.MustRegister(cversion.NewCollector("dbquery_exporter"))
+}
+
+func printVersion() {
+	fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
+
+	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
+		fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
+	} else {
+		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
+	}
+}
+
+func printWelcome() {
+	log.Logger.Info().
+		Str("version", version.Info()).
+		Str("build_ctx", version.BuildContext()).
+		Msg("Starting DBQuery exporter")
+
+	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
+		log.Logger.Fatal().Msg("no databases supported, check compile flags")
+	} else {
+		log.Logger.Info().Msgf("supported databases: %s", sdb)
+	}
 }
 
 // Main is main function for cli.
@@ -46,24 +65,22 @@ func main() {
 			"Logging log format (logfmt, json).")
 		webConfig = flag.String("web.config", "",
 			"Path to config yaml file that can enable TLS or authentication.")
-		disableCache   = flag.Bool("no-cache", false, "Disable query result caching")
-		validateOutput = flag.Bool("validate-output", false, "Enable output validation")
+		disableCache            = flag.Bool("no-cache", false, "Disable query result caching")
+		enableSchedulerParallel = flag.Bool("parallel-scheduler", false, "Run scheduler ask parallel")
+		validateOutput          = flag.Bool("validate-output", false, "Enable output validation")
 	)
 
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
+		printVersion()
 		os.Exit(0)
 	}
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	support.InitializeLogger(*loglevel, *logformat)
-	log.Logger.Info().
-		Str("version", version.Info()).
-		Str("build_ctx", version.BuildContext()).
-		Msg("Starting DBQuery exporter")
+	printWelcome()
 
 	if err := enableSDNotify(); err != nil {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
@@ -72,10 +89,12 @@ func main() {
 	collectors.Init()
 
 	cfg, err := conf.LoadConfiguration(*configFile)
-	if err != nil {
+	if err != nil || cfg == nil {
 		log.Logger.Fatal().Err(err).Str("file", *configFile).
 			Msg("load config file error")
 	}
+
+	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput)
 
 	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
 	metrics.UpdateConfLoadTime()
@@ -86,7 +105,7 @@ func main() {
 
 	collectors.CollectorsPool.UpdateConf(cfg)
 
-	if err := start(cfg, *configFile, *listenAddress, *webConfig, *disableCache, *validateOutput); err != nil {
+	if err := start(cfg, *listenAddress, *webConfig); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
@@ -94,11 +113,9 @@ func main() {
 	log.Logger.Info().Msg("finished..")
 }
 
-func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
-	disableCache, validateOutput bool,
-) error {
+func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 	cache := support.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, disableCache, validateOutput, cache)
+	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache)
 	sched := scheduler.NewScheduler(cache, cfg)
 
 	var runGroup run.Group
@@ -128,7 +145,8 @@ func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
 			for range hup {
 				log.Info().Msg("reloading configuration")
 
-				if newConf, err := conf.LoadConfiguration(configFile); err == nil {
+				if newConf, err := conf.LoadConfiguration(cfg.ConfigFilename); err == nil {
+					newConf.CopyRuntimeOptions(cfg)
 					webHandler.ReloadConf(newConf)
 					sched.ReloadConf(newConf)
 					collectors.CollectorsPool.UpdateConf(newConf)
@@ -148,7 +166,12 @@ func start(cfg *conf.Configuration, configFile, listenAddress, webConfig string,
 	)
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
-	runGroup.Add(sched.Run, sched.Close)
+
+	if cfg.ParallelScheduler { //nolint:nilaway
+		runGroup.Add(sched.RunParallel, sched.Close)
+	} else {
+		runGroup.Add(sched.Run, sched.Close)
+	}
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 	daemon.SdNotify(false, "STATUS=ready")       //nolint:errcheck

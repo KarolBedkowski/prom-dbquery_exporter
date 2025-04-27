@@ -1,3 +1,11 @@
+v0.11.1 2025-04-27
+* feat: scheduled queries can run in parallel
+* feat(breaking): database drivers are selected by compilation tags
+* fix: fix broken validate-output option
+* fix: fix broken extra templates functions
+* fix: fix log messages
+* dev: refactor code; update golangcl-lint
+
 v0.11.0 2025-04-22
 * feat: scheduled queries may run in separate workers pool that don't
   block normal requests
