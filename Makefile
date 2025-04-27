@@ -17,13 +17,13 @@ LDFLAGS=" -w -s \
 
 build:
 	go build -v -o dbquery_exporter \
-		--tags pg,mssql,oracle,mysql,sqlite \
+		--tags pg,mssql,oracle,mysql,sqlite,tmpl_extra_func \
 		cli/main.go
 
 build_release:
 	CGO_ENABLED=0 \
 		go build -v -o dbquery_exporter  \
-			--tags pg,mssql,oracle,mysql,sqlite \
+			--tags pg,mssql,oracle,mysql,sqlite,tmpl_extra_func \
 			--ldflags $(LDFLAGS) \
 			cli/main.go
 
@@ -42,15 +42,17 @@ build_arm64:
 		GOARCH=arm64 \
 		GOOS=linux \
 		go build -v -o dbquery_exporter_arm64  \
-			--tags pg \
+			--tags pg,tmpl_extra_func \
 			--ldflags $(LDFLAGS) \
 			cli/main.go
 
 .PHONY: run
 
 run:
-	go run --tags debug,pg,mssql,oracle,mysql,sqlite -v cli/main.go -log.level debug -parallel-scheduler true
-
+	go run --tags debug,pg,sqlite,tmpl_extra_func \
+		-v cli/main.go -log.level debug \
+		-parallel-scheduler  \
+		-validate-output
 
 .PHONY: check
 lint:
@@ -65,5 +67,9 @@ lint:
 format:
 	find internal cli -type d -exec wsl -fix ./{} ';'
 	find . -name '*.go' -type f -exec gofumpt -w {} ';'
+
+.PHONY: test
+test:
+	go test  --tags debug,pg,sqlite,mssql,mysql,oracle,tmpl_extra_func ./...
 
 # vim:ft=make
