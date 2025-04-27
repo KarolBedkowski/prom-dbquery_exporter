@@ -16,11 +16,16 @@ LDFLAGS=" -w -s \
 .PHONY: build
 
 build:
-	go build -v -o dbquery_exporter --tags debug cli/main.go
+	go build -v -o dbquery_exporter \
+		--tags pg,mssql,oracle,mysql,sqlite \
+		cli/main.go
 
 build_release:
 	CGO_ENABLED=0 \
-		go build -v -o dbquery_exporter  --ldflags $(LDFLAGS) cli/main.go
+		go build -v -o dbquery_exporter  \
+			--tags pg,mssql,oracle,mysql,sqlite \
+			--ldflags $(LDFLAGS) \
+			cli/main.go
 
 
 .PHONY: build_arm64
@@ -29,19 +34,22 @@ build_arm64_debug:
 	CGO_ENABLED=0 GOARCH=arm64 GOOS=linux \
 		go build -v -o dbquery_exporter_arm64  \
 			--ldflags $(LDFLAGS) \
-			--tags debug \
+			--tags debug,pg \
 			cli/main.go
 
 build_arm64:
 	CGO_ENABLED=0 \
 		GOARCH=arm64 \
 		GOOS=linux \
-		go build -v -o dbquery_exporter_arm64  --ldflags $(LDFLAGS) cli/main.go
+		go build -v -o dbquery_exporter_arm64  \
+			--tags pg \
+			--ldflags $(LDFLAGS) \
+			cli/main.go
 
 .PHONY: run
 
 run:
-	go run --tags debug -v cli/main.go -log.level debug -parallel-scheduler true
+	go run --tags debug,pg,mssql,oracle,mysql,sqlite -v cli/main.go -log.level debug -parallel-scheduler true
 
 
 .PHONY: check
@@ -50,6 +58,7 @@ lint:
 	#--fix
 	# go install go.uber.org/nilaway/cmd/nilaway@latest
 	nilaway ./...
+	typos
 
 
 .PHONY: format

@@ -10,11 +10,6 @@ import (
 	"time"
 
 	"github.com/coreos/go-systemd/v22/daemon"
-	// _ "github.com/denisenkom/go-mssqldb"
-	// _ "github.com/go-sql-driver/mysql".
-	// _ "github.com/sijms/go-ora/v2".
-	_ "github.com/glebarez/go-sqlite"
-	_ "github.com/lib/pq"
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
 	cversion "github.com/prometheus/client_golang/prometheus/collectors/version"
@@ -22,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/scheduler"
 	"prom-dbquery_exporter.app/internal/server"
@@ -53,8 +49,17 @@ func main() {
 
 	flag.Parse()
 
+	sdb := db.SupportedDatabases()
+
 	if *showVersion {
 		fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
+
+		if len(sdb) == 0 {
+			fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
+		} else {
+			fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
+		}
+
 		os.Exit(0)
 	}
 
@@ -65,6 +70,12 @@ func main() {
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
 		Msg("Starting DBQuery exporter")
+
+	if len(sdb) == 0 {
+		log.Logger.Panic().Msg("no databases supported, check compile flags")
+	} else {
+		log.Logger.Info().Msgf("supported databases: %s", sdb)
+	}
 
 	if err := enableSDNotify(); err != nil {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")

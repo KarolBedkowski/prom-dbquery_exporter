@@ -14,3 +14,9 @@ func (i InvalidConfigurationError) Error() string {
 
 // ErrNoDatabaseName is error generated when there is no configured database with given name.
 var ErrNoDatabaseName = InvalidConfigurationError("no database name")
+
+type NotSupportedError string
+
+func (i NotSupportedError) Error() string {
+	return "Database " + string(i) + " is not supported; check compile flags"
+}

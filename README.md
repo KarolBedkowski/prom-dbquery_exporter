@@ -14,26 +14,44 @@ Support: SQLite, PostgrSQL/Cockroach, Oracle, MySQL/MariaDB/TiDB and MSSQL (not 
 * see: go.mod
 
 #### Database drivers
+Each driver must be added during build by tag.
+
 * PostgrSQL
 	* lib: github.com/lib/pq
 	* configuration driver name: postgres, postgresql, cockroach, cockroachdb
+	* build tag: pg
 * SQLite
 	* lib: github.com/glebarez/go-sqlite
 	* configuration driver name: dqlite3, sqlite
+	* build tag: sqlite
 * Oracle
 	* lib: https://github.com/sijms/go-ora
 	* configuration driver name: oracle, oci8
+	* build tag: oracle
 * MSSQL
 	* lib: github.com/denisenkom/go-mssqldb - require enable on compile
 	* configuration driver name: mssql
+	* build tag: mssql
 * MySQL/MariaDB/TiB
 	* lib: github.com/go-sql-driver/mysql - require enable on compile
 	* configuration driver name: mysql, mariadb, tidb
+	* build tag: mysql
 
 
 ### Local Build & Run
 
+Build in all drivers:
+
     make build
+
+Build only selected drivers:
+
+    go build -v -o dbquery_exporter --tags pg,mssql,oracle,mysql,sqlite cli/main.go
+
+(or modify Makefile)
+
+Run:
+
     ./dbquery_exporter
 
 For help:
