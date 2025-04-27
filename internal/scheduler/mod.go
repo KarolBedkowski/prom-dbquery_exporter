@@ -132,6 +132,10 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	dbName := j.Database
 	query := (s.cfg.Query)[queryName]
 
+	if query == nil {
+		return fmt.Errorf("Fatal, empty query %s", queryName) //nolint:err113,stylecheck
+	}
+
 	output := make(chan *collectors.TaskResult, 1)
 	defer close(output)
 

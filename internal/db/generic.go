@@ -159,7 +159,7 @@ func (g *genericDatabase) executeInitialQuery(ctx context.Context, sql string, c
 // Query get data from database.
 func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
 ) (*QueryResult, error) {
-	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
+	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger() //nolint:nilaway
 	ctx = llog.WithContext(ctx)
 	result := &QueryResult{Start: time.Now()}
 

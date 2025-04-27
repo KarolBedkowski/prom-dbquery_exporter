@@ -89,7 +89,7 @@ func main() {
 	collectors.Init()
 
 	cfg, err := conf.LoadConfiguration(*configFile)
-	if err != nil {
+	if err != nil || cfg == nil {
 		log.Logger.Fatal().Err(err).Str("file", *configFile).
 			Msg("load config file error")
 	}
@@ -167,7 +167,7 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
 
-	if cfg.ParallelScheduler {
+	if cfg.ParallelScheduler { //nolint:nilaway
 		runGroup.Add(sched.RunParallel, sched.Close)
 	} else {
 		runGroup.Add(sched.Run, sched.Close)

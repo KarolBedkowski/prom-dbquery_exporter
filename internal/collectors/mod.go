@@ -166,12 +166,10 @@ func (cs *Collectors) stats() []collectorStats {
 }
 
 // CollectorsPool is global handler for all db queries.
-var CollectorsPool *Collectors
+var CollectorsPool = newCollectors()
 
 // Init db subsystem.
 func Init() {
-	CollectorsPool = newCollectors()
-
 	initMetrics()
 	initTemplates()
 }
