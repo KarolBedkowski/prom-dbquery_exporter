@@ -1305,7 +1305,7 @@
           "expr": "sum(dbquery_exporter_dbpool_idleconnections{instance=\"$instance\"})",
           "hide": false,
           "interval": "",
-          "legendFormat": "idle conenctions",
+          "legendFormat": "idle connections",
           "range": true,
           "refId": "B"
         }

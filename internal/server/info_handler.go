@@ -89,7 +89,7 @@ func newInfoHandler(conf *conf.Configuration) *infoHandler {
 func (q *infoHandler) Handler() http.Handler {
 	h := newLogMiddleware(
 		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWraper("info"),
+			metrics.NewReqDurationWrapper("info"),
 			q), "info", false)
 
 	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)

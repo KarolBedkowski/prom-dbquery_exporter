@@ -21,7 +21,7 @@ func newPostgresLoader(cfg *conf.Database) (*genericDatabase, error) {
 		connStr, ok = val.(string)
 
 		if !ok {
-			return nil, InvalidConfigrationError(fmt.Sprintf("invalid 'connstr' value: %v", val))
+			return nil, InvalidConfigurationError(fmt.Sprintf("invalid 'connstr' value: %v", val))
 		}
 	} else {
 		p := make([]string, 0, len(cfg.Connection))
@@ -240,7 +240,7 @@ func newMssqlLoader(cfg *conf.Database) (*genericDatabase, error) {
 	}
 
 	if !databaseConfigured {
-		return nil, InvalidConfigrationError("missing database")
+		return nil, InvalidConfigurationError("missing database")
 	}
 
 	connstr := params.Encode()

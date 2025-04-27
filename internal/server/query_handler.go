@@ -94,7 +94,7 @@ func newQueryHandler(c *conf.Configuration, disableCache bool, validateOutput bo
 func (q *queryHandler) Handler() http.Handler {
 	h := newLogMiddleware(
 		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWraper("query"),
+			metrics.NewReqDurationWrapper("query"),
 			q), "query", false)
 
 	h = support.NewTraceMiddleware("dbquery_exporter")(h)
@@ -172,7 +172,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 
 			logger.Debug().Object("task", &task).Msg("queryhandler: schedule task")
 
-			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil { //nolint:contextcheck
+			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
 				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
 				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
 					Msg("queryhandler: start task error")

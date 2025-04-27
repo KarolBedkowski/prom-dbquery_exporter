@@ -147,7 +147,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 		IsScheduledJob: true,
 	}
 
-	if err := collectors.CollectorsPool.ScheduleTask(task); err != nil { //nolint:contextcheck
+	if err := collectors.CollectorsPool.ScheduleTask(task); err != nil {
 		return fmt.Errorf("start task error: %w", err)
 	}
 
@@ -208,7 +208,7 @@ func (s *Scheduler) runJobInLoop(ctx context.Context, job conf.Job) {
 func (s *Scheduler) Run() error {
 	s.log.Debug().Msgf("scheduler: starting serial scheduler")
 
-	s.resheduleTasks()
+	s.rescheduleTask()
 
 	timer := time.NewTimer(time.Second)
 	defer timer.Stop()
@@ -231,7 +231,7 @@ func (s *Scheduler) Run() error {
 
 		case cfg := <-s.newCfgCh:
 			s.updateConfig(cfg)
-			s.resheduleTasks()
+			s.rescheduleTask()
 
 		case <-timer.C:
 			for _, job := range s.tasks {
@@ -327,8 +327,8 @@ func (s *Scheduler) updateConfig(cfg *conf.Configuration) {
 	s.log.Info().Msgf("scheduler: configuration updated; tasks: %d", len(s.tasks))
 }
 
-// resheduleTasks set next run time for all tasks.
-func (s *Scheduler) resheduleTasks() {
+// rescheduleTask set next run time for all tasks.
+func (s *Scheduler) rescheduleTask() {
 	// add some offset to prevent all tasks start in the same time
 	for _, task := range s.tasks {
 		task.nextRun = time.Now().Add(time.Duration(task.job.Idx*7) * time.Second) //nolint:mnd

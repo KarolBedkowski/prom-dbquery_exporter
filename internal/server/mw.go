@@ -70,7 +70,7 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 
 		llog.WithLevel(level).
 			Strs("agent", request.Header["User-Agent"]).
-			Msg("webjandler: request start")
+			Msg("webhandler: request start")
 
 		responseData := &responseData{
 			status: 0,

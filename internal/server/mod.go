@@ -27,7 +27,7 @@ const (
 	defaultShutdownTimeout = time.Duration(10) * time.Second
 )
 
-// WebHandler handle incomming requests.
+// WebHandler handle incoming requests.
 type WebHandler struct {
 	handler       *queryHandler
 	infoHandler   *infoHandler

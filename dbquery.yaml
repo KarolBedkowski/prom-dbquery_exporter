@@ -4,7 +4,7 @@ global:
 database:
   testdb:
     driver: sqlite
-    # conenction parameters
+    # connection parameters
     connection:
       database: rwr3.db
     # pool configuration
@@ -83,7 +83,7 @@ query:
       ping{database="{{ .Database }}"} 0
 
   testq1:
-    # Characters like `:` must be doubled to prevent binding paramaters.
+    # Characters like `:` must be doubled to prevent binding parameters.
     sql: >
        select s.name, count(t.id) as cnt
        from sports s left join trips t on s.id = t.sport_id
@@ -93,7 +93,7 @@ query:
     caching_time: 20s
     # timeout define query timeout in second
     timeout: 1s
-    # Rows from query are accessible via `conext.R` variable and should be
+    # Rows from query are accessible via `context.R` variable and should be
     # always iterate.
     # Labels defined on database level are available via `context.L map`.
     # Some other variables are available:
@@ -106,7 +106,7 @@ query:
       rwr3_sport_trip_count{sport="{{ .name }}", dbname="{{ $top.L.env }}"} {{ .cnt }}
       {{- end  }}
       rwr3_sport_trip_count_rows {{ .Count }}
-      rwr3_sport_trip_query_secounds {{ .QueryDuration }}
+      rwr3_sport_trip_query_seconds {{ .QueryDuration }}
       rwr3_sport_trip_last_query_unix {{ .QueryStartTime }}
 
   testq2:
@@ -118,7 +118,7 @@ query:
       rwr3_trips_count {{ .cnt }}
       {{- end  }}
       rwr3_trips_count_rows {{ .Count }}
-      rwr3_trips_query_secounds {{ .QueryDuration }}
+      rwr3_trips_query_seconds {{ .QueryDuration }}
       rwr3_trips_last_query_unix {{ .QueryStartTime }}
 
   test_buckets:
