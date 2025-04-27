@@ -61,6 +61,13 @@ For help:
 Edit `dbquery.yaml` file, run and visit `http://localhost:9122/query?query=<query_name>&database=<database_name>`.
 See dbquery.yaml for configuration examples.
 
+
+Other features enabled by compilation tags:
+
+* `tmpl_extra_func` - enable additional template functions `genericBuckets` and `genericBucketsInt`.
+* `debug` - enable internal debugging and tracing routines (`/debug/` endpoint).
+
+
 ## Prometheus config
 
     scrape_configs:
@@ -150,18 +157,18 @@ Data available in templates:
 
 ### Template functions
 
-* toLower - convert value to lower case
-* toUpper - convert value to upper case
-* trim - trim non-printable characters
-* quote - quote " characters
-* replaceSpaces - replace spaces by "_"
-* removeSpaces - remove spaces
-* keepAlfaNum - keep only A-Za-z0-9 characters
-* keepAlfaNumUnderline - keep only A-Za-z0-9 and "_" characters
-* keepAlfaNumUnderlineSpace - keep only A-Za-z0-9, "_" and space characters
-* keepAlfaNumUnderlineU - keep only unicode letter, digits and "_"
-* keepAlfaNumUnderlineSpaceU - keep only unicode letter, digits, space and "_"
-* clean - keep only A-Za-z0-9 and "_", replace spaces to "_", trim, convert to lower case
+* `toLower` - convert value to lower case
+* `toUpper` - convert value to upper case
+* `trim` - trim non-printable characters
+* `quote` - quote " characters
+* `replaceSpaces` - replace spaces by "_"
+* `removeSpaces` - remove spaces
+* `keepAlfaNum` - keep only A-Za-z0-9 characters
+* `keepAlfaNumUnderline` - keep only A-Za-z0-9 and "_" characters
+* `keepAlfaNumUnderlineSpace` - keep only A-Za-z0-9, "_" and space characters
+* `keepAlfaNumUnderlineU` - keep only unicode letter, digits and "_"
+* `keepAlfaNumUnderlineSpaceU` - keep only unicode letter, digits, space and "_"
+* `clean` - keep only A-Za-z0-9 and "_", replace spaces to "_", trim, convert to lower case
 
 
 # Requests
@@ -191,7 +198,7 @@ Multiple queries:
 
 Oracle return column in upper case. Probably NLS_LANG environment variable should be also used in most cases (i.e. `NLS_LANG=American_America.UTF8`).
 
-All queries should be reasonable fast - long queries should be avoided. As a rule of thumb - each request should take no more 1 minute.
+All queries should be reasonable fast - long queries should be avoided. As a rule of thumb - each request should take no more 1 minute. Longer queries can by scheduled, run and it result cached in background in defined intervals.
 
 There is a simple protection preventing to run exactly the same queries (request) parallel.
 When next query arrive it may wait up to 5 minutes to previous request finished. After 15 minutes from start
