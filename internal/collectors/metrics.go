@@ -127,6 +127,11 @@ func (l loggersPoolCollector) Collect(resCh chan<- prometheus.Metric) { //nolint
 
 	for _, cstat := range cstats {
 		stat := cstat.dbstats
+
+		if stat == nil {
+			continue
+		}
+
 		resCh <- prometheus.MustNewConstMetric(
 			dbpoolOpenConnsDesc,
 			prometheus.GaugeValue,
