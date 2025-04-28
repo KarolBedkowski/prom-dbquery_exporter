@@ -1,3 +1,7 @@
+v0.12.2 2025-04-28
+* fix: fix workers configuration for db other than pg
+* fix: do not try collect metrics from collectors that don't have it yet
+
 v0.11.1 2025-04-27
 * feat: scheduled queries can run in parallel
 * feat(breaking): database drivers are selected by compilation tags
