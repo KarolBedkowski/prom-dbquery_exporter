@@ -151,23 +151,6 @@ func (d *Database) validatePG() error {
 		errs = multierror.Append(errs, err)
 	}
 
-	d.MaxWorkers = defaultMaxWorkers
-
-	if d.Pool != nil {
-		if d.Pool.MaxIdleConnections > 0 {
-			d.MaxWorkers = d.Pool.MaxConnections
-		}
-
-		if d.BackgroundWorkers >= d.MaxWorkers {
-			log.Logger.Warn().
-				Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
-
-			d.BackgroundWorkers = 0
-		} else {
-			d.MaxWorkers -= d.BackgroundWorkers
-		}
-	}
-
 	return errs.ErrorOrNil()
 }
 
@@ -186,6 +169,23 @@ func (d *Database) validateCommon() error {
 
 	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
 		log.Logger.Warn().Msgf("configuration: database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
+	}
+
+	d.MaxWorkers = defaultMaxWorkers
+
+	if d.Pool != nil {
+		if d.Pool.MaxIdleConnections > 0 {
+			d.MaxWorkers = d.Pool.MaxConnections
+		}
+
+		if d.BackgroundWorkers >= d.MaxWorkers {
+			log.Logger.Warn().
+				Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
+
+			d.BackgroundWorkers = 0
+		} else {
+			d.MaxWorkers -= d.BackgroundWorkers
+		}
 	}
 
 	return errs.ErrorOrNil()
