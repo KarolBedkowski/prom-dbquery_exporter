@@ -191,7 +191,7 @@ func (c *collector) removeWorker(isBg bool) {
 }
 
 func (c *collector) spawnWorker(group *sync.WaitGroup, rwCh chan bool) {
-	if c.runningWorkers >= c.cfg.MaxWorkers {
+	if c.runningWorkers >= c.cfg.MaxWorkers || len(c.workQueue) == 0 {
 		return
 	}
 
@@ -206,7 +206,7 @@ func (c *collector) spawnWorker(group *sync.WaitGroup, rwCh chan bool) {
 }
 
 func (c *collector) spawnBgWorker(group *sync.WaitGroup, rwCh chan bool) {
-	if c.runningBgWorkers >= c.cfg.BackgroundWorkers {
+	if c.runningBgWorkers >= c.cfg.BackgroundWorkers || len(c.workBgQueue) == 0 {
 		return
 	}
 
