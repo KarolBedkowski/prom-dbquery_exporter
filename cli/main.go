@@ -167,7 +167,7 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
 
-	if cfg.ParallelScheduler { //nolint:nilaway
+	if cfg.ParallelScheduler {
 		runGroup.Add(sched.RunParallel, sched.Close)
 	} else {
 		runGroup.Add(sched.Run, sched.Close)

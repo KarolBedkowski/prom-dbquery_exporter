@@ -51,7 +51,7 @@ func (g *genericDatabase) Stats() *DatabaseStats {
 // Query get data from database.
 func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
 ) (*QueryResult, error) {
-	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger() //nolint:nilaway
+	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
 	result := &QueryResult{Start: time.Now()}
 
