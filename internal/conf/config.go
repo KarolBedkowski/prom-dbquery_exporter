@@ -4,11 +4,13 @@
 package conf
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
 )
 
@@ -77,9 +79,12 @@ outerloop:
 
 // LoadConfiguration from filename.
 func LoadConfiguration(filename string) (*Configuration, error) {
+	logger := log.Logger.With().Str("module", "config").Logger()
 	conf := &Configuration{
 		ConfigFilename: filename,
 	}
+
+	logger.Info().Msgf("Loading config file %s", filename)
 
 	b, err := os.ReadFile(filename) // #nosec
 	if err != nil {
@@ -91,18 +96,19 @@ func LoadConfiguration(filename string) (*Configuration, error) {
 	}
 
 	for name, db := range conf.Database {
-		db.Name = name
+		db.setup(name)
 	}
 
 	for name, q := range conf.Query {
-		q.Name = name
+		q.setup(name)
 	}
 
 	for idx, j := range conf.Jobs {
-		j.Idx = idx + 1
+		j.setup(idx + 1)
 	}
 
-	if err = conf.validate(); err != nil {
+	ctx := logger.WithContext(context.Background())
+	if err = conf.validate(ctx); err != nil {
 		return nil, newConfigurationError("validate error").Wrap(err)
 	}
 
@@ -129,7 +135,31 @@ func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateO
 	}
 }
 
-func (c *Configuration) validate() error {
+func (c *Configuration) validateJobs(ctx context.Context) error {
+	var errs *multierror.Error
+
+	validJobs := 0
+
+	for i, job := range c.Jobs {
+		if err := job.validate(ctx, c); err != nil {
+			errs = multierror.Append(errs, newConfigurationError(
+				fmt.Sprintf("validate job %d error", i+1)).Wrap(err))
+		}
+
+		if job.IsValid {
+			validJobs++
+		}
+	}
+
+	if len(c.Jobs) > 0 && validJobs == 0 {
+		logger := log.Ctx(ctx)
+		logger.Warn().Msgf("configuration: all jobs are invalid!")
+	}
+
+	return errs.ErrorOrNil()
+}
+
+func (c *Configuration) validate(ctx context.Context) error {
 	var errs *multierror.Error
 
 	if len(c.Database) == 0 {
@@ -152,20 +182,13 @@ func (c *Configuration) validate() error {
 	}
 
 	for name, db := range c.Database {
-		db.setup()
-
 		if err := db.validate(); err != nil {
 			errs = multierror.Append(errs, newConfigurationError(
 				fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
 		}
 	}
 
-	for i, job := range c.Jobs {
-		if err := job.validate(c); err != nil {
-			errs = multierror.Append(errs, newConfigurationError(
-				fmt.Sprintf("validate job %d error", i+1)).Wrap(err))
-		}
-	}
+	errs = multierror.Append(errs, c.validateJobs(ctx))
 
 	return errs.ErrorOrNil()
 }

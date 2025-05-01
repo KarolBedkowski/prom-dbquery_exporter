@@ -18,7 +18,7 @@ import (
 
 const (
 	defaultMaxConnections   = 10
-	defaultIldeConenction   = 2
+	defaultIldeConnection   = 2
 	defaultConnMaxLifetime  = time.Duration(600) * time.Second
 	defaultConnectioTimeout = time.Duration(15) * time.Second
 )
@@ -156,11 +156,13 @@ func (d *Database) validatePG() error {
 	return errs.ErrorOrNil()
 }
 
-func (d *Database) setup() {
+func (d *Database) setup(name string) {
+	d.Name = name
+
 	if d.Pool == nil {
 		d.Pool = &PoolConfiguration{
 			MaxConnections:     defaultMaxConnections,
-			MaxIdleConnections: defaultIldeConenction,
+			MaxIdleConnections: defaultIldeConnection,
 			ConnMaxLifeTime:    defaultConnMaxLifetime,
 		}
 	}

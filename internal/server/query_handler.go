@@ -105,7 +105,7 @@ func (q *queryHandler) Handler() http.Handler {
 }
 
 // SetConfiguration update handler configuration.
-func (q *queryHandler) SetConfiguration(c *conf.Configuration) {
+func (q *queryHandler) UpdateConf(c *conf.Configuration) {
 	q.configuration = c
 
 	q.queryResultCache.Clear()

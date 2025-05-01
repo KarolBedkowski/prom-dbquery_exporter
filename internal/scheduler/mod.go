@@ -40,7 +40,6 @@ type Scheduler struct {
 	log        zerolog.Logger
 	cfg        *conf.Configuration
 	cache      *support.Cache[[]byte]
-	stop       chan struct{}
 	tasks      []*scheduledTask
 	newCfgCh   chan *conf.Configuration
 	tasksQueue chan<- *collectors.Task
@@ -57,7 +56,6 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
 	scheduler := &Scheduler{
 		cfg:        cfg,
 		cache:      cache,
-		stop:       make(chan struct{}),
 		log:        log.Logger.With().Str("module", "scheduler").Logger(),
 		newCfgCh:   make(chan *conf.Configuration, 1),
 		tasksQueue: tasksQueue,
@@ -89,13 +87,13 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
 	prometheus.MustRegister(scheduler.scheduledTasksSuccess)
 	prometheus.MustRegister(scheduler.scheduledTasksFailed)
 
-	scheduler.ReloadConf(cfg)
+	scheduler.UpdateConf(cfg)
 
 	return scheduler
 }
 
 // Run scheduler process that get data for all defined jobs sequential.
-func (s *Scheduler) Run() error {
+func (s *Scheduler) Run(ctx context.Context) error {
 	s.log.Debug().Msgf("scheduler: starting serial scheduler")
 
 	s.rescheduleTask()
@@ -114,7 +112,7 @@ func (s *Scheduler) Run() error {
 		timer.Reset(time.Second)
 
 		select {
-		case <-s.stop:
+		case <-ctx.Done():
 			s.log.Debug().Msg("scheduler: stopped")
 
 			return nil
@@ -126,7 +124,7 @@ func (s *Scheduler) Run() error {
 		case <-timer.C:
 			for _, job := range s.tasks {
 				if time.Now().After(job.nextRun) {
-					s.handleJobWithMetrics(context.Background(), job.job)
+					s.handleJobWithMetrics(ctx, job.job)
 					job.nextRun = time.Now().Add(job.job.Interval)
 				}
 			}
@@ -135,24 +133,24 @@ func (s *Scheduler) Run() error {
 }
 
 // RunParallel run scheduler in parallel mode that spawn goroutine for each defined job.
-func (s *Scheduler) RunParallel() error {
+func (s *Scheduler) RunParallel(ctx context.Context) error {
 	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
 
 	for {
-		ctx, cancel := context.WithCancel(context.Background())
-		group, ctx := errgroup.WithContext(ctx)
+		lctx, cancel := context.WithCancel(ctx)
+		group, lctx := errgroup.WithContext(lctx)
 
 		// spawn background workers
 		for _, job := range s.tasks {
 			group.Go(func() error {
-				s.runJobInLoop(ctx, job.job)
+				s.runJobInLoop(lctx, job.job)
 
 				return nil
 			})
 		}
 
 		select {
-		case <-s.stop:
+		case <-ctx.Done():
 			s.log.Debug().Msg("scheduler: stopping")
 			cancel()
 
@@ -185,12 +183,11 @@ func (s *Scheduler) Close(err error) {
 	_ = err
 
 	log.Logger.Debug().Msg("scheduler: stopping")
-	close(s.stop)
 	close(s.newCfgCh)
 }
 
-// ReloadConf load new configuration.
-func (s *Scheduler) ReloadConf(cfg *conf.Configuration) {
+// UpdateConf load new configuration.
+func (s *Scheduler) UpdateConf(cfg *conf.Configuration) {
 	s.newCfgCh <- cfg
 }
 
@@ -223,8 +220,7 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 		llog.Debug().Msg("scheduler: execute job finished")
 	}
 
-	duration := time.Since(startTS)
-	if job.Interval < duration {
+	if duration := time.Since(startTS); job.Interval < duration {
 		llog.Warn().Dur("duration", duration).
 			Msgf("scheduler: task run longer than defined interval (%s)", job.Interval)
 	}

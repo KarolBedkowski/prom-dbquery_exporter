@@ -1,6 +1,7 @@
 package conf
 
 import (
+	"context"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
@@ -33,7 +34,11 @@ func (j *Job) MarshalZerologObject(event *zerolog.Event) {
 		Dur("interval", j.Interval)
 }
 
-func (j *Job) validate(cfg *Configuration) error {
+func (j *Job) setup(idx int) {
+	j.Idx = idx
+}
+
+func (j *Job) validate(ctx context.Context, cfg *Configuration) error {
 	var errs *multierror.Error
 
 	if j.Database == "" {
@@ -50,13 +55,13 @@ func (j *Job) validate(cfg *Configuration) error {
 			WithMsg("unknown query"))
 	}
 
-	if j.Interval.Seconds() < 1 {
-		log.Logger.Warn().Msgf("configuration: job %d (%v, %v): interval < 1s: %v", j.Idx, j.Database, j.Query, j.Interval)
-		j.IsValid = false
+	err := errs.ErrorOrNil()
+	if err == nil {
+		j.IsValid = true
 	}
 
-	err := errs.ErrorOrNil()
-	if err != nil {
+	if j.Interval.Seconds() < 1 {
+		log.Ctx(ctx).Warn().Msgf("configuration: job %d (%v, %v): interval < 1s: %v", j.Idx, j.Database, j.Query, j.Interval)
 		j.IsValid = false
 	}
 

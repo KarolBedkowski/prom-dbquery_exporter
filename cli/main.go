@@ -98,7 +98,7 @@ func main() {
 	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput)
 
 	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
-	metrics.UpdateConfLoadTime()
+	metrics.UpdateConf()
 
 	if err := start(cfg, *listenAddress, *webConfig); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
@@ -115,21 +115,13 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 	cache := support.NewCache[[]byte]("query_cache")
 	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache, taskQueue)
 	sched := scheduler.NewScheduler(cache, cfg, taskQueue)
+	runGroup := run.Group{}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	var runGroup run.Group
-
 	// Collectors
-	runGroup.Add(
-		func() error {
-			return collectors.Start(ctx)
-		},
-		func(_ error) {
-			cancel()
-		},
-	)
+	runGroup.Add(func() error { return collectors.Start(ctx) }, func(_ error) { cancel() })
 
 	// Termination handler.
 	term := make(chan os.Signal, 1)
@@ -143,9 +135,7 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 
 			return nil
 		},
-		func(_ error) {
-			close(term)
-		},
+		func(_ error) { close(term) },
 	)
 
 	// Reload handler.
@@ -158,30 +148,27 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 
 				if newConf, err := conf.LoadConfiguration(cfg.ConfigFilename); err == nil {
 					newConf.CopyRuntimeOptions(cfg)
-					webHandler.ReloadConf(newConf)
-					sched.ReloadConf(newConf)
+					webHandler.UpdateConf(newConf)
+					sched.UpdateConf(newConf)
 					collectors.UpdateConf(newConf)
-					metrics.UpdateConfLoadTime()
+					metrics.UpdateConf()
 					log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
 				} else {
-					log.Logger.Error().Err(err).
-						Msg("reloading configuration error; using old configuration")
+					log.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
 				}
 			}
 
 			return nil
 		},
-		func(_ error) {
-			close(hup)
-		},
+		func(_ error) { close(hup) },
 	)
 
 	runGroup.Add(webHandler.Run, webHandler.Close)
 
 	if cfg.ParallelScheduler {
-		runGroup.Add(sched.RunParallel, sched.Close)
+		runGroup.Add(func() error { return sched.RunParallel(ctx) }, sched.Close)
 	} else {
-		runGroup.Add(sched.Run, sched.Close)
+		runGroup.Add(func() error { return sched.Run(ctx) }, sched.Close)
 	}
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck

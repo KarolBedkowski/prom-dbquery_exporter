@@ -110,8 +110,8 @@ func (w *WebHandler) Close(err error) {
 	_ = w.server.Shutdown(ctx)
 }
 
-// ReloadConf reload configuration in all handlers.
-func (w *WebHandler) ReloadConf(newConf *conf.Configuration) {
-	w.handler.SetConfiguration(newConf)
+// UpdateConf reload configuration in all handlers.
+func (w *WebHandler) UpdateConf(newConf *conf.Configuration) {
+	w.handler.UpdateConf(newConf)
 	w.infoHandler.Configuration = newConf
 }

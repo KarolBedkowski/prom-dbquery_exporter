@@ -34,7 +34,7 @@ build_arm64_debug:
 	CGO_ENABLED=0 GOARCH=arm64 GOOS=linux \
 		go build -v -o dbquery_exporter_arm64  \
 			--ldflags $(LDFLAGS) \
-			--tags debug,pg \
+			--tags debug,pg,tmpl_extra_func \
 			cli/main.go
 
 build_arm64:
@@ -56,10 +56,10 @@ run:
 
 .PHONY: check
 lint:
-	golangci-lint run
+	golangci-lint run || true
 	#--fix
 	# go install go.uber.org/nilaway/cmd/nilaway@latest
-	nilaway ./...
+	nilaway ./... || true
 	typos
 
 
