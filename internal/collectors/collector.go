@@ -10,13 +10,13 @@ package collectors
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strconv"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/metrics"
@@ -34,16 +34,12 @@ type collector struct {
 	workQueue chan *Task
 	// workBgQueue is chan that distribute task to workers created by scheduler
 	workBgQueue chan *Task
-	// newConfCh bring new configuration
-	newConfCh chan *conf.Database
-	// stopCh stopping main worker.
-	stopCh chan struct{}
-	dbName string
-	sync.Mutex
-	active bool
+	dbName      string
 
-	runningWorkers   int
-	runningBgWorkers int
+	normalWorkersGroup errgroup.Group
+	bgWorkersGroup     errgroup.Group
+
+	workerID uint64
 }
 
 const tasksQueueSize = 10
@@ -54,51 +50,30 @@ func newCollector(name string, cfg *conf.Database) (*collector, error) {
 		return nil, fmt.Errorf("get loader error: %w", err)
 	}
 
-	c := &collector{
-		dbName: name,
-		loader: loader,
-
+	col := &collector{
+		dbName:      name,
+		loader:      loader,
+		tasks:       make(chan *Task, 1),
 		workQueue:   make(chan *Task, tasksQueueSize),
 		workBgQueue: make(chan *Task, tasksQueueSize),
-		newConfCh:   make(chan *conf.Database, 1),
-		stopCh:      make(chan struct{}, 1),
 		cfg:         cfg,
 		log:         log.Logger.With().Str("dbname", name).Logger(),
 	}
 
-	return c, nil
+	col.normalWorkersGroup.SetLimit(cfg.MaxWorkers)
+	col.bgWorkersGroup.SetLimit(cfg.BackgroundWorkers)
+
+	return col, nil
 }
 
-func (c *collector) stop() error {
-	c.Lock()
-	defer c.Unlock()
-
-	if !c.active {
-		return ErrLoaderStopped
-	}
-
-	c.log.Debug().Msgf("collector: stopping...")
-	c.stopCh <- struct{}{}
+func (c *collector) start(ctx context.Context) error {
+	c.log.Debug().Msg("collector: starting")
+	c.mainWorker(ctx)
 
 	return nil
 }
 
 func (c *collector) addTask(task *Task) {
-	c.Lock()
-	defer c.Unlock()
-
-	if !c.active {
-		c.log.Debug().Msg("collector: starting")
-
-		c.active = true
-
-		if c.tasks == nil {
-			c.tasks = make(chan *Task, 1)
-		}
-
-		go c.mainWorker()
-	}
-
 	c.log.Debug().Msgf("collector: add new task; queue size: %d", len(c.tasks))
 
 	if c.tasks != nil {
@@ -108,62 +83,15 @@ func (c *collector) addTask(task *Task) {
 	}
 }
 
-func (c *collector) updateConf(cfg *conf.Database) bool {
-	if reflect.DeepEqual(c.cfg, cfg) {
-		return false
-	}
-
-	c.newConfCh <- cfg
-
-	return true
-}
-
-func (c *collector) recreateLoader(cfg *conf.Database) {
-	newLoader, err := db.CreateLoader(cfg)
-	if err != nil || newLoader == nil {
-		c.log.Error().Err(err).Msg("collector: create loader with new configuration error")
-		c.log.Error().Msg("collector: configuration not updated!")
-	} else {
-		c.cfg = cfg
-		c.loader = newLoader
-
-		c.log.Debug().Msg("collector: configuration updated")
-	}
-}
-
-func (c *collector) mainWorker() {
-	c.runningBgWorkers = 0
-	c.runningWorkers = 0
-
-	group := sync.WaitGroup{}
-	// rwCh receive worker-stopped events.
-	rwCh := make(chan bool)
-	defer close(rwCh)
-
+func (c *collector) mainWorker(ctx context.Context) {
 	support.SetGoroutineLabels(context.Background(), "main_worker", c.dbName)
 
 loop:
-	for c.active && c.tasks != nil {
+	for {
 		select {
-		case isBg := <-rwCh:
-			c.removeWorker(isBg)
-			group.Done()
-
-		case cfg := <-c.newConfCh:
-			c.Lock()
-			c.log.Debug().Msg("collector: wait for workers finish its current task...")
-			group.Wait()
-			c.log.Debug().Msg("collector: workers stopped")
-			c.loader.Close(c.log.WithContext(context.Background()))
-			c.recreateLoader(cfg)
-			c.Unlock()
-
-		case <-c.stopCh:
+		case <-ctx.Done():
 			c.log.Debug().Msg("collector: stopping workers...")
-			c.active = false
 			close(c.tasks)
-			c.tasks = nil
-			group.Wait()
 			c.log.Debug().Msg("collector: workers stopped")
 
 			break loop
@@ -171,61 +99,51 @@ loop:
 		case task := <-c.tasks:
 			if task.IsScheduledJob && c.cfg.BackgroundWorkers > 0 {
 				c.workBgQueue <- task
-				c.spawnBgWorker(&group, rwCh)
+				c.spawnBgWorker(ctx)
 			} else {
 				c.workQueue <- task
-				c.spawnWorker(&group, rwCh)
+				c.spawnWorker(ctx)
 			}
 		}
 	}
 
+	_ = c.bgWorkersGroup.Wait()
+	_ = c.normalWorkersGroup.Wait()
+
 	c.log.Debug().Msg("collector: main worker exit")
 }
 
-func (c *collector) removeWorker(isBg bool) {
-	if isBg {
-		c.runningBgWorkers--
-	} else {
-		c.runningWorkers--
-	}
-}
-
-func (c *collector) spawnWorker(group *sync.WaitGroup, rwCh chan bool) {
-	if c.runningWorkers >= c.cfg.MaxWorkers || len(c.workQueue) == 0 {
+func (c *collector) spawnWorker(ctx context.Context) {
+	if len(c.workQueue) == 0 {
 		return
 	}
 
-	group.Add(1)
+	c.normalWorkersGroup.TryGo(func() error {
+		c.worker(ctx, c.workQueue, false)
 
-	c.runningWorkers++
-
-	go func(rw int, workQueue chan *Task) {
-		c.worker(rw, workQueue, false)
-		rwCh <- false
-	}(c.runningWorkers, c.workQueue)
+		return nil
+	})
 }
 
-func (c *collector) spawnBgWorker(group *sync.WaitGroup, rwCh chan bool) {
-	if c.runningBgWorkers >= c.cfg.BackgroundWorkers || len(c.workBgQueue) == 0 {
+func (c *collector) spawnBgWorker(ctx context.Context) {
+	if len(c.workBgQueue) == 0 {
 		return
 	}
 
-	group.Add(1)
+	c.bgWorkersGroup.TryGo(func() error {
+		c.worker(ctx, c.workBgQueue, true)
 
-	c.runningBgWorkers++
-
-	go func(rw int, workQueue chan *Task) {
-		c.worker(rw, workQueue, true)
-		rwCh <- true
-	}(c.runningBgWorkers, c.workBgQueue)
+		return nil
+	})
 }
 
-func (c *collector) worker(idx int, workQueue chan *Task, isBg bool) {
-	wlog := c.log.With().Bool("bg", isBg).Int("worker_idx", idx).Logger()
+func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
+	idx := atomic.AddUint64(&c.workerID, 1)
+	idxstr := strconv.FormatUint(idx, 10)
+	wlog := c.log.With().Bool("bg", isBg).Uint64("worker_id", idx).Logger()
 
 	workersCreatedCnt.WithLabelValues(c.dbName).Inc()
-	support.SetGoroutineLabels(context.Background(), "worker", strconv.Itoa(idx),
-		"db", c.dbName, "bg", strconv.FormatBool(isBg))
+	support.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.dbName, "bg", strconv.FormatBool(isBg))
 
 	wlog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
 
@@ -234,7 +152,7 @@ func (c *collector) worker(idx int, workQueue chan *Task, isBg bool) {
 	defer shutdownTimer.Stop()
 
 loop:
-	for c.active {
+	for {
 		// reset worker shutdown timer after each iteration.
 		if !shutdownTimer.Stop() {
 			select {
@@ -246,12 +164,15 @@ loop:
 		shutdownTimer.Reset(time.Second)
 
 		select {
+		case <-ctx.Done():
+			break loop
+
 		case task := <-workQueue:
 			wlog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
-			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", strconv.Itoa(idx), "db", c.dbName)
+			support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", idxstr, "db", c.dbName)
 			tasksQueueWaitTime.WithLabelValues(c.dbName).Observe(time.Since(task.RequestStart).Seconds())
 
-			c.handleTask(wlog, task)
+			c.handleTask(ctx, wlog, task)
 
 			continue
 		case <-shutdownTimer.C:
@@ -262,7 +183,7 @@ loop:
 	wlog.Debug().Msg("collector: worker stopped")
 }
 
-func (c *collector) handleTask(wlog zerolog.Logger, task *Task) {
+func (c *collector) handleTask(ctx context.Context, wlog zerolog.Logger, task *Task) {
 	llog := wlog.With().Object("task", task).Logger()
 
 	select {
@@ -280,6 +201,11 @@ func (c *collector) handleTask(wlog zerolog.Logger, task *Task) {
 	res := c.doQuery(wlog, task)
 
 	select {
+	case <-ctx.Done():
+		llog.Warn().Msg("collector: worker stopped after processing")
+		task.Output <- task.newResult(ErrAborted, nil)
+
+		return
 	case <-task.Ctx.Done():
 		llog.Warn().Msg("collector: task cancelled after processing")
 

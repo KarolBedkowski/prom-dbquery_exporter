@@ -20,6 +20,7 @@ require (
 	github.com/sijms/go-ora/v2 v2.8.24
 	golang.org/x/crypto v0.37.0
 	golang.org/x/net v0.39.0
+	golang.org/x/sync v0.13.0
 	gopkg.in/yaml.v2 v2.4.0
 )
 
@@ -46,7 +47,6 @@ require (
 	github.com/rs/xid v1.6.0 // indirect
 	golang.org/x/exp v0.0.0-20250408133849-7e4ce0ab07d0 // indirect
 	golang.org/x/oauth2 v0.29.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
 	golang.org/x/sys v0.32.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect

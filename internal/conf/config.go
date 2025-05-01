@@ -153,6 +153,7 @@ func (c *Configuration) validate() error {
 
 	for name, db := range c.Database {
 		db.setup()
+
 		if err := db.validate(); err != nil {
 			errs = multierror.Append(errs, newConfigurationError(
 				fmt.Sprintf("validate database '%s' error", name)).Wrap(err))

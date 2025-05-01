@@ -21,7 +21,8 @@ type Job struct {
 	Database string
 	Interval time.Duration
 
-	Idx int `yaml:"-"`
+	Idx     int  `yaml:"-"`
+	IsValid bool `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
@@ -51,7 +52,13 @@ func (j *Job) validate(cfg *Configuration) error {
 
 	if j.Interval.Seconds() < 1 {
 		log.Logger.Warn().Msgf("configuration: job %d (%v, %v): interval < 1s: %v", j.Idx, j.Database, j.Query, j.Interval)
+		j.IsValid = false
 	}
 
-	return errs.ErrorOrNil()
+	err := errs.ErrorOrNil()
+	if err != nil {
+		j.IsValid = false
+	}
+
+	return err
 }

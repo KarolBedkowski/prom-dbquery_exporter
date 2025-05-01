@@ -21,4 +21,6 @@ var (
 	ErrLoaderStopped = InvalidConfigurationError("loader stopped")
 	// ErrAppNotConfigured is returned when there is application is not configured yet.
 	ErrAppNotConfigured = errors.New("app not configured")
+
+	ErrAborted = errors.New("task aborted")
 )

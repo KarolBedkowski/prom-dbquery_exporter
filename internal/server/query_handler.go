@@ -77,13 +77,17 @@ type queryHandler struct {
 	queryResultCache *support.Cache[[]byte]
 	// runningQuery lock the same request for running twice
 	queryLocker locker
+	taskQueue   chan<- *collectors.Task
 }
 
-func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte]) *queryHandler {
+func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte],
+	taskQueue chan<- *collectors.Task,
+) *queryHandler {
 	return &queryHandler{
 		configuration:    c,
 		queryLocker:      newLocker(),
 		queryResultCache: cache,
+		taskQueue:        taskQueue,
 	}
 }
 
@@ -258,15 +262,11 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 
 			logger.Debug().Object("task", &task).Msg("queryhandler: schedule task")
 
-			if err := collectors.CollectorsPool.ScheduleTask(&task); err != nil {
-				support.TraceErrorf(ctx, "scheduled %q to %q error: %v", queryName, dbName, err)
-				logger.Error().Err(err).Str("dbname", dbName).Str("query", queryName).
-					Msg("queryhandler: start task error")
-			} else {
-				support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
+			q.taskQueue <- &task
 
-				scheduled++
-			}
+			support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
+
+			scheduled++
 		}
 	}
 

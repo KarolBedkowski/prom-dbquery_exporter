@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/support"
 )
@@ -39,8 +40,9 @@ type WebHandler struct {
 
 // NewWebHandler create new WebHandler.
 func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string, cache *support.Cache[[]byte],
+	taskQueue chan<- *collectors.Task,
 ) *WebHandler {
-	qh := newQueryHandler(cfg, cache)
+	qh := newQueryHandler(cfg, cache, taskQueue)
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -99,12 +100,6 @@ func main() {
 	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
 	metrics.UpdateConfLoadTime()
 
-	if collectors.CollectorsPool == nil {
-		panic("database pool not configured")
-	}
-
-	collectors.CollectorsPool.UpdateConf(cfg)
-
 	if err := start(cfg, *listenAddress, *webConfig); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
@@ -114,11 +109,27 @@ func main() {
 }
 
 func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
+	collectors, taskQueue := collectors.NewCollectors(cfg)
+	defer close(taskQueue)
+
 	cache := support.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache)
-	sched := scheduler.NewScheduler(cache, cfg)
+	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache, taskQueue)
+	sched := scheduler.NewScheduler(cache, cfg, taskQueue)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	var runGroup run.Group
+
+	// Collectors
+	runGroup.Add(
+		func() error {
+			return collectors.Start(ctx)
+		},
+		func(_ error) {
+			cancel()
+		},
+	)
 
 	// Termination handler.
 	term := make(chan os.Signal, 1)
@@ -126,9 +137,9 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 	runGroup.Add(
 		func() error {
 			<-term
+			cancel()
 			log.Logger.Warn().Msg("Received SIGTERM, exiting...")
 			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
-			collectors.CollectorsPool.Close()
 
 			return nil
 		},
@@ -149,7 +160,7 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 					newConf.CopyRuntimeOptions(cfg)
 					webHandler.ReloadConf(newConf)
 					sched.ReloadConf(newConf)
-					collectors.CollectorsPool.UpdateConf(newConf)
+					collectors.UpdateConf(newConf)
 					metrics.UpdateConfLoadTime()
 					log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
 				} else {
@@ -200,12 +211,14 @@ func enableSDNotify() error {
 		return nil
 	}
 
-	go func(interval time.Duration) {
+	interval /= 2
+
+	go func() {
 		tick := time.Tick(interval)
 		for range tick {
 			_, _ = daemon.SdNotify(false, daemon.SdNotifyWatchdog)
 		}
-	}(interval / 2) //nolint:mnd
+	}()
 
 	return nil
 }

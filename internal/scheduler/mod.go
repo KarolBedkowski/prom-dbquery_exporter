@@ -10,13 +10,13 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/trace"
+	"golang.org/x/sync/errgroup"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
@@ -37,12 +37,13 @@ func (s *scheduledTask) MarshalZerologObject(event *zerolog.Event) {
 
 // Scheduler is background process that load configured data into cache in some intervals.
 type Scheduler struct {
-	log      zerolog.Logger
-	cfg      *conf.Configuration
-	cache    *support.Cache[[]byte]
-	stop     chan struct{}
-	tasks    []*scheduledTask
-	newCfgCh chan *conf.Configuration
+	log        zerolog.Logger
+	cfg        *conf.Configuration
+	cache      *support.Cache[[]byte]
+	stop       chan struct{}
+	tasks      []*scheduledTask
+	newCfgCh   chan *conf.Configuration
+	tasksQueue chan<- *collectors.Task
 
 	scheduledTasksCnt     prometheus.Counter
 	scheduledTasksSuccess prometheus.Counter
@@ -50,13 +51,16 @@ type Scheduler struct {
 }
 
 // NewScheduler create new scheduler that use `cache` and initial `cfg` configuration.
-func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration) *Scheduler {
+func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
+	tasksQueue chan<- *collectors.Task,
+) *Scheduler {
 	scheduler := &Scheduler{
-		cfg:      cfg,
-		cache:    cache,
-		stop:     make(chan struct{}),
-		log:      log.Logger.With().Str("module", "scheduler").Logger(),
-		newCfgCh: make(chan *conf.Configuration, 1),
+		cfg:        cfg,
+		cache:      cache,
+		stop:       make(chan struct{}),
+		log:        log.Logger.With().Str("module", "scheduler").Logger(),
+		newCfgCh:   make(chan *conf.Configuration, 1),
+		tasksQueue: tasksQueue,
 
 		scheduledTasksCnt: prometheus.NewCounter(
 			prometheus.CounterOpts{
@@ -134,26 +138,28 @@ func (s *Scheduler) Run() error {
 func (s *Scheduler) RunParallel() error {
 	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
 
-	group := sync.WaitGroup{}
-
 	for {
 		ctx, cancel := context.WithCancel(context.Background())
+		group, ctx := errgroup.WithContext(ctx)
 
 		// spawn background workers
 		for _, job := range s.tasks {
-			group.Add(1)
-
-			go func() {
+			group.Go(func() error {
 				s.runJobInLoop(ctx, job.job)
-				group.Done()
-			}()
+
+				return nil
+			})
 		}
 
 		select {
 		case <-s.stop:
 			s.log.Debug().Msg("scheduler: stopping")
 			cancel()
-			group.Wait()
+
+			if err := group.Wait(); err != nil {
+				s.log.Error().Err(err).Msg("scheduler: wait for errors finished error")
+			}
+
 			s.log.Debug().Msg("scheduler: stopped")
 
 			return nil
@@ -161,7 +167,11 @@ func (s *Scheduler) RunParallel() error {
 		case cfg := <-s.newCfgCh:
 			s.log.Debug().Msg("scheduler: stopping workers for config reload")
 			cancel()
-			group.Wait()
+
+			if err := group.Wait(); err != nil {
+				s.log.Error().Err(err).Msg("scheduler: wait for errors finished error")
+			}
+
 			s.log.Debug().Msg("scheduler: all workers stopped")
 			s.updateConfig(cfg)
 
@@ -245,9 +255,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 		IsScheduledJob: true,
 	}
 
-	if err := collectors.CollectorsPool.ScheduleTask(task); err != nil {
-		return fmt.Errorf("start task error: %w", err)
-	}
+	s.tasksQueue <- task
 
 	support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
 
@@ -307,22 +315,9 @@ func (s *Scheduler) updateConfig(cfg *conf.Configuration) {
 	tasks := make([]*scheduledTask, 0, len(cfg.Jobs))
 
 	for _, job := range cfg.Jobs {
-		// skip disabled jobs
-		if job.Interval.Seconds() <= 1 {
-			continue
+		if job.IsValid {
+			tasks = append(tasks, &scheduledTask{job: *job})
 		}
-
-		// skip unknown queries
-		if _, ok := (s.cfg.Query)[job.Query]; !ok {
-			continue
-		}
-
-		// skip unknown databases
-		if _, ok := s.cfg.Database[job.Database]; !ok {
-			continue
-		}
-
-		tasks = append(tasks, &scheduledTask{job: *job})
 	}
 
 	s.tasks = tasks
