@@ -18,10 +18,7 @@ import (
 )
 
 const (
-	defaultTimeout         = time.Duration(300) * time.Second // sec
-	defaultConnMaxLifetime = time.Duration(600) * time.Second
-	defaultMaxOpenConns    = 10
-	defaultMaxIdleConns    = 2
+	defaultTimeout = time.Duration(300) * time.Second // sec
 )
 
 type genericDatabase struct {
@@ -141,28 +138,29 @@ func (g *genericDatabase) String() string {
 }
 
 func (g *genericDatabase) configureConnection(ctx context.Context) {
-	g.conn.SetConnMaxLifetime(defaultConnMaxLifetime)
-	g.conn.SetMaxOpenConns(defaultMaxOpenConns)
-	g.conn.SetMaxIdleConns(defaultMaxIdleConns)
+	llog := log.Ctx(ctx)
 
-	if pool := g.dbConf.Pool; pool != nil {
-		llog := log.Ctx(ctx)
+	pool := g.dbConf.Pool
+	if pool == nil {
+		llog.Warn().Msg("no pool configuration")
 
-		if pool.MaxConnections > 0 {
-			llog.Debug().Int("max-conn", pool.MaxConnections).Msg("db: max connection set")
-			g.conn.SetMaxOpenConns(pool.MaxConnections)
-		}
+		return
+	}
 
-		if pool.MaxIdleConnections > 0 {
-			llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("db: max idle connection set")
-			g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
-		}
+	if pool.MaxConnections > 0 {
+		llog.Debug().Int("max-conn", pool.MaxConnections).Msg("db: max connection set")
+		g.conn.SetMaxOpenConns(pool.MaxConnections)
+	}
 
-		if pool.ConnMaxLifeTime > 0 {
-			llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
-				Msg("db: connection max life time set")
-			g.conn.SetConnMaxLifetime(pool.ConnMaxLifeTime)
-		}
+	if pool.MaxIdleConnections > 0 {
+		llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("db: max idle connection set")
+		g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
+	}
+
+	if pool.ConnMaxLifeTime > 0 {
+		llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
+			Msg("db: connection max life time set")
+		g.conn.SetConnMaxLifetime(pool.ConnMaxLifeTime)
 	}
 }
 
