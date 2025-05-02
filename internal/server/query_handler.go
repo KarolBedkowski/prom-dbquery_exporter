@@ -174,32 +174,29 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 }
 
 func (q *queryHandler) getFromCache(query *conf.Query, dbName string, params map[string]any) ([]byte, bool) {
-	if q.configuration.DisableCache || len(params) > 0 {
+	if q.configuration.DisableCache || len(params) > 0 || query.CachingTime == 0 {
 		return nil, false
 	}
 
-	if query.CachingTime > 0 {
-		queryKey := query.Name + "@" + dbName
-		if data, ok := q.queryResultCache.Get(queryKey); ok {
-			return data, ok
-		}
-	}
+	queryKey := query.Name + "@" + dbName
 
-	return nil, false
+	return q.queryResultCache.Get(queryKey)
 }
 
 func (q *queryHandler) putIntoCache(task *collectors.Task, data []byte) {
 	query := task.Query
 
 	// do not cache query with user params
-	if query == nil || len(task.Params) > 0 {
+	if q.configuration.DisableCache || query == nil || len(task.Params) > 0 || query.CachingTime == 0 {
 		return
 	}
 
-	if query.CachingTime > 0 && !q.configuration.DisableCache {
-		queryKey := query.Name + "@" + task.DBName
+	queryKey := query.Name + "@" + task.DBName
 
-		q.queryResultCache.Put(queryKey, query.CachingTime, data)
+	q.queryResultCache.Put(queryKey, query.CachingTime, data)
+
+	if d := log.Logger.Debug(); d.Enabled() {
+		d.Strs("cache_items", q.queryResultCache.Content()).Msg("objects in cache")
 	}
 }
 
