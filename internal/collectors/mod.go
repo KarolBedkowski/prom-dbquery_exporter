@@ -2,7 +2,7 @@ package collectors
 
 //
 // mod.go
-// Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
+// Copyright (C) 2023-2025 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
 //
@@ -52,19 +52,13 @@ func NewCollectors(cfg *conf.Configuration) (*Collectors, chan<- *Task) {
 	return colls, colls.taskQueue
 }
 
-func (cs *Collectors) Start(ctx context.Context) error {
+func (cs *Collectors) Run(ctx context.Context) error {
 	for {
 		cs.log.Debug().Msg("collectors: starting...")
 
-		if err := cs.createCollectors(); err != nil {
+		group, cancel, err := cs.startLoaders()
+		if err != nil {
 			return err
-		}
-
-		cctx, cancel := context.WithCancel(context.Background())
-		group, cctx := errgroup.WithContext(cctx)
-
-		for _, dbloader := range cs.collectors {
-			group.Go(func() error { return dbloader.start(cctx) })
 		}
 
 	loop:
@@ -258,4 +252,19 @@ func (cs *Collectors) createCollectors() error {
 	cs.collectors = collectors
 
 	return nil
+}
+
+func (cs *Collectors) startLoaders() (*errgroup.Group, context.CancelFunc, error) {
+	if err := cs.createCollectors(); err != nil {
+		return nil, nil, err
+	}
+
+	cctx, cancel := context.WithCancel(context.Background())
+	group, cctx := errgroup.WithContext(cctx)
+
+	for _, dbloader := range cs.collectors {
+		group.Go(func() error { return dbloader.run(cctx) })
+	}
+
+	return group, cancel, nil
 }

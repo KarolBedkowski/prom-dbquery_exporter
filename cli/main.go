@@ -121,7 +121,8 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 	defer cancel()
 
 	// Collectors
-	runGroup.Add(func() error { return collectors.Start(ctx) }, func(_ error) { cancel() })
+	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
+	runGroup.Add(webHandler.Run, webHandler.Stop)
 
 	// Termination handler.
 	term := make(chan os.Signal, 1)
@@ -162,8 +163,6 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 		},
 		func(_ error) { close(hup) },
 	)
-
-	runGroup.Add(webHandler.Run, webHandler.Close)
 
 	if cfg.ParallelScheduler {
 		runGroup.Add(func() error { return sched.RunParallel(ctx) }, sched.Close)

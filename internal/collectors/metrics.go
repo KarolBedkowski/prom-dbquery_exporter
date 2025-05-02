@@ -2,7 +2,7 @@ package collectors
 
 //
 // pool.go
-// Copyright (C) 2021 Karol Będkowski <Karol Będkowski@kkomp>
+// Copyright (C) 2021-2025 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
 //
@@ -31,7 +31,7 @@ var (
 		[]string{"loader"})
 )
 
-func initMetrics() {
+func init() {
 	prometheus.MustRegister(workersCreatedCnt)
 	prometheus.MustRegister(tasksQueueWaitTime)
 }

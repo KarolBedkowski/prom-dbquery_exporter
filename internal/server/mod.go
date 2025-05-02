@@ -98,8 +98,8 @@ func (w *WebHandler) Run() error {
 	return nil
 }
 
-// Close stop listen webhandler.
-func (w *WebHandler) Close(err error) {
+// Stop stop listen webhandler.
+func (w *WebHandler) Stop(err error) {
 	_ = err
 
 	log.Logger.Debug().Msg("webhandler: closing")
