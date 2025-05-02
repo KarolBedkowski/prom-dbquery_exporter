@@ -203,7 +203,7 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	s.scheduledTasksCnt.Inc()
 
 	llog := s.log.With().Str("dbname", job.Database).Str("query", job.Query).Int("job_idx", job.Idx).Logger()
-	log.Debug().Msg("scheduler: job processing start")
+	llog.Debug().Msg("scheduler: job processing start")
 
 	ctx = llog.WithContext(ctx)
 
