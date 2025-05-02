@@ -13,7 +13,9 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/xid"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/trace"
 	"golang.org/x/sync/errgroup"
@@ -117,17 +119,14 @@ func (s *Scheduler) Run(ctx context.Context) error {
 
 			return nil
 
-		case cfg := <-s.newCfgCh:
-			s.updateConfig(cfg)
-			s.rescheduleTask()
+		case cfg, ok := <-s.newCfgCh:
+			if ok {
+				s.updateConfig(cfg)
+				s.rescheduleTask()
+			}
 
 		case <-timer.C:
-			for _, job := range s.tasks {
-				if time.Now().After(job.nextRun) {
-					s.handleJobWithMetrics(ctx, job.job)
-					job.nextRun = time.Now().Add(job.job.Interval)
-				}
-			}
+			s.runOverdueJobs(ctx)
 		}
 	}
 }
@@ -162,7 +161,13 @@ func (s *Scheduler) RunParallel(ctx context.Context) error {
 
 			return nil
 
-		case cfg := <-s.newCfgCh:
+		case cfg, ok := <-s.newCfgCh:
+			if !ok {
+				cancel()
+
+				return nil
+			}
+
 			s.log.Debug().Msg("scheduler: stopping workers for config reload")
 			cancel()
 
@@ -182,7 +187,7 @@ func (s *Scheduler) RunParallel(ctx context.Context) error {
 func (s *Scheduler) Close(err error) {
 	_ = err
 
-	log.Logger.Debug().Msg("scheduler: stopping")
+	s.log.Debug().Msg("scheduler: stopping")
 	close(s.newCfgCh)
 }
 
@@ -240,7 +245,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	defer close(output)
 
 	task := &collectors.Task{
-		Ctx:          ctx,
+		Ctx:          hlog.CtxWithID(ctx, xid.New()),
 		DBName:       dbName,
 		QueryName:    queryName,
 		Params:       nil,
@@ -261,15 +266,26 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 
 		return fmt.Errorf("processing error: %w", err)
 
-	case res := <-output:
-		if res.Error != nil {
-			return fmt.Errorf("processing error: %w", res.Error)
-		}
+	case res, ok := <-output:
+		if ok {
+			if res.Error != nil {
+				return fmt.Errorf("processing error: %w", res.Error)
+			}
 
-		s.cache.Put(query.Name+"@"+dbName, query.CachingTime, res.Result)
+			s.cache.Put(query.Name+"@"+dbName, query.CachingTime, res.Result)
+		}
 	}
 
 	return nil
+}
+
+func (s *Scheduler) runOverdueJobs(ctx context.Context) {
+	for _, job := range s.tasks {
+		if time.Now().After(job.nextRun) {
+			s.handleJobWithMetrics(ctx, job.job)
+			job.nextRun = time.Now().Add(job.job.Interval)
+		}
+	}
 }
 
 // / runJobInLoop run in goroutine and get data from data for one job in defined intervals.
