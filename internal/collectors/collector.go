@@ -23,21 +23,24 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
-// collector handle task for one collector (loader).
+// collector handle task for one loader.
 type collector struct {
 	log    zerolog.Logger
 	loader db.Database
 	cfg    *conf.Database
-	// tasks is queue task to schedule
+	// tasks is queue task to schedule.
 	tasks chan *Task
-	// workQueue is chan that distribute task to workers
+	// workQueue is chan that distribute task to workers.
 	workQueue chan *Task
-	// workBgQueue is chan that distribute task to workers created by scheduler
+	// workBgQueue is chan that distribute task created by scheduler to dedicated pool of workers.
 	workBgQueue chan *Task
 	dbName      string
 
+	// normalWorkersGroup is pool of workers that handle normal tasks and scheduled task when
+	// background workers are disabled.
 	normalWorkersGroup errgroup.Group
-	bgWorkersGroup     errgroup.Group
+	// bgWorkersGroup is pool of workers that handle only tasks created by scheduler.
+	bgWorkersGroup errgroup.Group
 
 	// workerID is last unique worker id
 	workerID uint64
@@ -54,7 +57,6 @@ func newCollector(name string, cfg *conf.Database) (*collector, error) {
 	col := &collector{
 		dbName:      name,
 		loader:      loader,
-		tasks:       make(chan *Task, 1),
 		workQueue:   make(chan *Task, tasksQueueSize),
 		workBgQueue: make(chan *Task, tasksQueueSize),
 		cfg:         cfg,
@@ -81,6 +83,9 @@ func (c *collector) addTask(task *Task) {
 func (c *collector) run(ctx context.Context) error {
 	c.log.Debug().Msg("collector: starting")
 
+	c.tasks = make(chan *Task, 1)
+	defer close(c.tasks)
+
 	support.SetGoroutineLabels(context.Background(), "main_worker", c.dbName)
 
 loop:
@@ -88,8 +93,6 @@ loop:
 		select {
 		case <-ctx.Done():
 			c.log.Debug().Msg("collector: stopping workers...")
-			close(c.tasks)
-			c.log.Debug().Msg("collector: workers stopped")
 
 			break loop
 

@@ -37,13 +37,15 @@ func printVersion() {
 	} else {
 		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
 	}
+
+	fmt.Printf("Available template functions: %s\n", support.AvailableTmplFunctions()) //nolint:forbidigo
 }
 
 func printWelcome() {
 	log.Logger.Info().
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
-		Msg("Starting DBQuery exporter")
+		Msg("starting DBQuery exporter")
 
 	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
 		log.Logger.Fatal().Msg("no databases supported, check compile flags")

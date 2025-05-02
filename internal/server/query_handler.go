@@ -26,7 +26,7 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
-const defaultMaxLockTime = 20 * time.Minute
+const maxLockTime = time.Duration(20) * time.Minute
 
 type lockInfo struct {
 	ts  time.Time
@@ -39,12 +39,11 @@ func (l lockInfo) String() string {
 
 type locker struct {
 	runningQuery map[string]lockInfo
-	maxLockTime  time.Duration
 	sync.Mutex
 }
 
 func newLocker() locker {
-	return locker{runningQuery: make(map[string]lockInfo), maxLockTime: defaultMaxLockTime}
+	return locker{runningQuery: make(map[string]lockInfo)}
 }
 
 func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
@@ -52,7 +51,7 @@ func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
 	defer l.Unlock()
 
 	if li, ok := l.runningQuery[queryKey]; ok {
-		if time.Since(li.ts) < l.maxLockTime {
+		if time.Since(li.ts) < maxLockTime {
 			return li.String(), false
 		}
 
@@ -123,7 +122,8 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 	// prevent to run the same request twice
 	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
-		http.Error(writer, "query in progress, started by "+locker, http.StatusInternalServerError)
+		logger.Warn().Msgf("query already in progress, started by %s", locker)
+		http.Error(writer, "query in progress", http.StatusInternalServerError)
 		support.TraceErrorf(ctx, "query locked by %s", locker)
 
 		return

@@ -127,15 +127,6 @@ func (d *Database) CheckConnectionParam(keys ...string) error {
 	return nil
 }
 
-// GetConnectTimeout return connection timeout from configuration or default.
-func (d *Database) GetConnectTimeout() time.Duration {
-	if d.ConnectTimeout > 0 {
-		return d.ConnectTimeout
-	}
-
-	return defaultConnectioTimeout
-}
-
 func (d *Database) validatePG() error {
 	if d.CheckConnectionParam("connstr") == nil {
 		return nil
@@ -180,6 +171,10 @@ func (d *Database) setup(name string) {
 		d.BackgroundWorkers = 0
 	} else {
 		d.MaxWorkers -= d.BackgroundWorkers
+	}
+
+	if d.ConnectTimeout <= 0 {
+		d.ConnectTimeout = defaultConnectioTimeout
 	}
 }
 

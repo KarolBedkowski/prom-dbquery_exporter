@@ -185,7 +185,7 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 	g.configureConnection(ctx)
 
 	// check is database is working
-	lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
+	lctx, cancel := context.WithTimeout(ctx, g.dbConf.ConnectTimeout)
 	defer cancel()
 
 	if err = g.conn.PingContext(lctx); err != nil {
@@ -231,7 +231,7 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 }
 
 func (g *genericDatabase) executeInitialQuery(ctx context.Context, sql string, conn *sqlx.Conn) error {
-	lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
+	lctx, cancel := context.WithTimeout(ctx, g.dbConf.ConnectTimeout)
 	defer cancel()
 
 	rows, err := conn.QueryxContext(lctx, sql)
