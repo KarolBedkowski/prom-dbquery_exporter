@@ -50,6 +50,8 @@ func printWelcome() {
 	} else {
 		log.Logger.Info().Msgf("supported databases: %s", sdb)
 	}
+
+	log.Logger.Info().Msgf("available template functions: %s", support.AvailableTmplFunctions())
 }
 
 // Main is main function for cli.
