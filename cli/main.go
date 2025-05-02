@@ -92,9 +92,12 @@ func main() {
 	}
 
 	cfg, err := conf.LoadConfiguration(*configFile)
-	if err != nil || cfg == nil {
-		log.Logger.Fatal().Err(err).Str("file", *configFile).
-			Msg("load config file error")
+	if err != nil {
+		log.Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
+	}
+
+	if cfg == nil {
+		panic("create configuration error")
 	}
 
 	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput)
