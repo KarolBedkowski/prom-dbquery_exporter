@@ -194,10 +194,6 @@ func (q *queryHandler) putIntoCache(task *collectors.Task, data []byte) {
 	queryKey := query.Name + "@" + task.DBName
 
 	q.queryResultCache.Put(queryKey, query.CachingTime, data)
-
-	if d := log.Logger.Debug(); d.Enabled() {
-		d.Strs("cache_items", q.queryResultCache.Content()).Msg("objects in cache")
-	}
 }
 
 func (q *queryHandler) validateOutput(output []byte) error {
