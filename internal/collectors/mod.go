@@ -259,9 +259,3 @@ func (cs *Collectors) createCollectors() error {
 
 	return nil
 }
-
-// Init db subsystem.
-func Init() {
-	initMetrics()
-	initTemplates()
-}

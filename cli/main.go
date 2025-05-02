@@ -87,8 +87,6 @@ func main() {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
-	collectors.Init()
-
 	cfg, err := conf.LoadConfiguration(*configFile)
 	if err != nil || cfg == nil {
 		log.Logger.Fatal().Err(err).Str("file", *configFile).

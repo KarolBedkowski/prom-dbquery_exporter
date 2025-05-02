@@ -15,6 +15,8 @@ import (
 )
 
 func init() {
+	FuncMap["buckets"] = buckets
+	FuncMap["bucketsInt"] = bucketsInt
 	FuncMap["genericBuckets"] = buckets
 	FuncMap["genericBucketsInt"] = bucketsInt
 }
