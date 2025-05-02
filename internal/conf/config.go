@@ -95,6 +95,8 @@ func LoadConfiguration(filename string) (*Configuration, error) {
 		return nil, newConfigurationError("unmarshal file error").Wrap(err)
 	}
 
+	conf.Global.setup()
+
 	for name, db := range conf.Database {
 		db.setup(name)
 	}
