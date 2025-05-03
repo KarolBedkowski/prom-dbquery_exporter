@@ -155,14 +155,15 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	queryNames = deduplicateStringList(queryNames)
 	dbNames = deduplicateStringList(dbNames)
 	dWriter := dataWriter{writer: writer}
+	cancelCh := make(chan struct{}, 1)
 
 	dWriter.writeHeaders()
 	support.TracePrintf(ctx, "start querying db")
 
-	output := q.queryDatabases(ctx, dbNames, queryNames, params, &dWriter)
+	output := q.queryDatabases(ctx, dbNames, queryNames, params, &dWriter, cancelCh)
 
 	support.TracePrintf(ctx, "start reading data, scheduled: %d", dWriter.scheduled)
-	q.writeResult(ctx, &dWriter, output)
+	q.writeResult(ctx, &dWriter, output, cancelCh)
 	logger.Debug().Int("written", dWriter.written).
 		Err(ctx.Err()).
 		Msg("queryhandler: all database queries finished")
@@ -208,13 +209,15 @@ func (q *queryHandler) validateOutput(output []byte) error {
 }
 
 func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]any, dWriter *dataWriter,
+	queryNames []string, params map[string]any, dWriter *dataWriter, cancelCh chan struct{},
 ) chan *collectors.TaskResult {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("queryhandler: database processing start")
 
 	output := make(chan *collectors.TaskResult, len(dbNames)*len(queryNames))
 	now := time.Now()
+
+	reqID, _ := hlog.IDFromCtx(ctx)
 
 	for _, dbName := range dbNames {
 		for _, queryName := range queryNames {
@@ -235,19 +238,20 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 				continue
 			}
 
-			task := collectors.Task{
-				Ctx:          ctx,
+			task := &collectors.Task{
 				DBName:       dbName,
 				QueryName:    queryName,
 				Params:       params,
 				Output:       output,
 				Query:        query,
 				RequestStart: now,
+				ReqID:        reqID.String(),
+				CancelCh:     cancelCh,
 			}
 
-			logger.Debug().Object("task", &task).Msg("queryhandler: schedule task")
+			logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
 
-			q.taskQueue <- &task
+			q.taskQueue <- task
 
 			support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
 
@@ -258,7 +262,9 @@ func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
 	return output
 }
 
-func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp <-chan *collectors.TaskResult) {
+func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp <-chan *collectors.TaskResult,
+	cancelCh chan<- struct{},
+) {
 	logger := log.Ctx(ctx)
 	logger.Debug().Msgf("queryhandler: write result start; waiting for %d results", dWriter.scheduled)
 
@@ -292,8 +298,9 @@ loop:
 			q.putIntoCache(task, res.Result)
 
 		case <-ctx.Done():
+			close(cancelCh)
 			err := ctx.Err()
-			logger.Error().Err(err).Msg("queryhandler: result error")
+			logger.Error().Err(err).Msg("queryhandler: context cancelled")
 			metrics.IncProcessErrorsCnt("cancel")
 			support.TraceErrorf(ctx, "result error: %s", err)
 
@@ -306,6 +313,7 @@ func paramsFromQuery(req *http.Request) map[string]any {
 	params := make(map[string]any)
 
 	for k, v := range req.URL.Query() {
+		// standard parameters
 		if k != "query" && k != "group" && k != "database" && len(v) > 0 {
 			params[k] = v[0]
 		}

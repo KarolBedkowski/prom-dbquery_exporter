@@ -175,7 +175,7 @@ loop:
 		case task, ok := <-workQueue:
 			if ok {
 				wlog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
-				support.SetGoroutineLabels(task.Ctx, "query", task.QueryName, "worker", idxstr, "db", c.dbName)
+				support.SetGoroutineLabels(ctx, "query", task.QueryName, "worker", idxstr, "db", c.dbName, "req_id", task.ReqID)
 				tasksQueueWaitTime.WithLabelValues(c.dbName).Observe(time.Since(task.RequestStart).Seconds())
 
 				c.handleTask(ctx, wlog, task)
@@ -192,56 +192,49 @@ loop:
 func (c *collector) handleTask(ctx context.Context, wlog zerolog.Logger, task *Task) {
 	llog := wlog.With().Object("task", task).Logger()
 
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	// is task already cancelled?
 	select {
-	case <-task.Ctx.Done():
+	case <-task.Cancelled():
 		llog.Warn().Msg("collector: task cancelled before processing")
 
+		return
+	case <-ctx.Done():
 		return
 	default:
 	}
 
-	if task.Ctx.Err() != nil {
-		return
-	}
-
 	// get result
-	res := c.queryDatabase(wlog, task)
+	res := make(chan *TaskResult, 1)
+	go c.queryDatabase(ctx, wlog, task, res)
 
 	// check is task cancelled in meantime
 	select {
 	case <-ctx.Done():
-		llog.Warn().Msg("collector: worker stopped after processing")
+		llog.Warn().Err(ctx.Err()).Msg("collector: worker stopped when processing")
 
-		return
-	case <-task.Ctx.Done():
-		llog.Warn().Msg("collector: task cancelled after processing")
+	case <-task.Cancelled():
+		llog.Warn().Msg("collector: task cancelled when processing")
 
-		return
-	default:
+	case r := <-res:
+		// send result
+		task.Output <- r
 	}
-
-	if task.Ctx.Err() != nil {
-		llog.Warn().Msg("collector: can't send output")
-
-		return
-	}
-
-	// send result
-	task.Output <- res
 }
 
 // queryDatabase get result from loader.
-func (c *collector) queryDatabase(llog zerolog.Logger, task *Task) *TaskResult {
-	ctx := task.Ctx
-
+func (c *collector) queryDatabase(ctx context.Context, llog zerolog.Logger, task *Task, res chan *TaskResult) {
 	support.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
 
 	result, err := c.loader.Query(ctx, task.Query, task.Params)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("query")
 
-		return c.handleQueryError(llog, task, err)
+		res <- c.handleQueryError(ctx, llog, task, err)
+
+		return
 	}
 
 	llog.Debug().Msg("collector: result received")
@@ -250,22 +243,23 @@ func (c *collector) queryDatabase(llog zerolog.Logger, task *Task) *TaskResult {
 	output, err := formatResult(ctx, result, task.Query, c.cfg)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("format")
+		res <- task.newResult(fmt.Errorf("format error: %w", err), nil)
 
-		return task.newResult(fmt.Errorf("format error: %w", err), nil)
+		return
 	}
 
 	llog.Debug().Msg("collector: result formatted")
 	support.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
 
-	return task.newResult(nil, output)
+	res <- task.newResult(nil, output)
 }
 
-func (c *collector) handleQueryError(llog zerolog.Logger, task *Task, err error) *TaskResult {
+func (c *collector) handleQueryError(ctx context.Context, llog zerolog.Logger, task *Task, err error) *TaskResult {
 	// When OnError is defined - generate metrics according to this template
 	if task.Query.OnErrorTpl != nil {
 		llog.Warn().Err(err).Msg("collector: query error handled by on error template")
 
-		if output, err := formatError(task.Ctx, err, task.Query, c.cfg); err != nil {
+		if output, err := formatError(ctx, err, task.Query, c.cfg); err != nil {
 			llog.Error().Err(err).Msg("collector: format error result error")
 		} else {
 			llog.Debug().Bytes("output", output).Msg("result")

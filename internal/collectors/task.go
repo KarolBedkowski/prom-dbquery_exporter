@@ -8,26 +8,39 @@ package collectors
 //
 
 import (
-	"context"
 	"time"
 
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/hlog"
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
 // Task is query to perform.
 type Task struct {
 	RequestStart time.Time
-	// Ctx is context used for cancellation.
-	Ctx       context.Context //nolint:containedctx
-	Query     *conf.Query
-	Params    map[string]any
-	Output    chan *TaskResult
-	DBName    string
-	QueryName string
+	Query        *conf.Query
+	Params       map[string]any
+	Output       chan *TaskResult
+	DBName       string
+	QueryName    string
 
 	IsScheduledJob bool
+	ReqID          string
+
+	CancelCh chan struct{}
+}
+
+// Cancelled check is task cancelled.
+func (d *Task) Cancelled() <-chan struct{} {
+	return d.CancelCh
+}
+
+// WithCancel create CancelCh and return cancel function.
+func (d *Task) WithCancel() (*Task, func()) {
+	if d.CancelCh == nil {
+		d.CancelCh = make(chan struct{})
+	}
+
+	return d, d.cancel
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
@@ -35,13 +48,8 @@ func (d *Task) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("db", d.DBName).
 		Str("query", d.QueryName).
 		Bool("is_job", d.IsScheduledJob).
-		Interface("params", d.Params)
-
-	if d.Ctx != nil {
-		if rid, ok := hlog.IDFromCtx(d.Ctx); ok {
-			e.Str("req_id", rid.String())
-		}
-	}
+		Interface("params", d.Params).
+		Str("req_id", d.ReqID)
 }
 
 func (d *Task) newResult(err error, result []byte) *TaskResult {
@@ -49,6 +57,13 @@ func (d *Task) newResult(err error, result []byte) *TaskResult {
 		Error:  err,
 		Result: result,
 		Task:   d,
+	}
+}
+
+func (d *Task) cancel() {
+	if d.CancelCh != nil {
+		close(d.CancelCh)
+		d.CancelCh = nil
 	}
 }
 

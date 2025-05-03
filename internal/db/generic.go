@@ -93,6 +93,12 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 		}
 	}
 
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
+	default:
+	}
+
 	result.Records, err = createRecords(rows)
 	if err != nil {
 		return nil, fmt.Errorf("create record error: %w", err)

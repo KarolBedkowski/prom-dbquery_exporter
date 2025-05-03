@@ -15,7 +15,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/xid"
 	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/trace"
 	"golang.org/x/sync/errgroup"
@@ -245,16 +244,20 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	defer close(output)
 
 	task := &collectors.Task{
-		Ctx:          hlog.CtxWithID(ctx, xid.New()),
 		DBName:       dbName,
 		QueryName:    queryName,
 		Params:       nil,
 		Output:       output,
 		Query:        query,
 		RequestStart: time.Now(),
+		ReqID:        xid.New().String(),
 
 		IsScheduledJob: true,
 	}
+
+	// cancel task on end
+	task, cancel := task.WithCancel()
+	defer cancel()
 
 	s.tasksQueue <- task
 
@@ -262,9 +265,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 
 	select {
 	case <-ctx.Done():
-		err := ctx.Err()
-
-		return fmt.Errorf("processing error: %w", err)
+		return fmt.Errorf("processing error: %w", ctx.Err())
 
 	case res, ok := <-output:
 		if ok {
