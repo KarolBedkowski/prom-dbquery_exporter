@@ -4,11 +4,13 @@
 package conf
 
 import (
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
 )
 
@@ -28,6 +30,7 @@ type Configuration struct {
 	DisableCache      bool   `yaml:"-"`
 	ParallelScheduler bool   `yaml:"-"`
 	ValidateOutput    bool   `yaml:"-"`
+	EnableInfo        bool   `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
@@ -55,7 +58,8 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 		Str("config_filename", c.ConfigFilename).
 		Bool("disable_cache", c.DisableCache).
 		Bool("parallel_scheduler", c.ParallelScheduler).
-		Bool("validateOutput", c.ValidateOutput))
+		Bool("validate_output", c.ValidateOutput).
+		Bool("enable_info", c.EnableInfo))
 }
 
 // GroupQueries return queries that belong to given group.
@@ -77,9 +81,12 @@ outerloop:
 
 // LoadConfiguration from filename.
 func LoadConfiguration(filename string) (*Configuration, error) {
+	logger := log.Logger.With().Str("module", "config").Logger()
 	conf := &Configuration{
 		ConfigFilename: filename,
 	}
+
+	logger.Info().Msgf("Loading config file %s", filename)
 
 	b, err := os.ReadFile(filename) // #nosec
 	if err != nil {
@@ -90,19 +97,22 @@ func LoadConfiguration(filename string) (*Configuration, error) {
 		return nil, newConfigurationError("unmarshal file error").Wrap(err)
 	}
 
+	conf.Global.setup()
+
 	for name, db := range conf.Database {
-		db.Name = name
+		db.setup(name)
 	}
 
 	for name, q := range conf.Query {
-		q.Name = name
+		q.setup(name)
 	}
 
 	for idx, j := range conf.Jobs {
-		j.Idx = idx + 1
+		j.setup(idx + 1)
 	}
 
-	if err = conf.validate(); err != nil {
+	ctx := logger.WithContext(context.Background())
+	if err = conf.validate(ctx); err != nil {
 		return nil, newConfigurationError("validate error").Wrap(err)
 	}
 
@@ -113,9 +123,10 @@ func (c *Configuration) CopyRuntimeOptions(oldcfg *Configuration) {
 	c.DisableCache = oldcfg.DisableCache
 	c.ParallelScheduler = oldcfg.ParallelScheduler
 	c.ValidateOutput = oldcfg.ValidateOutput
+	c.EnableInfo = oldcfg.EnableInfo
 }
 
-func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateOutput *bool) {
+func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateOutput, enableInfo *bool) {
 	if disableCache != nil {
 		c.DisableCache = *disableCache
 	}
@@ -127,9 +138,37 @@ func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateO
 	if validateOutput != nil {
 		c.ValidateOutput = *validateOutput
 	}
+
+	if enableInfo != nil {
+		c.EnableInfo = *enableInfo
+	}
 }
 
-func (c *Configuration) validate() error {
+func (c *Configuration) validateJobs(ctx context.Context) error {
+	var errs *multierror.Error
+
+	validJobs := 0
+
+	for i, job := range c.Jobs {
+		if err := job.validate(ctx, c); err != nil {
+			errs = multierror.Append(errs, newConfigurationError(
+				fmt.Sprintf("validate job %d error", i+1)).Wrap(err))
+		}
+
+		if job.IsValid {
+			validJobs++
+		}
+	}
+
+	if len(c.Jobs) > 0 && validJobs == 0 {
+		logger := log.Ctx(ctx)
+		logger.Warn().Msgf("configuration: all jobs are invalid!")
+	}
+
+	return errs.ErrorOrNil()
+}
+
+func (c *Configuration) validate(ctx context.Context) error {
 	var errs *multierror.Error
 
 	if len(c.Database) == 0 {
@@ -158,12 +197,7 @@ func (c *Configuration) validate() error {
 		}
 	}
 
-	for i, job := range c.Jobs {
-		if err := job.validate(c); err != nil {
-			errs = multierror.Append(errs, newConfigurationError(
-				fmt.Sprintf("validate job %d error", i+1)).Wrap(err))
-		}
-	}
+	errs = multierror.Append(errs, c.validateJobs(ctx))
 
 	return errs.ErrorOrNil()
 }

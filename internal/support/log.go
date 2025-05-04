@@ -9,6 +9,7 @@
 package support
 
 import (
+	"context"
 	stdlog "log"
 	"os"
 	"time"
@@ -53,4 +54,12 @@ func outputIsConsole() bool {
 	fileInfo, _ := os.Stdout.Stat()
 
 	return fileInfo != nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
+}
+
+func GetLoggerFromCtx(ctx context.Context) zerolog.Logger {
+	if llog := log.Ctx(ctx); llog != nil {
+		return *llog
+	}
+
+	return log.Logger
 }

@@ -9,8 +9,38 @@ package db
 
 import (
 	"fmt"
+	"maps"
 	"net/url"
+	"slices"
+	"sort"
+
+	"prom-dbquery_exporter.app/internal/conf"
 )
+
+type dbCreator (func(cfg *conf.Database) (Database, error))
+
+var supportedDatabases map[string]dbCreator
+
+func registerDatabase(creator dbCreator, names ...string) {
+	if supportedDatabases == nil {
+		supportedDatabases = make(map[string]dbCreator)
+	}
+
+	for _, n := range names {
+		supportedDatabases[n] = creator
+	}
+}
+
+func SupportedDatabases() []string {
+	if len(supportedDatabases) == 0 {
+		return nil
+	}
+
+	s := slices.Collect(maps.Keys(supportedDatabases))
+	sort.Strings(s)
+
+	return s
+}
 
 type standardParams struct {
 	params url.Values
@@ -50,29 +80,4 @@ func (s *standardParams) load(cfg map[string]any) {
 			s.params.Add(key, vstr)
 		}
 	}
-}
-
-func SupportedDatabases() []string {
-	var res []string
-	if SqliteSupported {
-		res = append(res, "sqlite")
-	}
-
-	if MysqlSupported {
-		res = append(res, "mysql")
-	}
-
-	if MssqlSupported {
-		res = append(res, "mssql")
-	}
-
-	if PostgresqlSupported {
-		res = append(res, "postgresql")
-	}
-
-	if OracleSupported {
-		res = append(res, "oracle")
-	}
-
-	return res
 }

@@ -8,9 +8,12 @@ package support
 //
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
@@ -20,6 +23,7 @@ type (
 		cache     map[string]cacheItem[T]
 		name      string
 		cacheLock sync.Mutex
+		logger    zerolog.Logger
 	}
 
 	cacheItem[T any] struct {
@@ -31,8 +35,9 @@ type (
 // NewCache create  new cache object.
 func NewCache[T any](name string) *Cache[T] {
 	return &Cache[T]{
-		name:  name,
-		cache: make(map[string]cacheItem[T]),
+		name:   name,
+		cache:  make(map[string]cacheItem[T]),
+		logger: log.Logger.With().Str("subsystem", "cache").Str("cache_name", name).Logger(),
 	}
 }
 
@@ -40,6 +45,8 @@ func NewCache[T any](name string) *Cache[T] {
 func (r *Cache[T]) Get(key string) (T, bool) {
 	r.cacheLock.Lock()
 	defer r.cacheLock.Unlock()
+
+	r.logger.Debug().Msgf("get from cache: key=%s", key)
 
 	item, ok := r.cache[key]
 	if !ok {
@@ -65,6 +72,7 @@ func (r *Cache[T]) Put(key string, ttl time.Duration, data T) {
 	r.cacheLock.Lock()
 	defer r.cacheLock.Unlock()
 
+	r.logger.Debug().Msgf("put into cache: key=%s; ttl=%s", key, ttl)
 	r.cache[key] = cacheItem[T]{
 		expireTS: time.Now().Add(ttl),
 		content:  data,
@@ -76,7 +84,20 @@ func (r *Cache[T]) Clear() {
 	r.cacheLock.Lock()
 	defer r.cacheLock.Unlock()
 
+	r.logger.Debug().Msg("clear cache")
 	clear(r.cache)
+}
+
+func (r *Cache[T]) Content() []string {
+	r.cacheLock.Lock()
+	defer r.cacheLock.Unlock()
+
+	res := make([]string, 0, len(r.cache))
+	for k, v := range r.cache {
+		res = append(res, fmt.Sprintf("%s: expires: %s", k, v.expireTS))
+	}
+
+	return res
 }
 
 // func (r *Cache) purgeExpired() {

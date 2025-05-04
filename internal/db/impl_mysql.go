@@ -15,9 +15,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-const MysqlSupported = true
-
-func newMysqlLoader(cfg *conf.Database) (*genericDatabase, error) {
+func newMysqlLoader(cfg *conf.Database) (Database, error) {
 	params := &standardParams{
 		host: "localhost",
 		port: "3306",
@@ -60,4 +58,8 @@ func newMysqlLoader(cfg *conf.Database) (*genericDatabase, error) {
 	}
 
 	return l, nil
+}
+
+func init() {
+	registerDatabase(newMysqlLoader, "mssql", "mariadb", "tidb")
 }

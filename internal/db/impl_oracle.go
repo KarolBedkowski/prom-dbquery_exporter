@@ -15,9 +15,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-const OracleSupported = true
-
-func newOracleLoader(cfg *conf.Database) (*genericDatabase, error) {
+func newOracleLoader(cfg *conf.Database) (Database, error) {
 	params := newStandardParams(cfg.Connection)
 
 	if params.dbname == "" {
@@ -60,4 +58,8 @@ func newOracleLoader(cfg *conf.Database) (*genericDatabase, error) {
 	}
 
 	return l, nil
+}
+
+func init() {
+	registerDatabase(newOracleLoader, "oracle", "oci8")
 }

@@ -2,18 +2,20 @@ package collectors
 
 //
 // mod.go
-// Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
+// Copyright (C) 2023-2025 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
 //
 
 import (
-	"fmt"
-	"sync"
+	"context"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"golang.org/x/sync/errgroup"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 // Collectors is collection of all configured databases.
@@ -21,122 +23,192 @@ type Collectors struct {
 	log        zerolog.Logger
 	cfg        *conf.Configuration
 	collectors map[string]*collector
-	sync.Mutex
+	newConfCh  chan *conf.Configuration
+	taskQueue  chan *Task
 }
 
-// newCollectors create new Databases object.
-func newCollectors() *Collectors {
-	return &Collectors{
+// NewCollectors create new Databases object.
+func NewCollectors(cfg *conf.Configuration) (*Collectors, chan<- *Task) {
+	colls := &Collectors{
 		collectors: make(map[string]*collector),
-		cfg:        nil,
+		cfg:        cfg,
 		log:        log.Logger.With().Str("module", "databases").Logger(),
+		taskQueue:  make(chan *Task),
+		newConfCh:  make(chan *conf.Configuration, 1),
 	}
+
+	prometheus.MustRegister(
+		prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace: metrics.MetricsNamespace,
+				Name:      "loaders_in_pool",
+				Help:      "Number of active loaders in pool",
+			},
+			colls.collectorsLen,
+		))
+
+	prometheus.MustRegister(colls)
+
+	return colls, colls.taskQueue
 }
 
-// ScheduleTask schedule new task to process in this database.
-func (cs *Collectors) ScheduleTask(task *Task) error {
-	cs.Lock()
-	defer cs.Unlock()
+func (cs *Collectors) Run(ctx context.Context) error {
+	for {
+		cs.log.Debug().Msg("collectors: starting...")
 
-	dbName := task.DBName
-
-	dbloader, ok := cs.collectors[dbName]
-	if !ok {
-		var err error
-
-		cs.log.Debug().Str("dbname", dbName).Msg("collectors: creating collector")
-
-		dbloader, err = cs.createCollector(dbName)
+		group, cancel, err := cs.startLoaders()
 		if err != nil {
 			return err
 		}
 
-		if dbloader == nil {
-			return ErrAppNotConfigured
+	loop:
+		for {
+			select {
+			case <-ctx.Done():
+				cs.log.Info().Msg("collectors: stopping...")
+				cancel()
+
+				if err := group.Wait(); err != nil {
+					cs.log.Error().Err(err).Msg("stopping collectors for new conf error")
+				}
+
+				cs.log.Debug().Msg("collectors: stopped")
+
+				return nil
+
+			case task := <-cs.taskQueue:
+				if dbloader, ok := cs.collectors[task.DBName]; ok {
+					dbloader.addTask(task)
+				} else {
+					task.Output <- task.newResult(ErrAppNotConfigured, nil)
+				}
+
+			case cfg := <-cs.newConfCh:
+				cs.log.Debug().Msg("collectors: stopping collectors for update configuration")
+				cancel()
+
+				if err := group.Wait(); err != nil {
+					cs.log.Error().Err(err).Msg("stopping collectors for new conf error")
+				}
+
+				cs.cfg = cfg
+				cs.log.Debug().Msg("collectors: update configuration finished")
+
+				break loop
+			}
 		}
 	}
-
-	dbloader.addTask(task)
-
-	return nil
 }
 
 // UpdateConf update configuration for existing loaders:
 // close not existing any more loaders and close loaders with changed
 // configuration so they can be create with new conf on next use.
 func (cs *Collectors) UpdateConf(cfg *conf.Configuration) {
-	cs.Lock()
-	defer cs.Unlock()
+	if cfg != nil {
+		cs.newConfCh <- cfg
+	}
+}
 
-	if cfg == nil {
+func (cs *Collectors) Describe(ch chan<- *prometheus.Desc) {
+	prometheus.DescribeByCollect(cs, ch)
+}
+
+func (cs *Collectors) Collect(resCh chan<- prometheus.Metric) { //nolint:funlen
+	if cs.collectors == nil {
 		return
 	}
 
-	cs.log.Debug().Msg("collectors: update configuration begin")
+	cstats := cs.stats()
 
-	// update existing
-	for k, dbConf := range cfg.Database {
-		if db, ok := cs.collectors[k]; ok {
-			if db.updateConf(dbConf) {
-				cs.log.Info().Str("db", k).Msg("collectors: database configuration changed")
-			}
+	for _, cstat := range cstats {
+		stat := cstat.dbstats
+
+		if stat == nil {
+			continue
 		}
+
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolOpenConnsDesc,
+			prometheus.GaugeValue,
+			float64(stat.DBStats.OpenConnections),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolActConnsDesc,
+			prometheus.GaugeValue,
+			float64(stat.DBStats.InUse),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolIdleConnsDesc,
+			prometheus.GaugeValue,
+			float64(stat.DBStats.Idle),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolconfMaxConnsDesc,
+			prometheus.GaugeValue,
+			float64(stat.DBStats.MaxOpenConnections),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolConnWaitCntDesc,
+			prometheus.CounterValue,
+			float64(stat.DBStats.WaitCount),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolConnIdleClosedDesc,
+			prometheus.CounterValue,
+			float64(stat.DBStats.MaxIdleClosed),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolConnIdleTimeClosedDesc,
+			prometheus.CounterValue,
+			float64(stat.DBStats.MaxIdleTimeClosed),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolConnLifeTimeClosedDesc,
+			prometheus.CounterValue,
+			float64(stat.DBStats.MaxLifetimeClosed),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolConnWaitTimeDesc,
+			prometheus.CounterValue,
+			stat.DBStats.WaitDuration.Seconds(),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolConnTotalConnectedDesc,
+			prometheus.CounterValue,
+			float64(stat.TotalOpenedConnections),
+			stat.Name,
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			dbpoolConnTotalFailedDesc,
+			prometheus.CounterValue,
+			float64(stat.TotalFailedConnections),
+			stat.Name,
+		)
+
+		resCh <- prometheus.MustNewConstMetric(
+			collectorQueueLengthDesc,
+			prometheus.GaugeValue,
+			float64(cstat.queueLength),
+			stat.Name,
+			"main",
+		)
+		resCh <- prometheus.MustNewConstMetric(
+			collectorQueueLengthDesc,
+			prometheus.GaugeValue,
+			float64(cstat.queueBgLength),
+			stat.Name,
+			"bg",
+		)
 	}
-
-	var toDel []string
-
-	// stop not existing anymore
-	for k, db := range cs.collectors {
-		if _, ok := cfg.Database[k]; !ok {
-			cs.log.Info().Str("db", k).Msgf("collectors: database %s not found in new conf; removing", k)
-
-			_ = db.stop()
-
-			toDel = append(toDel, k)
-		}
-	}
-
-	for _, k := range toDel {
-		delete(cs.collectors, k)
-	}
-
-	cs.cfg = cfg
-
-	cs.log.Debug().Msg("collectors: update configuration finished")
-}
-
-// Close database.
-func (cs *Collectors) Close() {
-	cs.Lock()
-	defer cs.Unlock()
-
-	cs.log.Debug().Msg("collectors: closing databases")
-
-	for k, db := range cs.collectors {
-		cs.log.Info().Str("db", k).Msg("collectors: stopping database")
-
-		_ = db.stop()
-	}
-}
-
-func (cs *Collectors) createCollector(dbName string) (*collector, error) {
-	if cs.cfg == nil {
-		return nil, ErrAppNotConfigured
-	}
-
-	dconf, ok := cs.cfg.Database[dbName]
-	if !ok {
-		return nil, ErrUnknownDatabase
-	}
-
-	c, err := newCollector(dbName, dconf)
-	if err != nil {
-		return nil, fmt.Errorf("collectors: create dbloader error: %w", err)
-	}
-
-	cs.collectors[dbName] = c
-
-	return c, nil
 }
 
 // collectorsLen return number or loaders in pool.
@@ -145,17 +217,11 @@ func (cs *Collectors) collectorsLen() float64 {
 		return 0
 	}
 
-	cs.Lock()
-	defer cs.Unlock()
-
 	return float64(len(cs.collectors))
 }
 
 // stats return stats for each loaders.
 func (cs *Collectors) stats() []collectorStats {
-	cs.Lock()
-	defer cs.Unlock()
-
 	stats := make([]collectorStats, 0, len(cs.collectors))
 
 	for _, l := range cs.collectors {
@@ -165,11 +231,40 @@ func (cs *Collectors) stats() []collectorStats {
 	return stats
 }
 
-// CollectorsPool is global handler for all db queries.
-var CollectorsPool = newCollectors()
+func (cs *Collectors) createCollectors() error {
+	collectors := make(map[string]*collector)
 
-// Init db subsystem.
-func Init() {
-	initMetrics()
-	initTemplates()
+	for dbName, dbConf := range cs.cfg.Database {
+		dbloader, err := newCollector(dbName, dbConf)
+		if err != nil {
+			cs.log.Error().Err(err).Str("dbname", dbName).Msg("create collector error")
+
+			continue
+		}
+
+		collectors[dbName] = dbloader
+	}
+
+	if len(collectors) == 0 {
+		return InvalidConfigurationError("no databases available")
+	}
+
+	cs.collectors = collectors
+
+	return nil
+}
+
+func (cs *Collectors) startLoaders() (*errgroup.Group, context.CancelFunc, error) {
+	if err := cs.createCollectors(); err != nil {
+		return nil, nil, err
+	}
+
+	cctx, cancel := context.WithCancel(context.Background())
+	group, cctx := errgroup.WithContext(cctx)
+
+	for _, dbloader := range cs.collectors {
+		group.Go(func() error { return dbloader.run(cctx) })
+	}
+
+	return group, cancel, nil
 }

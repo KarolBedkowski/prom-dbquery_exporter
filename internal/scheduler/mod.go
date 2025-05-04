@@ -10,13 +10,14 @@ package scheduler
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/trace"
+	"golang.org/x/sync/errgroup"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/metrics"
@@ -37,12 +38,12 @@ func (s *scheduledTask) MarshalZerologObject(event *zerolog.Event) {
 
 // Scheduler is background process that load configured data into cache in some intervals.
 type Scheduler struct {
-	log      zerolog.Logger
-	cfg      *conf.Configuration
-	cache    *support.Cache[[]byte]
-	stop     chan struct{}
-	tasks    []*scheduledTask
-	newCfgCh chan *conf.Configuration
+	log        zerolog.Logger
+	cfg        *conf.Configuration
+	cache      *support.Cache[[]byte]
+	tasks      []*scheduledTask
+	newCfgCh   chan *conf.Configuration
+	tasksQueue chan<- *collectors.Task
 
 	scheduledTasksCnt     prometheus.Counter
 	scheduledTasksSuccess prometheus.Counter
@@ -50,13 +51,15 @@ type Scheduler struct {
 }
 
 // NewScheduler create new scheduler that use `cache` and initial `cfg` configuration.
-func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration) *Scheduler {
+func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
+	tasksQueue chan<- *collectors.Task,
+) *Scheduler {
 	scheduler := &Scheduler{
-		cfg:      cfg,
-		cache:    cache,
-		stop:     make(chan struct{}),
-		log:      log.Logger.With().Str("module", "scheduler").Logger(),
-		newCfgCh: make(chan *conf.Configuration, 1),
+		cfg:        cfg,
+		cache:      cache,
+		log:        log.Logger.With().Str("module", "scheduler").Logger(),
+		newCfgCh:   make(chan *conf.Configuration, 1),
+		tasksQueue: tasksQueue,
 
 		scheduledTasksCnt: prometheus.NewCounter(
 			prometheus.CounterOpts{
@@ -85,13 +88,13 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration) *Schedu
 	prometheus.MustRegister(scheduler.scheduledTasksSuccess)
 	prometheus.MustRegister(scheduler.scheduledTasksFailed)
 
-	scheduler.ReloadConf(cfg)
+	scheduler.UpdateConf(cfg)
 
 	return scheduler
 }
 
 // Run scheduler process that get data for all defined jobs sequential.
-func (s *Scheduler) Run() error {
+func (s *Scheduler) Run(ctx context.Context) error {
 	s.log.Debug().Msgf("scheduler: starting serial scheduler")
 
 	s.rescheduleTask()
@@ -110,58 +113,67 @@ func (s *Scheduler) Run() error {
 		timer.Reset(time.Second)
 
 		select {
-		case <-s.stop:
+		case <-ctx.Done():
 			s.log.Debug().Msg("scheduler: stopped")
 
 			return nil
 
-		case cfg := <-s.newCfgCh:
-			s.updateConfig(cfg)
-			s.rescheduleTask()
+		case cfg, ok := <-s.newCfgCh:
+			if ok {
+				s.updateConfig(cfg)
+				s.rescheduleTask()
+			}
 
 		case <-timer.C:
-			for _, job := range s.tasks {
-				if time.Now().After(job.nextRun) {
-					s.handleJobWithMetrics(context.Background(), job.job)
-					job.nextRun = time.Now().Add(job.job.Interval)
-				}
-			}
+			s.runOverdueJobs(ctx)
 		}
 	}
 }
 
 // RunParallel run scheduler in parallel mode that spawn goroutine for each defined job.
-func (s *Scheduler) RunParallel() error {
+func (s *Scheduler) RunParallel(ctx context.Context) error {
 	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
 
-	group := sync.WaitGroup{}
-
 	for {
-		ctx, cancel := context.WithCancel(context.Background())
+		lctx, cancel := context.WithCancel(ctx)
+		group, lctx := errgroup.WithContext(lctx)
 
 		// spawn background workers
 		for _, job := range s.tasks {
-			group.Add(1)
+			group.Go(func() error {
+				s.runJobInLoop(lctx, job.job)
 
-			go func() {
-				s.runJobInLoop(ctx, job.job)
-				group.Done()
-			}()
+				return nil
+			})
 		}
 
 		select {
-		case <-s.stop:
+		case <-ctx.Done():
 			s.log.Debug().Msg("scheduler: stopping")
 			cancel()
-			group.Wait()
+
+			if err := group.Wait(); err != nil {
+				s.log.Error().Err(err).Msg("scheduler: wait for errors finished error")
+			}
+
 			s.log.Debug().Msg("scheduler: stopped")
 
 			return nil
 
-		case cfg := <-s.newCfgCh:
+		case cfg, ok := <-s.newCfgCh:
+			if !ok {
+				cancel()
+
+				return nil
+			}
+
 			s.log.Debug().Msg("scheduler: stopping workers for config reload")
 			cancel()
-			group.Wait()
+
+			if err := group.Wait(); err != nil {
+				s.log.Error().Err(err).Msg("scheduler: wait for errors finished error")
+			}
+
 			s.log.Debug().Msg("scheduler: all workers stopped")
 			s.updateConfig(cfg)
 
@@ -174,13 +186,12 @@ func (s *Scheduler) RunParallel() error {
 func (s *Scheduler) Close(err error) {
 	_ = err
 
-	log.Logger.Debug().Msg("scheduler: stopping")
-	close(s.stop)
+	s.log.Debug().Msg("scheduler: stopping")
 	close(s.newCfgCh)
 }
 
-// ReloadConf load new configuration.
-func (s *Scheduler) ReloadConf(cfg *conf.Configuration) {
+// UpdateConf load new configuration.
+func (s *Scheduler) UpdateConf(cfg *conf.Configuration) {
 	s.newCfgCh <- cfg
 }
 
@@ -191,7 +202,7 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	s.scheduledTasksCnt.Inc()
 
 	llog := s.log.With().Str("dbname", job.Database).Str("query", job.Query).Int("job_idx", job.Idx).Logger()
-	log.Debug().Msg("scheduler: job processing start")
+	llog.Debug().Msg("scheduler: job processing start")
 
 	ctx = llog.WithContext(ctx)
 
@@ -213,8 +224,7 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 		llog.Debug().Msg("scheduler: execute job finished")
 	}
 
-	duration := time.Since(startTS)
-	if job.Interval < duration {
+	if duration := time.Since(startTS); job.Interval < duration {
 		llog.Warn().Dur("duration", duration).
 			Msgf("scheduler: task run longer than defined interval (%s)", job.Interval)
 	}
@@ -227,45 +237,56 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	query := (s.cfg.Query)[queryName]
 
 	if query == nil {
-		return fmt.Errorf("fatal, empty query %s", queryName) //nolint:err113,stylecheck
+		return fmt.Errorf("fatal, empty query %s", queryName) //nolint:err113
 	}
 
 	output := make(chan *collectors.TaskResult, 1)
 	defer close(output)
 
 	task := &collectors.Task{
-		Ctx:          ctx,
 		DBName:       dbName,
 		QueryName:    queryName,
 		Params:       nil,
 		Output:       output,
 		Query:        query,
 		RequestStart: time.Now(),
+		ReqID:        xid.New().String(),
 
 		IsScheduledJob: true,
 	}
 
-	if err := collectors.CollectorsPool.ScheduleTask(task); err != nil {
-		return fmt.Errorf("start task error: %w", err)
-	}
+	// cancel task on end
+	task, cancel := task.WithCancel()
+	defer cancel()
+
+	s.tasksQueue <- task
 
 	support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
 
 	select {
 	case <-ctx.Done():
-		err := ctx.Err()
+		return fmt.Errorf("processing error: %w", ctx.Err())
 
-		return fmt.Errorf("processing error: %w", err)
+	case res, ok := <-output:
+		if ok {
+			if res.Error != nil {
+				return fmt.Errorf("processing error: %w", res.Error)
+			}
 
-	case res := <-output:
-		if res.Error != nil {
-			return fmt.Errorf("processing error: %w", res.Error)
+			s.cache.Put(query.Name+"@"+dbName, query.CachingTime, res.Result)
 		}
-
-		s.cache.Put(query.Name+"@"+dbName, query.CachingTime, res.Result)
 	}
 
 	return nil
+}
+
+func (s *Scheduler) runOverdueJobs(ctx context.Context) {
+	for _, job := range s.tasks {
+		if time.Now().After(job.nextRun) {
+			s.handleJobWithMetrics(ctx, job.job)
+			job.nextRun = time.Now().Add(job.job.Interval)
+		}
+	}
 }
 
 // / runJobInLoop run in goroutine and get data from data for one job in defined intervals.
@@ -307,22 +328,9 @@ func (s *Scheduler) updateConfig(cfg *conf.Configuration) {
 	tasks := make([]*scheduledTask, 0, len(cfg.Jobs))
 
 	for _, job := range cfg.Jobs {
-		// skip disabled jobs
-		if job.Interval.Seconds() <= 1 {
-			continue
+		if job.IsValid {
+			tasks = append(tasks, &scheduledTask{job: *job})
 		}
-
-		// skip unknown queries
-		if _, ok := (s.cfg.Query)[job.Query]; !ok {
-			continue
-		}
-
-		// skip unknown databases
-		if _, ok := s.cfg.Database[job.Database]; !ok {
-			continue
-		}
-
-		tasks = append(tasks, &scheduledTask{job: *job})
 	}
 
 	s.tasks = tasks

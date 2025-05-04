@@ -113,7 +113,7 @@ func init() {
 }
 
 // UpdateConfLoadTime set current time for configuration_load_time metric.
-func UpdateConfLoadTime() {
+func UpdateConf() {
 	configReloadTime.SetToCurrentTime()
 }
 

@@ -17,8 +17,10 @@ import (
 )
 
 const (
-	defaultMaxWorkers       = 10
-	defaultConnectioTimeout = 15 * time.Second
+	defaultMaxConnections   = 10
+	defaultIldeConnection   = 2
+	defaultConnMaxLifetime  = time.Duration(600) * time.Second
+	defaultConnectioTimeout = time.Duration(15) * time.Second
 )
 
 // PoolConfiguration configure database connection pool.
@@ -125,15 +127,6 @@ func (d *Database) CheckConnectionParam(keys ...string) error {
 	return nil
 }
 
-// GetConnectTimeout return connection timeout from configuration or default.
-func (d *Database) GetConnectTimeout() time.Duration {
-	if d.ConnectTimeout > 0 {
-		return d.ConnectTimeout
-	}
-
-	return defaultConnectioTimeout
-}
-
 func (d *Database) validatePG() error {
 	if d.CheckConnectionParam("connstr") == nil {
 		return nil
@@ -154,6 +147,37 @@ func (d *Database) validatePG() error {
 	return errs.ErrorOrNil()
 }
 
+func (d *Database) setup(name string) {
+	d.Name = name
+
+	if d.Pool == nil {
+		d.Pool = &PoolConfiguration{
+			MaxConnections:     defaultMaxConnections,
+			MaxIdleConnections: defaultIldeConnection,
+			ConnMaxLifeTime:    defaultConnMaxLifetime,
+		}
+	}
+
+	if d.Pool.MaxIdleConnections > 0 {
+		d.MaxWorkers = d.Pool.MaxConnections
+	} else {
+		d.MaxWorkers = 1
+	}
+
+	if d.BackgroundWorkers >= d.MaxWorkers {
+		log.Logger.Warn().
+			Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
+
+		d.BackgroundWorkers = 0
+	} else {
+		d.MaxWorkers -= d.BackgroundWorkers
+	}
+
+	if d.ConnectTimeout <= 0 {
+		d.ConnectTimeout = defaultConnectioTimeout
+	}
+}
+
 func (d *Database) validateCommon() error {
 	var errs *multierror.Error
 
@@ -169,23 +193,6 @@ func (d *Database) validateCommon() error {
 
 	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
 		log.Logger.Warn().Msgf("configuration: database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
-	}
-
-	d.MaxWorkers = defaultMaxWorkers
-
-	if d.Pool != nil {
-		if d.Pool.MaxIdleConnections > 0 {
-			d.MaxWorkers = d.Pool.MaxConnections
-		}
-
-		if d.BackgroundWorkers >= d.MaxWorkers {
-			log.Logger.Warn().
-				Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
-
-			d.BackgroundWorkers = 0
-		} else {
-			d.MaxWorkers -= d.BackgroundWorkers
-		}
 	}
 
 	return errs.ErrorOrNil()

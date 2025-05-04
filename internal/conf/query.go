@@ -54,6 +54,10 @@ func (q *Query) MarshalZerologObject(e *zerolog.Event) {
 		Str("name", q.Name)
 }
 
+func (q *Query) setup(name string) {
+	q.Name = name
+}
+
 func (q *Query) validate() error {
 	if q.SQL == "" {
 		return MissingFieldError{"sql"}

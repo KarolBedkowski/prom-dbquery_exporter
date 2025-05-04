@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -36,19 +37,23 @@ func printVersion() {
 	} else {
 		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
 	}
+
+	fmt.Printf("Available template functions: %s\n", support.AvailableTmplFunctions()) //nolint:forbidigo
 }
 
 func printWelcome() {
 	log.Logger.Info().
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
-		Msg("Starting DBQuery exporter")
+		Msg("starting DBQuery exporter")
 
 	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
 		log.Logger.Fatal().Msg("no databases supported, check compile flags")
 	} else {
 		log.Logger.Info().Msgf("supported databases: %s", sdb)
 	}
+
+	log.Logger.Info().Msgf("available template functions: %s", support.AvailableTmplFunctions())
 }
 
 // Main is main function for cli.
@@ -68,6 +73,7 @@ func main() {
 		disableCache            = flag.Bool("no-cache", false, "Disable query result caching")
 		enableSchedulerParallel = flag.Bool("parallel-scheduler", false, "Run scheduler ask parallel")
 		validateOutput          = flag.Bool("validate-output", false, "Enable output validation")
+		enableInfo              = flag.Bool("enable-info", false, "Enable /info endpoint")
 	)
 
 	flag.Parse()
@@ -86,24 +92,19 @@ func main() {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
-	collectors.Init()
-
 	cfg, err := conf.LoadConfiguration(*configFile)
-	if err != nil || cfg == nil {
-		log.Logger.Fatal().Err(err).Str("file", *configFile).
-			Msg("load config file error")
+	if err != nil {
+		log.Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
 	}
 
-	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput)
+	if cfg == nil {
+		panic("create configuration error")
+	}
+
+	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput, enableInfo)
 
 	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
-	metrics.UpdateConfLoadTime()
-
-	if collectors.CollectorsPool == nil {
-		panic("database pool not configured")
-	}
-
-	collectors.CollectorsPool.UpdateConf(cfg)
+	metrics.UpdateConf()
 
 	if err := start(cfg, *listenAddress, *webConfig); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
@@ -114,11 +115,20 @@ func main() {
 }
 
 func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
-	cache := support.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache)
-	sched := scheduler.NewScheduler(cache, cfg)
+	collectors, taskQueue := collectors.NewCollectors(cfg)
+	defer close(taskQueue)
 
-	var runGroup run.Group
+	cache := support.NewCache[[]byte]("query_cache")
+	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache, taskQueue)
+	sched := scheduler.NewScheduler(cache, cfg, taskQueue)
+	runGroup := run.Group{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Collectors
+	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
+	runGroup.Add(webHandler.Run, webHandler.Stop)
 
 	// Termination handler.
 	term := make(chan os.Signal, 1)
@@ -126,15 +136,13 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 	runGroup.Add(
 		func() error {
 			<-term
+			cancel()
 			log.Logger.Warn().Msg("Received SIGTERM, exiting...")
 			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
-			collectors.CollectorsPool.Close()
 
 			return nil
 		},
-		func(_ error) {
-			close(term)
-		},
+		func(_ error) { close(term) },
 	)
 
 	// Reload handler.
@@ -147,30 +155,25 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 
 				if newConf, err := conf.LoadConfiguration(cfg.ConfigFilename); err == nil {
 					newConf.CopyRuntimeOptions(cfg)
-					webHandler.ReloadConf(newConf)
-					sched.ReloadConf(newConf)
-					collectors.CollectorsPool.UpdateConf(newConf)
-					metrics.UpdateConfLoadTime()
+					webHandler.UpdateConf(newConf)
+					sched.UpdateConf(newConf)
+					collectors.UpdateConf(newConf)
+					metrics.UpdateConf()
 					log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
 				} else {
-					log.Logger.Error().Err(err).
-						Msg("reloading configuration error; using old configuration")
+					log.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
 				}
 			}
 
 			return nil
 		},
-		func(_ error) {
-			close(hup)
-		},
+		func(_ error) { close(hup) },
 	)
 
-	runGroup.Add(webHandler.Run, webHandler.Close)
-
-	if cfg.ParallelScheduler { //nolint:nilaway
-		runGroup.Add(sched.RunParallel, sched.Close)
+	if cfg.ParallelScheduler {
+		runGroup.Add(func() error { return sched.RunParallel(ctx) }, sched.Close)
 	} else {
-		runGroup.Add(sched.Run, sched.Close)
+		runGroup.Add(func() error { return sched.Run(ctx) }, sched.Close)
 	}
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
@@ -200,12 +203,14 @@ func enableSDNotify() error {
 		return nil
 	}
 
-	go func(interval time.Duration) {
+	interval /= 2
+
+	go func() {
 		tick := time.Tick(interval)
 		for range tick {
 			_, _ = daemon.SdNotify(false, daemon.SdNotifyWatchdog)
 		}
-	}(interval / 2) //nolint:mnd
+	}()
 
 	return nil
 }

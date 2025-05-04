@@ -17,9 +17,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-const SqliteSupported = true
-
-func newSqliteLoader(cfg *conf.Database) (*genericDatabase, error) {
+func newSqliteLoader(cfg *conf.Database) (Database, error) {
 	params := url.Values{}
 
 	var dbname string
@@ -62,4 +60,8 @@ func newSqliteLoader(cfg *conf.Database) (*genericDatabase, error) {
 	}
 
 	return l, nil
+}
+
+func init() {
+	registerDatabase(newSqliteLoader, "sqlite3", "sqlite")
 }

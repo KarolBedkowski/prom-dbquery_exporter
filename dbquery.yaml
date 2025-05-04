@@ -406,7 +406,7 @@ query:
     metrics: |
       pg_long_query_result 1
 
-# run this quieries in background and fill the cache
+# run this queries in background and fill the cache
 jobs:
   - query: pg_locks
     database: testdbpgsql

@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/support"
 )
@@ -24,7 +25,7 @@ import (
 const (
 	defaultRwTimeout       = 300 * time.Second
 	defaultMaxHeaderBytes  = 1 << 20
-	defaultShutdownTimeout = time.Duration(10) * time.Second
+	defaultShutdownTimeout = time.Duration(2) * time.Second
 )
 
 // WebHandler handle incoming requests.
@@ -39,12 +40,15 @@ type WebHandler struct {
 
 // NewWebHandler create new WebHandler.
 func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string, cache *support.Cache[[]byte],
+	taskQueue chan<- *collectors.Task,
 ) *WebHandler {
-	qh := newQueryHandler(cfg, cache)
+	qh := newQueryHandler(cfg, cache, taskQueue)
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)
-	http.Handle("/info", ih.Handler())
+	if cfg.EnableInfo {
+		http.Handle("/info", ih.Handler())
+	}
 
 	webHandler := &WebHandler{
 		handler:       qh,
@@ -96,8 +100,8 @@ func (w *WebHandler) Run() error {
 	return nil
 }
 
-// Close stop listen webhandler.
-func (w *WebHandler) Close(err error) {
+// Stop stop listen webhandler.
+func (w *WebHandler) Stop(err error) {
 	_ = err
 
 	log.Logger.Debug().Msg("webhandler: closing")
@@ -108,8 +112,8 @@ func (w *WebHandler) Close(err error) {
 	_ = w.server.Shutdown(ctx)
 }
 
-// ReloadConf reload configuration in all handlers.
-func (w *WebHandler) ReloadConf(newConf *conf.Configuration) {
-	w.handler.SetConfiguration(newConf)
+// UpdateConf reload configuration in all handlers.
+func (w *WebHandler) UpdateConf(newConf *conf.Configuration) {
+	w.handler.UpdateConf(newConf)
 	w.infoHandler.Configuration = newConf
 }

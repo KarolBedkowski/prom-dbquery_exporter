@@ -18,21 +18,21 @@ import (
 )
 
 const (
-	defaultTimeout         = time.Duration(300) * time.Second // sec
-	defaultConnMaxLifetime = time.Duration(600) * time.Second
-	defaultMaxOpenConns    = 10
-	defaultMaxIdleConns    = 2
+	defaultTimeout = time.Duration(300) * time.Second // sec
 )
 
 type genericDatabase struct {
-	conn                   *sqlx.DB
-	dbConf                 *conf.Database
-	connStr                string
-	driver                 string
-	initialSQL             []string
-	lock                   sync.RWMutex
-	totalOpenedConnections uint32
-	totalFailedConnections uint32
+	conn       *sqlx.DB
+	dbConf     *conf.Database
+	connStr    string
+	driver     string
+	initialSQL []string
+
+	lock sync.RWMutex
+
+	// metrics
+	totalOpenedConnections atomic.Uint32
+	totalFailedConnections atomic.Uint32
 }
 
 func (g *genericDatabase) Stats() *DatabaseStats {
@@ -40,8 +40,8 @@ func (g *genericDatabase) Stats() *DatabaseStats {
 		return &DatabaseStats{
 			Name:                   g.dbConf.Name,
 			DBStats:                g.conn.Stats(),
-			TotalOpenedConnections: atomic.LoadUint32(&g.totalOpenedConnections),
-			TotalFailedConnections: atomic.LoadUint32(&g.totalFailedConnections),
+			TotalOpenedConnections: g.totalOpenedConnections.Load(),
+			TotalFailedConnections: g.totalFailedConnections.Load(),
 		}
 	}
 
@@ -51,7 +51,7 @@ func (g *genericDatabase) Stats() *DatabaseStats {
 // Query get data from database.
 func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
 ) (*QueryResult, error) {
-	llog := log.Ctx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger() //nolint:nilaway
+	llog := support.GetLoggerFromCtx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
 	result := &QueryResult{Start: time.Now()}
 
@@ -59,6 +59,8 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 
 	conn, err := g.getConnection(ctx)
 	if err != nil {
+		g.totalFailedConnections.Add(1)
+
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
 	defer conn.Close()
@@ -77,7 +79,6 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	if err != nil {
 		return nil, fmt.Errorf("begin tx error: %w", err)
 	}
-
 	defer tx.Rollback() //nolint:errcheck
 
 	support.TracePrintf(ctx, "db: begin query %q", query.Name)
@@ -93,6 +94,12 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 		} else {
 			return nil, fmt.Errorf("get columns error: %w", err)
 		}
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("context cancelled: %w", ctx.Err())
+	default:
 	}
 
 	result.Records, err = createRecords(rows)
@@ -112,8 +119,7 @@ func (g *genericDatabase) Close(ctx context.Context) error {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	log.Ctx(ctx).Debug().Interface("conn", g.conn).
-		Str("db", g.dbConf.Name).Msg("db: genericQuery close conn")
+	log.Ctx(ctx).Debug().Interface("conn", g.conn).Str("db", g.dbConf.Name).Msg("db: genericQuery close conn")
 
 	if g.conn == nil {
 		return nil
@@ -129,40 +135,35 @@ func (g *genericDatabase) Close(ctx context.Context) error {
 	return nil
 }
 
-func (g *genericDatabase) UpdateConf(db *conf.Database) bool {
-	g.dbConf = db
-
-	return true
-}
-
 func (g *genericDatabase) String() string {
 	return fmt.Sprintf("genericLoader name='%s' driver='%s' connstr='%v' connected=%v",
 		g.dbConf.Name, g.driver, g.connStr, g.conn != nil)
 }
 
 func (g *genericDatabase) configureConnection(ctx context.Context) {
-	g.conn.SetConnMaxLifetime(defaultConnMaxLifetime)
-	g.conn.SetMaxOpenConns(defaultMaxOpenConns)
-	g.conn.SetMaxIdleConns(defaultMaxIdleConns)
+	llog := log.Ctx(ctx)
 
-	if pool := g.dbConf.Pool; pool != nil {
-		llog := log.Ctx(ctx)
+	pool := g.dbConf.Pool
+	if pool == nil {
+		llog.Warn().Msg("no pool configuration")
 
-		if pool.MaxConnections > 0 {
-			llog.Debug().Int("max-conn", pool.MaxConnections).Msg("db: max connection set")
-			g.conn.SetMaxOpenConns(pool.MaxConnections)
-		}
+		return
+	}
 
-		if pool.MaxIdleConnections > 0 {
-			llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("db: max idle connection set")
-			g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
-		}
+	if pool.MaxConnections > 0 {
+		llog.Debug().Int("max-conn", pool.MaxConnections).Msg("db: max connection set")
+		g.conn.SetMaxOpenConns(pool.MaxConnections)
+	}
 
-		if pool.ConnMaxLifeTime > 0 {
-			llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
-				Msg("db: connection max life time set")
-			g.conn.SetConnMaxLifetime(pool.ConnMaxLifeTime)
-		}
+	if pool.MaxIdleConnections > 0 {
+		llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("db: max idle connection set")
+		g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
+	}
+
+	if pool.ConnMaxLifeTime > 0 {
+		llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
+			Msg("db: connection max life time set")
+		g.conn.SetConnMaxLifetime(pool.ConnMaxLifeTime)
 	}
 }
 
@@ -187,14 +188,25 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 	g.configureConnection(ctx)
 
 	// check is database is working
-	lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
-	defer cancel()
+	if err := g.pingDatabase(ctx); err != nil {
+		_ = g.conn.Close()
+		g.conn = nil
 
-	if err = g.conn.PingContext(lctx); err != nil {
-		return fmt.Errorf("ping error: %w", err)
+		return err
 	}
 
 	llog.Debug().Msg("db: genericQuery connected")
+
+	return nil
+}
+
+func (g *genericDatabase) pingDatabase(ctx context.Context) error {
+	lctx, cancel := context.WithTimeout(ctx, g.dbConf.ConnectTimeout)
+	defer cancel()
+
+	if err := g.conn.PingContext(lctx); err != nil {
+		return fmt.Errorf("ping error: %w", err)
+	}
 
 	return nil
 }
@@ -204,23 +216,24 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 
 	// connect to database if not connected
 	if err := g.openConnection(ctx); err != nil {
-		atomic.AddUint32(&g.totalFailedConnections, 1)
+		g.totalFailedConnections.Add(1)
 
 		return nil, fmt.Errorf("open connection error: %w", err)
 	}
 
 	conn, err := g.conn.Connx(ctx)
 	if err != nil {
-		atomic.AddUint32(&g.totalFailedConnections, 1)
+		g.totalFailedConnections.Add(1)
 
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
 
-	atomic.AddUint32(&g.totalOpenedConnections, 1)
+	g.totalOpenedConnections.Add(1)
 
 	// launch initial sqls if defined
 	for idx, sql := range g.initialSQL {
 		llog.Debug().Str("sql", sql).Msg("db: genericQuery execute initial sql")
+		support.TracePrintf(ctx, "db: execute initial sql")
 
 		if err := g.executeInitialQuery(ctx, sql, conn); err != nil {
 			conn.Close()
@@ -233,7 +246,7 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 }
 
 func (g *genericDatabase) executeInitialQuery(ctx context.Context, sql string, conn *sqlx.Conn) error {
-	lctx, cancel := context.WithTimeout(ctx, g.dbConf.GetConnectTimeout())
+	lctx, cancel := context.WithTimeout(ctx, g.dbConf.ConnectTimeout)
 	defer cancel()
 
 	rows, err := conn.QueryxContext(lctx, sql)

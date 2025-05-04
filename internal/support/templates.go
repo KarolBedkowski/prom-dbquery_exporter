@@ -7,6 +7,8 @@ package support
 import (
 	"bufio"
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 	"text/template"
@@ -59,6 +61,10 @@ var FuncMap = template.FuncMap{
 	"keepAlfaNumUnderlineSpaceU": keepAlfaNumUnderlineSpaceU,
 	"clean":                      clean,
 	"removeQuotes":               removeQuotes,
+}
+
+func AvailableTmplFunctions() []string {
+	return slices.Sorted(maps.Keys(FuncMap))
 }
 
 func replaceSpaces(i string) string {
