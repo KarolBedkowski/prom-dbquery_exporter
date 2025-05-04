@@ -11,7 +11,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"iter"
 	"maps"
 	"net/http"
 	"slices"
@@ -231,11 +230,9 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 		}
 
 		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
-
 		q.taskQueue <- task
 
 		support.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
-
 		dWriter.incScheduled()
 	}
 
@@ -354,48 +351,4 @@ func deduplicateStringList(inp []string) []string {
 	}
 
 	return slices.Collect(maps.Keys(tmpMap))
-}
-
-//---------------------------------------------------------------
-
-type InvalidRequestParameterError string
-
-func (g InvalidRequestParameterError) Error() string {
-	return string(g)
-}
-
-//---------------------------------------------------------------
-
-type requestParameters struct {
-	dbNames         []string
-	queryNames      []string
-	extraParameters map[string]any
-
-	queries []*conf.Query
-}
-
-// MarshalZerologObject implements LogObjectMarshaler.
-func (r *requestParameters) MarshalZerologObject(event *zerolog.Event) {
-	event.Strs("dbNames", r.dbNames).
-		Strs("queryNames", r.queryNames).
-		Interface("extraParameters", r.extraParameters)
-
-	qa := zerolog.Arr()
-	for _, q := range r.queries {
-		qa.Str(q.Name)
-	}
-
-	event.Array("queries", qa)
-}
-
-func (r *requestParameters) iter() iter.Seq2[string, *conf.Query] {
-	return func(yield func(string, *conf.Query) bool) {
-		for _, d := range r.dbNames {
-			for _, q := range r.queries {
-				if !yield(d, q) {
-					return
-				}
-			}
-		}
-	}
 }
