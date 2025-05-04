@@ -1,4 +1,10 @@
-v0.12.2 2025-04-28
+v0.11.3 2025-05-04
+* feat: print available template functions and supported databases on startup
+* feat: /info endpoint is disabled by default; can by enabled by cli option
+* fix: fix cache query result when query for request with group parameter
+* refactor: simplify code; fix minor problems
+
+v0.11.2 2025-04-28
 * fix: fix workers configuration for db other than pg
 * fix: do not try collect metrics from collectors that don't have it yet
 
