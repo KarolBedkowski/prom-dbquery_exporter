@@ -25,7 +25,7 @@ import (
 const (
 	defaultRwTimeout       = 300 * time.Second
 	defaultMaxHeaderBytes  = 1 << 20
-	defaultShutdownTimeout = time.Duration(10) * time.Second
+	defaultShutdownTimeout = time.Duration(2) * time.Second
 )
 
 // WebHandler handle incoming requests.
