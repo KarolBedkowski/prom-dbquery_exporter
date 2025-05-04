@@ -16,9 +16,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-const MssqlSupported = true
-
-func newMssqlLoader(cfg *conf.Database) (*genericDatabase, error) {
+func newMssqlLoader(cfg *conf.Database) (Database, error) {
 	params := url.Values{}
 	databaseConfigured := false
 
@@ -45,4 +43,8 @@ func newMssqlLoader(cfg *conf.Database) (*genericDatabase, error) {
 	}
 
 	return l, nil
+}
+
+func init() {
+	registerDatabase(newMssqlLoader, "mssql")
 }

@@ -43,7 +43,7 @@ type collector struct {
 	bgWorkersGroup errgroup.Group
 
 	// workerID is last unique worker id
-	workerID uint64
+	workerID atomic.Uint64
 }
 
 const tasksQueueSize = 10
@@ -143,7 +143,7 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 
 // worker get process task from `workQueue` in loop. Exit when there is no new task for 1 sec.
 func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
-	idx := atomic.AddUint64(&c.workerID, 1)
+	idx := c.workerID.Add(1)
 	idxstr := strconv.FormatUint(idx, 10)
 	wlog := c.log.With().Bool("bg", isBg).Uint64("worker_id", idx).Logger()
 

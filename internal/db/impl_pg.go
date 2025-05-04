@@ -16,9 +16,7 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-const PostgresqlSupported = true
-
-func newPostgresLoader(cfg *conf.Database) (*genericDatabase, error) {
+func newPostgresLoader(cfg *conf.Database) (Database, error) {
 	var connStr string
 	if val, ok := cfg.Connection["connstr"]; ok && val != "" {
 		connStr, ok = val.(string)
@@ -50,4 +48,8 @@ func newPostgresLoader(cfg *conf.Database) (*genericDatabase, error) {
 	}
 
 	return l, nil
+}
+
+func init() {
+	registerDatabase(newPostgresLoader, "postgresql", "postgres", "cockroach", "cockroachdb")
 }

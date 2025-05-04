@@ -17,17 +17,8 @@ import (
 
 // CreateLoader returns configured Loader for given configuration.
 func CreateLoader(cfg *conf.Database) (Database, error) {
-	switch cfg.Driver {
-	case "postgresql", "postgres", "cockroach", "cockroachdb":
-		return newPostgresLoader(cfg)
-	case "sqlite3", "sqlite":
-		return newSqliteLoader(cfg)
-	case "mysql", "mariadb", "tidb":
-		return newMysqlLoader(cfg)
-	case "oracle", "oci8":
-		return newOracleLoader(cfg)
-	case "mssql":
-		return newMssqlLoader(cfg)
+	if db, ok := supportedDatabases[cfg.Driver]; ok {
+		return db(cfg)
 	}
 
 	return nil, InvalidConfigurationError(fmt.Sprintf("unsupported database type '%s'", cfg.Driver))
@@ -41,9 +32,6 @@ type Database interface {
 	Close(ctx context.Context) error
 	// Human-friendly info
 	String() string
-	// UpdateConf return true when configuration was updated
-	UpdateConf(db *conf.Database) bool
-
 	// Stats return database stats if available
 	Stats() *DatabaseStats
 }
