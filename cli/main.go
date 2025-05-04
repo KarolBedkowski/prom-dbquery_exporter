@@ -73,6 +73,7 @@ func main() {
 		disableCache            = flag.Bool("no-cache", false, "Disable query result caching")
 		enableSchedulerParallel = flag.Bool("parallel-scheduler", false, "Run scheduler ask parallel")
 		validateOutput          = flag.Bool("validate-output", false, "Enable output validation")
+		enableInfo              = flag.Bool("enable-info", false, "Enable /info endpoint")
 	)
 
 	flag.Parse()
@@ -100,7 +101,7 @@ func main() {
 		panic("create configuration error")
 	}
 
-	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput)
+	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput, enableInfo)
 
 	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
 	metrics.UpdateConf()

@@ -46,7 +46,9 @@ func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig stri
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)
-	http.Handle("/info", ih.Handler())
+	if cfg.EnableInfo {
+		http.Handle("/info", ih.Handler())
+	}
 
 	webHandler := &WebHandler{
 		handler:       qh,

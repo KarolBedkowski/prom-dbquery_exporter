@@ -30,6 +30,7 @@ type Configuration struct {
 	DisableCache      bool   `yaml:"-"`
 	ParallelScheduler bool   `yaml:"-"`
 	ValidateOutput    bool   `yaml:"-"`
+	EnableInfo        bool   `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
@@ -57,7 +58,8 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 		Str("config_filename", c.ConfigFilename).
 		Bool("disable_cache", c.DisableCache).
 		Bool("parallel_scheduler", c.ParallelScheduler).
-		Bool("validateOutput", c.ValidateOutput))
+		Bool("validate_output", c.ValidateOutput).
+		Bool("enable_info", c.EnableInfo))
 }
 
 // GroupQueries return queries that belong to given group.
@@ -121,9 +123,10 @@ func (c *Configuration) CopyRuntimeOptions(oldcfg *Configuration) {
 	c.DisableCache = oldcfg.DisableCache
 	c.ParallelScheduler = oldcfg.ParallelScheduler
 	c.ValidateOutput = oldcfg.ValidateOutput
+	c.EnableInfo = oldcfg.EnableInfo
 }
 
-func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateOutput *bool) {
+func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateOutput, enableInfo *bool) {
 	if disableCache != nil {
 		c.DisableCache = *disableCache
 	}
@@ -134,6 +137,10 @@ func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateO
 
 	if validateOutput != nil {
 		c.ValidateOutput = *validateOutput
+	}
+
+	if enableInfo != nil {
+		c.EnableInfo = *enableInfo
 	}
 }
 
