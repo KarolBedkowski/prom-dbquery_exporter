@@ -11,12 +11,14 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"iter"
 	"maps"
 	"net/http"
 	"slices"
 	"sync"
 	"time"
 
+	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
@@ -76,7 +78,7 @@ func (l *locker) unlock(queryKey string) {
 type queryHandler struct {
 	configuration    *conf.Configuration
 	queryResultCache *support.Cache[[]byte]
-	// runningQuery lock the same request for running twice
+	// queryLocker protect from running the same request twice
 	queryLocker locker
 	taskQueue   chan<- *collectors.Task
 }
@@ -93,11 +95,7 @@ func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte],
 }
 
 func (q *queryHandler) Handler() http.Handler {
-	h := newLogMiddleware(
-		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWrapper("query"),
-			q), "query", false)
-
+	h := newLogMiddleware(promhttp.InstrumentHandlerDuration(metrics.NewReqDurationWrapper("query"), q), "query", false)
 	h = support.NewTraceMiddleware("dbquery_exporter")(h)
 	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
 	h = hlog.NewHandler(log.Logger)(h)
@@ -117,11 +115,9 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	defer cancel()
 
 	logger := log.Ctx(ctx)
-	queryNames := req.URL.Query()["query"]
-	dbNames := req.URL.Query()["database"]
 	requestID, _ := hlog.IDFromCtx(ctx)
 
-	support.SetGoroutineLabels(ctx, "requestID", requestID.String(), "req", req.URL.String())
+	support.SetGoroutineLabels(ctx, "req_id", requestID.String(), "req", req.URL.String())
 
 	// prevent to run the same request twice
 	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
@@ -134,36 +130,30 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 	defer q.queryLocker.unlock(req.URL.RawQuery)
 
-	for _, g := range req.URL.Query()["group"] {
-		q := q.configuration.GroupQueries(g)
-		if len(q) > 0 {
-			logger.Debug().Str("group", g).Interface("queries", q).Msg("queryhandler: add queries from group")
-			queryNames = append(queryNames, q...)
-		} else {
-			logger.Info().Str("group", g).Msg("queryhandler: group not found")
-		}
-	}
-
-	if len(queryNames) == 0 || len(dbNames) == 0 {
-		http.Error(writer, "missing required parameters", http.StatusBadRequest)
+	parameters, err := q.parseRequestParameters(req)
+	if err != nil {
+		logger.Info().Err(err).Msg("parse request parameters error")
+		http.Error(writer, "invalid parameters", http.StatusBadRequest)
 		support.TraceErrorf(ctx, "bad request")
 
 		return
 	}
 
-	params := paramsFromQuery(req)
-	queryNames = deduplicateStringList(queryNames)
-	dbNames = deduplicateStringList(dbNames)
+	logger.Debug().Object("parameters", parameters).Msg("parsed parameters")
+
 	dWriter := dataWriter{writer: writer}
-	cancelCh := make(chan struct{}, 1)
-
 	dWriter.writeHeaders()
-	support.TracePrintf(ctx, "start querying db")
 
-	output := q.queryDatabases(ctx, dbNames, queryNames, params, &dWriter, cancelCh)
+	// cancelCh is used to cancel background / running queries
+	cancelCh := make(chan struct{}, 1)
+	defer close(cancelCh)
+
+	support.TracePrintf(ctx, "start querying db")
+	output := q.queryDatabases(ctx, parameters, &dWriter, cancelCh)
 
 	support.TracePrintf(ctx, "start reading data, scheduled: %d", dWriter.scheduled)
-	q.writeResult(ctx, &dWriter, output, cancelCh)
+	q.writeResult(ctx, &dWriter, output)
+
 	logger.Debug().Int("written", dWriter.written).
 		Err(ctx.Err()).
 		Msg("queryhandler: all database queries finished")
@@ -208,70 +198,61 @@ func (q *queryHandler) validateOutput(output []byte) error {
 	return nil
 }
 
-func (q *queryHandler) queryDatabases(ctx context.Context, dbNames []string,
-	queryNames []string, params map[string]any, dWriter *dataWriter, cancelCh chan struct{},
+func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestParameters,
+	dWriter *dataWriter, cancelCh chan struct{},
 ) chan *collectors.TaskResult {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("queryhandler: database processing start")
 
-	output := make(chan *collectors.TaskResult, len(dbNames)*len(queryNames))
+	output := make(chan *collectors.TaskResult, len(parameters.dbNames)*len(parameters.queryNames))
 	now := time.Now()
-
 	reqID, _ := hlog.IDFromCtx(ctx)
 
-	for _, dbName := range dbNames {
-		for _, queryName := range queryNames {
-			query, ok := (q.configuration.Query)[queryName]
-			if !ok {
-				logger.Error().Str("dbname", dbName).Str("query", queryName).Msg("queryhandler: unknown query")
+	for dbName, query := range parameters.iter() {
+		metrics.IncQueryTotalCnt(query.Name, dbName)
 
-				continue
-			}
+		if data, ok := q.getFromCache(query, dbName, parameters.extraParameters); ok {
+			logger.Debug().Str("dbname", dbName).Str("query", query.Name).Msg("queryhandler: query result from cache")
+			support.TracePrintf(ctx, "data from cache for %q from %q", query.Name, dbName)
+			dWriter.write(ctx, data)
 
-			metrics.IncQueryTotalCnt(queryName, dbName)
-
-			if data, ok := q.getFromCache(query, dbName, params); ok {
-				logger.Debug().Str("dbname", dbName).Str("query", queryName).Msg("queryhandler: query result from cache")
-				support.TracePrintf(ctx, "data from cache for %q from %q", queryName, dbName)
-				dWriter.write(ctx, data)
-
-				continue
-			}
-
-			task := &collectors.Task{
-				DBName:       dbName,
-				QueryName:    queryName,
-				Params:       params,
-				Output:       output,
-				Query:        query,
-				RequestStart: now,
-				ReqID:        reqID.String(),
-				CancelCh:     cancelCh,
-			}
-
-			logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
-
-			q.taskQueue <- task
-
-			support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
-
-			dWriter.incScheduled()
+			continue
 		}
+
+		task := &collectors.Task{
+			DBName:       dbName,
+			QueryName:    query.Name,
+			Params:       parameters.extraParameters,
+			Output:       output,
+			Query:        query,
+			RequestStart: now,
+			ReqID:        reqID.String(),
+			CancelCh:     cancelCh,
+		}
+
+		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
+
+		q.taskQueue <- task
+
+		support.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
+
+		dWriter.incScheduled()
 	}
 
 	return output
 }
 
-func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp <-chan *collectors.TaskResult,
-	cancelCh chan<- struct{},
-) {
+func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp <-chan *collectors.TaskResult) {
 	logger := log.Ctx(ctx)
 	logger.Debug().Msgf("queryhandler: write result start; waiting for %d results", dWriter.scheduled)
 
-loop:
 	for dWriter.scheduled > 0 {
 		select {
-		case res := <-inp:
+		case res, ok := <-inp:
+			if !ok {
+				return
+			}
+
 			dWriter.scheduled--
 
 			task := res.Task
@@ -298,15 +279,55 @@ loop:
 			q.putIntoCache(task, res.Result)
 
 		case <-ctx.Done():
-			close(cancelCh)
 			err := ctx.Err()
 			logger.Error().Err(err).Msg("queryhandler: context cancelled")
 			metrics.IncProcessErrorsCnt("cancel")
 			support.TraceErrorf(ctx, "result error: %s", err)
 
-			break loop
+			return
 		}
 	}
+}
+
+func (q *queryHandler) parseRequestParameters(req *http.Request) (*requestParameters, error) {
+	var errs *multierror.Error
+
+	dbNames := deduplicateStringList(req.URL.Query()["database"])
+	if len(dbNames) == 0 {
+		errs = multierror.Append(errs, InvalidRequestParameterError("missing database parameter"))
+	}
+
+	queryNames := req.URL.Query()["query"]
+
+	for _, g := range req.URL.Query()["group"] {
+		q := q.configuration.GroupQueries(g)
+		if len(q) > 0 {
+			queryNames = append(queryNames, q...)
+		} else {
+			errs = multierror.Append(errs, InvalidRequestParameterError("unknown group "+g))
+		}
+	}
+
+	queryNames = deduplicateStringList(queryNames)
+	if len(queryNames) == 0 {
+		errs = multierror.Append(errs, InvalidRequestParameterError("missing query or group parameter"))
+	}
+
+	reqParams := &requestParameters{dbNames, queryNames, paramsFromQuery(req), nil}
+
+	for _, name := range queryNames {
+		if query, ok := q.configuration.Query[name]; ok {
+			reqParams.queries = append(reqParams.queries, query)
+		} else {
+			errs = multierror.Append(errs, InvalidRequestParameterError("unknown query "+name))
+		}
+	}
+
+	if len(reqParams.queries) == 0 {
+		errs = multierror.Append(errs, InvalidRequestParameterError("no valid query given"))
+	}
+
+	return reqParams, errs.ErrorOrNil()
 }
 
 func paramsFromQuery(req *http.Request) map[string]any {
@@ -323,7 +344,7 @@ func paramsFromQuery(req *http.Request) map[string]any {
 }
 
 func deduplicateStringList(inp []string) []string {
-	if len(inp) == 1 {
+	if len(inp) <= 1 {
 		return inp
 	}
 
@@ -333,4 +354,48 @@ func deduplicateStringList(inp []string) []string {
 	}
 
 	return slices.Collect(maps.Keys(tmpMap))
+}
+
+//---------------------------------------------------------------
+
+type InvalidRequestParameterError string
+
+func (g InvalidRequestParameterError) Error() string {
+	return string(g)
+}
+
+//---------------------------------------------------------------
+
+type requestParameters struct {
+	dbNames         []string
+	queryNames      []string
+	extraParameters map[string]any
+
+	queries []*conf.Query
+}
+
+// MarshalZerologObject implements LogObjectMarshaler.
+func (r *requestParameters) MarshalZerologObject(event *zerolog.Event) {
+	event.Strs("dbNames", r.dbNames).
+		Strs("queryNames", r.queryNames).
+		Interface("extraParameters", r.extraParameters)
+
+	qa := zerolog.Arr()
+	for _, q := range r.queries {
+		qa.Str(q.Name)
+	}
+
+	event.Array("queries", qa)
+}
+
+func (r *requestParameters) iter() iter.Seq2[string, *conf.Query] {
+	return func(yield func(string, *conf.Query) bool) {
+		for _, d := range r.dbNames {
+			for _, q := range r.queries {
+				if !yield(d, q) {
+					return
+				}
+			}
+		}
+	}
 }
