@@ -6,7 +6,7 @@ database:
     driver: sqlite
     # connection parameters
     connection:
-      database: rwr3.db
+      database: sqlitedatabasefile.db
     # pool configuration
     pool:
       # max number of active connection; default 10
