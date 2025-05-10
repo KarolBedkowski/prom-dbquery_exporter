@@ -46,5 +46,5 @@ func newMssqlLoader(cfg *conf.Database) (Database, error) {
 }
 
 func init() {
-	registerDatabase(newMssqlLoader, "mssql")
+	registerDatabase(dbDefinition{newMssqlLoader, nil}, "mssql")
 }

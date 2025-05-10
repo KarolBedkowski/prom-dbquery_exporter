@@ -32,7 +32,7 @@ func init() {
 func printVersion() {
 	fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
 
-	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
+	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
 		fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
 	} else {
 		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
@@ -47,7 +47,7 @@ func printWelcome() {
 		Str("build_ctx", version.BuildContext()).
 		Msg("starting DBQuery exporter")
 
-	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
+	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
 		log.Logger.Fatal().Msg("no databases supported, check compile flags")
 	} else {
 		log.Logger.Info().Msgf("supported databases: %s", sdb)
@@ -92,7 +92,7 @@ func main() {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
-	cfg, err := conf.LoadConfiguration(*configFile)
+	cfg, err := conf.LoadConfiguration(*configFile, db.GlobalRegistry)
 	if err != nil {
 		log.Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
 	}
@@ -153,7 +153,7 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 			for range hup {
 				log.Info().Msg("reloading configuration")
 
-				if newConf, err := conf.LoadConfiguration(cfg.ConfigFilename); err == nil {
+				if newConf, err := conf.LoadConfiguration(cfg.ConfigFilename, db.GlobalRegistry); err == nil {
 					newConf.CopyRuntimeOptions(cfg)
 					webHandler.UpdateConf(newConf)
 					sched.UpdateConf(newConf)

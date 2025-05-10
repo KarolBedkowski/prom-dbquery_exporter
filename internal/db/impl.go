@@ -9,38 +9,8 @@ package db
 
 import (
 	"fmt"
-	"maps"
 	"net/url"
-	"slices"
-	"sort"
-
-	"prom-dbquery_exporter.app/internal/conf"
 )
-
-type dbCreator (func(cfg *conf.Database) (Database, error))
-
-var supportedDatabases map[string]dbCreator
-
-func registerDatabase(creator dbCreator, names ...string) {
-	if supportedDatabases == nil {
-		supportedDatabases = make(map[string]dbCreator)
-	}
-
-	for _, n := range names {
-		supportedDatabases[n] = creator
-	}
-}
-
-func SupportedDatabases() []string {
-	if len(supportedDatabases) == 0 {
-		return nil
-	}
-
-	s := slices.Collect(maps.Keys(supportedDatabases))
-	sort.Strings(s)
-
-	return s
-}
 
 type standardParams struct {
 	params url.Values

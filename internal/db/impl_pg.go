@@ -12,7 +12,8 @@ import (
 	"strings"
 
 	// import pg package only when pg tag is enabled.
-	_ "github.com/lib/pq"
+	"github.com/hashicorp/go-multierror"
+	_ "github.com/lib/pq" //noqa:revive
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
@@ -51,5 +52,25 @@ func newPostgresLoader(cfg *conf.Database) (Database, error) {
 }
 
 func init() {
-	registerDatabase(newPostgresLoader, "postgresql", "postgres", "cockroach", "cockroachdb")
+	registerDatabase(dbDefinition{newPostgresLoader, validatePG}, "postgresql", "postgres", "cockroach", "cockroachdb")
+}
+
+func validatePG(cfg *conf.Database) error {
+	if CheckConnectionParam(cfg, "connstr") == nil {
+		return nil
+	}
+
+	var errs *multierror.Error
+
+	if err := CheckConnectionParam(cfg, "database"); err != nil {
+		if err := CheckConnectionParam(cfg, "dbname"); err != nil {
+			errs = multierror.Append(errs, conf.MissingFieldError{Field: "'database' or 'dbname'"})
+		}
+	}
+
+	if err := CheckConnectionParam(cfg, "user"); err != nil {
+		errs = multierror.Append(errs, err)
+	}
+
+	return errs.ErrorOrNil()
 }

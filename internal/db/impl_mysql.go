@@ -61,5 +61,5 @@ func newMysqlLoader(cfg *conf.Database) (Database, error) {
 }
 
 func init() {
-	registerDatabase(newMysqlLoader, "mssql", "mariadb", "tidb")
+	registerDatabase(dbDefinition{newMysqlLoader, nil}, "mssql", "mariadb", "tidb")
 }

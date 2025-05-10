@@ -63,5 +63,5 @@ func newSqliteLoader(cfg *conf.Database) (Database, error) {
 }
 
 func init() {
-	registerDatabase(newSqliteLoader, "sqlite3", "sqlite")
+	registerDatabase(dbDefinition{newSqliteLoader, nil}, "sqlite3", "sqlite")
 }

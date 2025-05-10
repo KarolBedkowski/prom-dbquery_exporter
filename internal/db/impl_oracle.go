@@ -61,5 +61,5 @@ func newOracleLoader(cfg *conf.Database) (Database, error) {
 }
 
 func init() {
-	registerDatabase(newOracleLoader, "oracle", "oci8")
+	registerDatabase(dbDefinition{newOracleLoader, nil}, "oracle", "oci8")
 }

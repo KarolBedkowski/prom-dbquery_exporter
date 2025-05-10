@@ -49,7 +49,7 @@ type collector struct {
 const tasksQueueSize = 10
 
 func newCollector(name string, cfg *conf.Database) (*collector, error) {
-	loader, err := db.CreateLoader(cfg)
+	loader, err := db.GlobalRegistry.GetInstance(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("get loader error: %w", err)
 	}

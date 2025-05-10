@@ -80,7 +80,7 @@ outerloop:
 }
 
 // LoadConfiguration from filename.
-func LoadConfiguration(filename string) (*Configuration, error) {
+func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
 	conf := &Configuration{
 		ConfigFilename: filename,
@@ -112,7 +112,7 @@ func LoadConfiguration(filename string) (*Configuration, error) {
 	}
 
 	ctx := logger.WithContext(context.Background())
-	if err = conf.validate(ctx); err != nil {
+	if err = conf.validate(ctx, dbp); err != nil {
 		return nil, newConfigurationError("validate error").Wrap(err)
 	}
 
@@ -168,7 +168,12 @@ func (c *Configuration) validateJobs(ctx context.Context) error {
 	return errs.ErrorOrNil()
 }
 
-func (c *Configuration) validate(ctx context.Context) error {
+type DatabaseProvider interface {
+	Validate(d *Database) error
+	IsSupported(d *Database) bool
+}
+
+func (c *Configuration) validate(ctx context.Context, dbp DatabaseProvider) error {
 	var errs *multierror.Error
 
 	if len(c.Database) == 0 {
@@ -191,9 +196,13 @@ func (c *Configuration) validate(ctx context.Context) error {
 	}
 
 	for name, db := range c.Database {
-		if err := db.validate(); err != nil {
-			errs = multierror.Append(errs, newConfigurationError(
-				fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
+		if dbp.IsSupported(db) {
+			if err := db.validate(dbp); err != nil {
+				errs = multierror.Append(errs, newConfigurationError(
+					fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
+			}
+		} else {
+			log.Logger.Warn().Str("database", name).Msgf("database %s is not supported", db.Driver)
 		}
 	}
 

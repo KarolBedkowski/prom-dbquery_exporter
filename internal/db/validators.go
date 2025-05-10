@@ -1,0 +1,59 @@
+package db
+
+import (
+	"strings"
+
+	"github.com/hashicorp/go-multierror"
+	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/conf"
+)
+
+//
+// validators.go
+// Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
+//
+// Distributed under terms of the GPLv3 license.
+//
+
+// CheckConnectionParam return true when all keys exists
+// and is not empty.
+func CheckConnectionParam(cfg *conf.Database, keys ...string) error {
+	var missing []string
+
+	for _, key := range keys {
+		val, ok := cfg.Connection[key]
+		if !ok {
+			missing = append(missing, key)
+		} else if val, ok := val.(string); ok {
+			if strings.TrimSpace(val) == "" {
+				missing = append(missing, key)
+			}
+		}
+	}
+
+	if len(missing) > 0 {
+		return conf.MissingFieldError{Field: strings.Join(missing, ", ")}
+	}
+
+	return nil
+}
+
+func validateCommon(dbcfg *conf.Database) error {
+	var errs *multierror.Error
+
+	if port, ok := dbcfg.Connection["port"]; ok {
+		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
+			errs = multierror.Append(errs, conf.NewInvalidFieldError("port", port))
+		}
+	}
+
+	if dbcfg.Timeout.Seconds() < 1 && dbcfg.Timeout > 0 {
+		log.Logger.Warn().Msgf("configuration: database %v: timeout < 1s: %s", dbcfg.Name, dbcfg.Timeout)
+	}
+
+	if dbcfg.ConnectTimeout.Seconds() < 1 && dbcfg.ConnectTimeout > 0 {
+		log.Logger.Warn().Msgf("configuration: database %v: connect_timeout < 1s: %s", dbcfg.Name, dbcfg.ConnectTimeout)
+	}
+
+	return errs.ErrorOrNil()
+}
