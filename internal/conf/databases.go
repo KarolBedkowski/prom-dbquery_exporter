@@ -73,6 +73,8 @@ type Database struct {
 	// Connection and ping timeout
 	ConnectTimeout time.Duration `yaml:"connect_timeout"`
 
+	// Has database valid configuration?
+	Valid bool
 	// Number of connection dedicated to run only jobs by scheduler
 	BackgroundWorkers int `yaml:"background_workers"`
 	// Max workers is defined by pool max_connections-background_workers
@@ -137,12 +139,16 @@ func (d *Database) setup(name string) {
 
 func (d *Database) validate(dbp DatabaseProvider) error {
 	if err := dbp.Validate(d); err != nil {
-		return fmt.Errorf("validate database configuration error: %w", err)
+		return fmt.Errorf("database configuration error: %w", err)
 	}
 
 	if d.Pool != nil {
-		return d.Pool.validate()
+		if err := d.Pool.validate(); err != nil {
+			return fmt.Errorf("database pool configuration error: %w", err)
+		}
 	}
+
+	d.Valid = true
 
 	return nil
 }
