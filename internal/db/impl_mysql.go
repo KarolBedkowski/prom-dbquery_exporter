@@ -1,7 +1,7 @@
 //go:build mysql
 // +build mysql
 
-// impl_pg.go
+// impl_mysql.go
 // Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
@@ -15,18 +15,36 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
+func init() {
+	registerDatabase(dbDefinition{newMysqlLoader, validateMysqlConf}, "mssql", "mariadb", "tidb")
+}
+
 func newMysqlLoader(cfg *conf.Database) (Database, error) {
-	params := &standardParams{
-		host: "localhost",
-		port: "3306",
+	params := newStandardParams(cfg.Connection)
+
+	// defaults
+	if params.host == "" {
+		params.host = "localhost"
 	}
 
-	params.load(cfg.Connection)
+	if params.port == "" {
+		params.port = "3306"
+	}
 
 	if params.dbname == "" {
 		return nil, ErrNoDatabaseName
 	}
 
+	connstr := buildMysqlConnstr(params)
+	l := &genericDatabase{
+		connStr: connstr, driver: "mysql", initialSQL: cfg.InitialQuery,
+		dbConf: cfg,
+	}
+
+	return l, nil
+}
+
+func buildMysqlConnstr(params standardParams) string {
 	var connstr strings.Builder
 
 	if params.user != "" {
@@ -52,14 +70,9 @@ func newMysqlLoader(cfg *conf.Database) (Database, error) {
 		connstr.WriteString(params.params.Encode())
 	}
 
-	l := &genericDatabase{
-		connStr: connstr.String(), driver: "mysql", initialSQL: cfg.InitialQuery,
-		dbConf: cfg,
-	}
-
-	return l, nil
+	return connstr.String()
 }
 
-func init() {
-	registerDatabase(dbDefinition{newMysqlLoader, nil}, "mssql", "mariadb", "tidb")
+func validateMysqlConf(cfg *conf.Database) error {
+	return checkConnectionParam(cfg, "database")
 }

@@ -1,5 +1,12 @@
 package db
 
+//
+// validators.go
+// Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
+//
+// Distributed under terms of the GPLv3 license.
+//
+
 import (
 	"strings"
 
@@ -8,21 +15,13 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-//
-// validators.go
-// Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
-//
-// Distributed under terms of the GPLv3 license.
-//
-
-// CheckConnectionParam return true when all keys exists
+// checkConnectionParam return true when all keys exists
 // and is not empty.
-func CheckConnectionParam(cfg *conf.Database, keys ...string) error {
+func checkConnectionParam(cfg *conf.Database, keys ...string) error {
 	var missing []string
 
 	for _, key := range keys {
-		val, ok := cfg.Connection[key]
-		if !ok {
+		if val, ok := cfg.Connection[key]; !ok {
 			missing = append(missing, key)
 		} else if val, ok := val.(string); ok {
 			if strings.TrimSpace(val) == "" {
@@ -32,7 +31,7 @@ func CheckConnectionParam(cfg *conf.Database, keys ...string) error {
 	}
 
 	if len(missing) > 0 {
-		return conf.MissingFieldError{Field: strings.Join(missing, ", ")}
+		return conf.MissingFieldError(strings.Join(missing, ", "))
 	}
 
 	return nil

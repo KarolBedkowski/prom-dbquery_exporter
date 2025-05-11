@@ -1,7 +1,7 @@
 //go:build sqlite
 // +build sqlite
 
-// impl_pg.go
+// impl_sqlite.go
 // Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
@@ -16,6 +16,10 @@ import (
 	_ "github.com/glebarez/go-sqlite"
 	"prom-dbquery_exporter.app/internal/conf"
 )
+
+func init() {
+	registerDatabase(dbDefinition{newSqliteLoader, validateSqliteConf}, "sqlite3", "sqlite")
+}
 
 func newSqliteLoader(cfg *conf.Database) (Database, error) {
 	params := url.Values{}
@@ -62,6 +66,6 @@ func newSqliteLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func init() {
-	registerDatabase(dbDefinition{newSqliteLoader, nil}, "sqlite3", "sqlite")
+func validateSqliteConf(cfg *conf.Database) error {
+	return checkConnectionParam(cfg, "database")
 }

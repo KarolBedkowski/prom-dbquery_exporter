@@ -1,7 +1,7 @@
 //go:build oracle
 // +build oracle
 
-// impl_pg.go
+// impl_oracle.go
 // Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
@@ -15,6 +15,10 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
+func init() {
+	registerDatabase(dbDefinition{newOracleLoader, validateOracleConf}, "oracle", "oci8")
+}
+
 func newOracleLoader(cfg *conf.Database) (Database, error) {
 	params := newStandardParams(cfg.Connection)
 
@@ -22,6 +26,20 @@ func newOracleLoader(cfg *conf.Database) (Database, error) {
 		return nil, ErrNoDatabaseName
 	}
 
+	connstr := buildOracleConnstr(params)
+	l := &genericDatabase{
+		connStr: connstr, driver: "oracle", initialSQL: cfg.InitialQuery,
+		dbConf: cfg,
+	}
+
+	return l, nil
+}
+
+func validateOracleConf(cfg *conf.Database) error {
+	return checkConnectionParam(cfg, "database", "host")
+}
+
+func buildOracleConnstr(params standardParams) string {
 	var connstr strings.Builder
 
 	connstr.WriteString("oracle://")
@@ -52,14 +70,5 @@ func newOracleLoader(cfg *conf.Database) (Database, error) {
 		connstr.WriteString(params.params.Encode())
 	}
 
-	l := &genericDatabase{
-		connStr: connstr.String(), driver: "oracle", initialSQL: cfg.InitialQuery,
-		dbConf: cfg,
-	}
-
-	return l, nil
-}
-
-func init() {
-	registerDatabase(dbDefinition{newOracleLoader, nil}, "oracle", "oci8")
+	return connstr.String()
 }

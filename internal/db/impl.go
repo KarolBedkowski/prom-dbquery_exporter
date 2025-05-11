@@ -21,14 +21,9 @@ type standardParams struct {
 	port   string
 }
 
-func newStandardParams(cfg map[string]any) *standardParams {
-	s := &standardParams{}
-	s.load(cfg)
+func newStandardParams(cfg map[string]any) standardParams {
+	params := standardParams{}
 
-	return s
-}
-
-func (s *standardParams) load(cfg map[string]any) {
 	for key, val := range cfg {
 		vstr := ""
 		if val != nil {
@@ -37,17 +32,19 @@ func (s *standardParams) load(cfg map[string]any) {
 
 		switch key {
 		case "database": //nolint: goconst
-			s.dbname = url.PathEscape(vstr)
+			params.dbname = url.PathEscape(vstr)
 		case "host":
-			s.host = url.PathEscape(vstr)
+			params.host = url.PathEscape(vstr)
 		case "port":
-			s.port = url.PathEscape(vstr)
+			params.port = url.PathEscape(vstr)
 		case "user":
-			s.user = url.PathEscape(vstr)
+			params.user = url.PathEscape(vstr)
 		case "password":
-			s.pass = url.PathEscape(vstr)
+			params.pass = url.PathEscape(vstr)
 		default:
-			s.params.Add(key, vstr)
+			params.params.Add(key, vstr)
 		}
 	}
+
+	return params
 }

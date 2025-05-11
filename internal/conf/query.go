@@ -60,14 +60,14 @@ func (q *Query) setup(name string) {
 
 func (q *Query) validate() error {
 	if q.SQL == "" {
-		return MissingFieldError{"sql"}
+		return MissingFieldError("sql")
 	}
 
 	q.SQL = strings.TrimSpace(q.SQL)
 
 	m := strings.TrimSpace(q.Metrics)
 	if m == "" {
-		return MissingFieldError{"metrics template"}
+		return MissingFieldError("metrics template")
 	}
 
 	tmpl, err := support.TemplateCompile(q.Name, m+"\n")

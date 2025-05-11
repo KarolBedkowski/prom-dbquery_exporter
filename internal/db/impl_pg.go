@@ -17,6 +17,11 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
+func init() {
+	registerDatabase(dbDefinition{newPostgresLoader, validatePostgresConf},
+		"postgresql", "postgres", "cockroach", "cockroachdb")
+}
+
 func newPostgresLoader(cfg *conf.Database) (Database, error) {
 	var connStr string
 	if val, ok := cfg.Connection["connstr"]; ok && val != "" {
@@ -51,24 +56,21 @@ func newPostgresLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func init() {
-	registerDatabase(dbDefinition{newPostgresLoader, validatePG}, "postgresql", "postgres", "cockroach", "cockroachdb")
-}
-
-func validatePG(cfg *conf.Database) error {
-	if CheckConnectionParam(cfg, "connstr") == nil {
+func validatePostgresConf(cfg *conf.Database) error {
+	// if connstr is confiured to not check other parameters
+	if checkConnectionParam(cfg, "connstr") == nil {
 		return nil
 	}
 
 	var errs *multierror.Error
 
-	if err := CheckConnectionParam(cfg, "database"); err != nil {
-		if err := CheckConnectionParam(cfg, "dbname"); err != nil {
-			errs = multierror.Append(errs, conf.MissingFieldError{Field: "'database' or 'dbname'"})
+	if err := checkConnectionParam(cfg, "database"); err != nil {
+		if err := checkConnectionParam(cfg, "dbname"); err != nil {
+			errs = multierror.Append(errs, conf.MissingFieldError("'database' or 'dbname'"))
 		}
 	}
 
-	if err := CheckConnectionParam(cfg, "user"); err != nil {
+	if err := checkConnectionParam(cfg, "user"); err != nil {
 		errs = multierror.Append(errs, err)
 	}
 
