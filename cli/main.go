@@ -153,8 +153,7 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 			for range hup {
 				log.Info().Msg("reloading configuration")
 
-				if newConf, err := conf.LoadConfiguration(cfg.ConfigFilename, db.GlobalRegistry); err == nil {
-					newConf.CopyRuntimeOptions(cfg)
+				if newConf, err := cfg.ReloadConfiguration(db.GlobalRegistry); err == nil {
 					webHandler.UpdateConf(newConf)
 					sched.UpdateConf(newConf)
 					collectors.UpdateConf(newConf)

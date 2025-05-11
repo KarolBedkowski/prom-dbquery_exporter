@@ -119,11 +119,16 @@ func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, e
 	return conf, nil
 }
 
-func (c *Configuration) CopyRuntimeOptions(oldcfg *Configuration) {
-	c.DisableCache = oldcfg.DisableCache
-	c.ParallelScheduler = oldcfg.ParallelScheduler
-	c.ValidateOutput = oldcfg.ValidateOutput
-	c.EnableInfo = oldcfg.EnableInfo
+// LoadConfiguration from filename.
+func (c *Configuration) ReloadConfiguration(dbp DatabaseProvider) (*Configuration, error) {
+	newCfg, err := LoadConfiguration(c.ConfigFilename, dbp)
+	if err != nil {
+		return nil, err
+	}
+
+	newCfg.copyRuntimeOption(c)
+
+	return newCfg, nil
 }
 
 func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateOutput, enableInfo *bool) {
@@ -142,6 +147,13 @@ func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateO
 	if enableInfo != nil {
 		c.EnableInfo = *enableInfo
 	}
+}
+
+func (c *Configuration) copyRuntimeOption(oldcfg *Configuration) {
+	c.DisableCache = oldcfg.DisableCache
+	c.ParallelScheduler = oldcfg.ParallelScheduler
+	c.ValidateOutput = oldcfg.ValidateOutput
+	c.EnableInfo = oldcfg.EnableInfo
 }
 
 func (c *Configuration) validateJobs(ctx context.Context) error {
@@ -176,10 +188,6 @@ type DatabaseProvider interface {
 func (c *Configuration) validate(ctx context.Context, dbp DatabaseProvider) error {
 	var errs *multierror.Error
 
-	if len(c.Database) == 0 {
-		errs = multierror.Append(errs, newConfigurationError("no database configured"))
-	}
-
 	if err := c.Global.validate(); err != nil {
 		errs = multierror.Append(errs, newConfigurationError("validate global settings error").Wrap(err))
 	}
@@ -195,18 +203,37 @@ func (c *Configuration) validate(ctx context.Context, dbp DatabaseProvider) erro
 		}
 	}
 
+	errs = multierror.Append(errs, c.validateDatabases(ctx, dbp), c.validateJobs(ctx))
+
+	return errs.ErrorOrNil()
+}
+
+func (c *Configuration) validateDatabases(ctx context.Context, dbp DatabaseProvider) error {
+	if len(c.Database) == 0 {
+		return newConfigurationError("no database configured")
+	}
+
+	var (
+		errs            *multierror.Error
+		anyDbConfigured bool
+	)
+
 	for name, db := range c.Database {
 		if dbp.IsSupported(db) {
 			if err := db.validate(dbp); err != nil {
 				errs = multierror.Append(errs, newConfigurationError(
 					fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
+			} else {
+				anyDbConfigured = true
 			}
 		} else {
-			log.Logger.Warn().Str("database", name).Msgf("database %s is not supported", db.Driver)
+			log.Ctx(ctx).Error().Str("database", name).Msgf("database %s is not supported", db.Driver)
 		}
 	}
 
-	errs = multierror.Append(errs, c.validateJobs(ctx))
+	if !anyDbConfigured {
+		errs = multierror.Append(errs, newConfigurationError("all databases have invalid configuration"))
+	}
 
 	return errs.ErrorOrNil()
 }
