@@ -336,7 +336,7 @@ func (s *Scheduler) updateConfig(cfg *conf.Configuration) {
 	s.tasks = tasks
 	s.cfg = cfg
 
-	s.log.Info().Msgf("scheduler: configuration updated; tasks: %d", len(s.tasks))
+	s.log.Debug().Msgf("scheduler: configuration updated; tasks: %d", len(s.tasks))
 }
 
 // rescheduleTask set next run time for all tasks.

@@ -149,7 +149,6 @@ func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool)
 
 	workersCreatedCnt.WithLabelValues(c.dbName).Inc()
 	support.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.dbName, "bg", strconv.FormatBool(isBg))
-
 	wlog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
 
 	// stop worker after 1 second of inactivity
@@ -227,18 +226,18 @@ func (c *collector) handleTask(ctx context.Context, wlog zerolog.Logger, task *T
 // queryDatabase get result from loader.
 func (c *collector) queryDatabase(ctx context.Context, llog zerolog.Logger, task *Task, res chan *TaskResult) {
 	support.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
+	llog.Debug().Msg("collector: start query")
 
 	result, err := c.loader.Query(ctx, task.Query, task.Params)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("query")
-
 		res <- c.handleQueryError(ctx, llog, task, err)
 
 		return
 	}
 
-	llog.Debug().Msg("collector: result received")
 	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
+	llog.Debug().Msgf("collector: result received in %0.5f", result.Duration)
 
 	output, err := formatResult(ctx, result, task.Query, c.cfg)
 	if err != nil {

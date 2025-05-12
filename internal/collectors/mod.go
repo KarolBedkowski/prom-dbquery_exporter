@@ -65,7 +65,7 @@ func (cs *Collectors) Run(ctx context.Context) error {
 		for {
 			select {
 			case <-ctx.Done():
-				cs.log.Info().Msg("collectors: stopping...")
+				cs.log.Debug().Msg("collectors: stopping...")
 				cancel()
 
 				if err := group.Wait(); err != nil {

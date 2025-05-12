@@ -266,7 +266,7 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
 
 			if err := q.validateOutput(res.Result); err != nil {
-				logger.Error().Err(err).Object("task", task).Msg("queryhandler: validate output error")
+				logger.Warn().Err(err).Object("task", task).Msg("queryhandler: validate output error")
 				support.TracePrintf(ctx, "validate result of query %q from %q: %v", task.QueryName, task.DBName, err)
 
 				continue
@@ -277,7 +277,7 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 
 		case <-ctx.Done():
 			err := ctx.Err()
-			logger.Error().Err(err).Msg("queryhandler: context cancelled")
+			logger.Warn().Err(err).Msg("queryhandler: context cancelled")
 			metrics.IncProcessErrorsCnt("cancel")
 			support.TraceErrorf(ctx, "result error: %s", err)
 

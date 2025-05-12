@@ -24,12 +24,14 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
+const AppName = "dbquery_exporter"
+
 func init() {
-	prometheus.MustRegister(cversion.NewCollector("dbquery_exporter"))
+	prometheus.MustRegister(cversion.NewCollector(AppName))
 }
 
 func printVersion() {
-	fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
+	fmt.Println(version.Print("dbquery_exporter")) //nolint:forbidigo
 
 	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
 		fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
@@ -41,18 +43,18 @@ func printVersion() {
 }
 
 func printWelcome() {
-	log.Logger.Info().
+	log.Logger.Log().
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
-		Msg("starting DBQuery exporter")
+		Msgf("starting %s", AppName)
 
 	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
 		log.Logger.Fatal().Msg("no databases supported, check compile flags")
 	} else {
-		log.Logger.Info().Msgf("supported databases: %s", sdb)
+		log.Logger.Log().Msgf("supported databases: %s", sdb)
 	}
 
-	log.Logger.Info().Msgf("available template functions: %s", support.AvailableTmplFunctions())
+	log.Logger.Log().Msgf("available template functions: %s", support.AvailableTmplFunctions())
 }
 
 // Main is main function for cli.
@@ -157,6 +159,7 @@ func start(cfg *conf.Configuration) error {
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 	daemon.SdNotify(false, "STATUS=ready")       //nolint:errcheck
+	log.Logger.Log().Msgf("%s READY!", AppName)
 
 	return runGroup.Run() //nolint:wrapcheck
 }
