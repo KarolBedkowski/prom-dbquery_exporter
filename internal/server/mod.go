@@ -30,35 +30,32 @@ const (
 
 // WebHandler handle incoming requests.
 type WebHandler struct {
-	handler       *queryHandler
-	infoHandler   *infoHandler
-	server        *http.Server
-	cfg           *conf.Configuration
-	listenAddress string
-	webConfig     string
+	handler     *queryHandler
+	infoHandler *infoHandler
+	server      *http.Server
+	cfg         *conf.Configuration
 }
 
 // NewWebHandler create new WebHandler.
-func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string, cache *support.Cache[[]byte],
+func NewWebHandler(cfg *conf.Configuration, cache *support.Cache[[]byte],
 	taskQueue chan<- *collectors.Task,
 ) *WebHandler {
 	qh := newQueryHandler(cfg, cache, taskQueue)
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)
-	if cfg.EnableInfo {
+	if cfg.RuntimeArgs.EnableInfo {
 		http.Handle("/info", ih.Handler())
 	}
 
 	webHandler := &WebHandler{
-		handler:       qh,
-		infoHandler:   ih,
-		listenAddress: listenAddress,
-		webConfig:     webConfig,
-		cfg:           cfg,
+		handler:     qh,
+		infoHandler: ih,
+		cfg:         cfg,
 	}
 
-	local := strings.HasPrefix(listenAddress, "127.0.0.1:") || strings.HasPrefix(listenAddress, "localhost:")
+	local := strings.HasPrefix(cfg.RuntimeArgs.ListenAddress, "127.0.0.1:") ||
+		strings.HasPrefix(cfg.RuntimeArgs.ListenAddress, "localhost:")
 
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
@@ -79,7 +76,7 @@ func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig stri
 
 // Run webhandler.
 func (w *WebHandler) Run() error {
-	log.Logger.Info().Msgf("webhandler: listening on %s", w.listenAddress)
+	log.Logger.Info().Msgf("webhandler: listening on %s", w.cfg.RuntimeArgs.ListenAddress)
 
 	rwTimeout := defaultRwTimeout
 	if w.cfg.Global.RequestTimeout > 0 {
@@ -87,13 +84,13 @@ func (w *WebHandler) Run() error {
 	}
 
 	w.server = &http.Server{
-		Addr:           w.listenAddress,
+		Addr:           w.cfg.RuntimeArgs.ListenAddress,
 		ReadTimeout:    rwTimeout,
 		WriteTimeout:   rwTimeout,
 		MaxHeaderBytes: defaultMaxHeaderBytes,
 	}
 
-	if err := listenAndServe(w.server, w.webConfig); err != nil {
+	if err := listenAndServe(w.server, w.cfg.RuntimeArgs.WebConfig); err != nil {
 		return fmt.Errorf("listen and serve failed: %w", err)
 	}
 

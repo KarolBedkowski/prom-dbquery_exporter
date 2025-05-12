@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"os/signal"
@@ -58,55 +57,36 @@ func printWelcome() {
 
 // Main is main function for cli.
 func main() {
-	var (
-		showVersion = flag.Bool("version", false, "Print version information.")
-		configFile  = flag.String("config.file", "dbquery.yaml",
-			"Path to configuration file.")
-		listenAddress = flag.String("web.listen-address", ":9122",
-			"Address to listen on for web interface and telemetry.")
-		loglevel = flag.String("log.level", "info",
-			"Logging level (debug, info, warn, error, fatal)")
-		logformat = flag.String("log.format", "logfmt",
-			"Logging log format (logfmt, json).")
-		webConfig = flag.String("web.config", "",
-			"Path to config yaml file that can enable TLS or authentication.")
-		disableCache            = flag.Bool("no-cache", false, "Disable query result caching")
-		enableSchedulerParallel = flag.Bool("parallel-scheduler", false, "Run scheduler ask parallel")
-		validateOutput          = flag.Bool("validate-output", false, "Enable output validation")
-		enableInfo              = flag.Bool("enable-info", false, "Enable /info endpoint")
-	)
+	cliOpts := conf.NewRuntimeArgs()
 
-	flag.Parse()
-
-	if *showVersion {
+	if cliOpts.ShowVersion {
 		printVersion()
 		os.Exit(0)
 	}
 
 	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	support.InitializeLogger(*loglevel, *logformat)
+	support.InitializeLogger(cliOpts.LogLevel, cliOpts.LogFormat)
 	printWelcome()
 
 	if err := enableSDNotify(); err != nil {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
-	cfg, err := conf.LoadConfiguration(*configFile, db.GlobalRegistry)
+	cfg, err := conf.LoadConfiguration(cliOpts.ConfigFilename, db.GlobalRegistry)
 	if err != nil {
-		log.Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
+		log.Logger.Fatal().Err(err).Str("file", cliOpts.ConfigFilename).Msg("load config file error")
 	}
 
 	if cfg == nil {
 		panic("create configuration error")
 	}
 
-	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput, enableInfo)
+	cfg.RuntimeArgs = cliOpts
 
 	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
 	metrics.UpdateConf()
 
-	if err := start(cfg, *listenAddress, *webConfig); err != nil {
+	if err := start(cfg); err != nil {
 		log.Logger.Fatal().Err(err).Msg("Start failed")
 		os.Exit(1)
 	}
@@ -114,12 +94,12 @@ func main() {
 	log.Logger.Info().Msg("finished..")
 }
 
-func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
+func start(cfg *conf.Configuration) error {
 	collectors, taskQueue := collectors.NewCollectors(cfg)
 	defer close(taskQueue)
 
 	cache := support.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache, taskQueue)
+	webHandler := server.NewWebHandler(cfg, cache, taskQueue)
 	sched := scheduler.NewScheduler(cache, cfg, taskQueue)
 	runGroup := run.Group{}
 
@@ -169,7 +149,7 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 		func(_ error) { close(hup) },
 	)
 
-	if cfg.ParallelScheduler {
+	if cfg.RuntimeArgs.ParallelScheduler {
 		runGroup.Add(func() error { return sched.RunParallel(ctx) }, sched.Close)
 	} else {
 		runGroup.Add(func() error { return sched.Run(ctx) }, sched.Close)

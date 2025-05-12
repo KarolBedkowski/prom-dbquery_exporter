@@ -25,18 +25,14 @@ type Configuration struct {
 	Global GlobalConf
 
 	// Runtime configuration
-
-	ConfigFilename    string `yaml:"-"`
-	DisableCache      bool   `yaml:"-"`
-	ParallelScheduler bool   `yaml:"-"`
-	ValidateOutput    bool   `yaml:"-"`
-	EnableInfo        bool   `yaml:"-"`
+	RuntimeArgs RuntimeArgs `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	event.Object("global", &c.Global).
-		Interface("jobs", c.Jobs)
+		Interface("jobs", c.Jobs).
+		Interface("cliOptions", c.RuntimeArgs)
 
 	d := zerolog.Dict()
 
@@ -53,13 +49,6 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	}
 
 	event.Dict("query", qd)
-
-	event.Dict("cli", zerolog.Dict().
-		Str("config_filename", c.ConfigFilename).
-		Bool("disable_cache", c.DisableCache).
-		Bool("parallel_scheduler", c.ParallelScheduler).
-		Bool("validate_output", c.ValidateOutput).
-		Bool("enable_info", c.EnableInfo))
 }
 
 // GroupQueries return queries that belong to given group.
@@ -82,9 +71,7 @@ outerloop:
 // LoadConfiguration from filename.
 func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
-	conf := &Configuration{
-		ConfigFilename: filename,
-	}
+	conf := &Configuration{}
 
 	logger.Info().Msgf("Loading config file %s", filename)
 
@@ -121,39 +108,14 @@ func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, e
 
 // LoadConfiguration from filename.
 func (c *Configuration) ReloadConfiguration(dbp DatabaseProvider) (*Configuration, error) {
-	newCfg, err := LoadConfiguration(c.ConfigFilename, dbp)
+	newCfg, err := LoadConfiguration(c.RuntimeArgs.ConfigFilename, dbp)
 	if err != nil {
 		return nil, err
 	}
 
-	newCfg.copyRuntimeOption(c)
+	newCfg.RuntimeArgs = c.RuntimeArgs
 
 	return newCfg, nil
-}
-
-func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateOutput, enableInfo *bool) {
-	if disableCache != nil {
-		c.DisableCache = *disableCache
-	}
-
-	if parallelScheduler != nil {
-		c.ParallelScheduler = *parallelScheduler
-	}
-
-	if validateOutput != nil {
-		c.ValidateOutput = *validateOutput
-	}
-
-	if enableInfo != nil {
-		c.EnableInfo = *enableInfo
-	}
-}
-
-func (c *Configuration) copyRuntimeOption(oldcfg *Configuration) {
-	c.DisableCache = oldcfg.DisableCache
-	c.ParallelScheduler = oldcfg.ParallelScheduler
-	c.ValidateOutput = oldcfg.ValidateOutput
-	c.EnableInfo = oldcfg.EnableInfo
 }
 
 func (c *Configuration) validateJobs(ctx context.Context) error {
