@@ -69,9 +69,9 @@ outerloop:
 }
 
 // LoadConfiguration from filename.
-func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, error) {
+func LoadConfiguration(filename string, dbp DatabaseProvider, ra RuntimeArgs) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
-	conf := &Configuration{}
+	conf := &Configuration{RuntimeArgs: ra}
 
 	logger.Info().Msgf("Loading config file %s", filename)
 
@@ -108,12 +108,10 @@ func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, e
 
 // LoadConfiguration from filename.
 func (c *Configuration) ReloadConfiguration(dbp DatabaseProvider) (*Configuration, error) {
-	newCfg, err := LoadConfiguration(c.RuntimeArgs.ConfigFilename, dbp)
+	newCfg, err := LoadConfiguration(c.RuntimeArgs.ConfigFilename, dbp, c.RuntimeArgs)
 	if err != nil {
 		return nil, err
 	}
-
-	newCfg.RuntimeArgs = c.RuntimeArgs
 
 	return newCfg, nil
 }

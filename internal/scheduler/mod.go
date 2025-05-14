@@ -32,8 +32,7 @@ type scheduledTask struct {
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (s *scheduledTask) MarshalZerologObject(event *zerolog.Event) {
-	event.Object("job", &s.job).
-		Time("next_run", s.nextRun)
+	event.Object("job", &s.job).Time("next_run", s.nextRun)
 }
 
 // Scheduler is background process that load configured data into cache in some intervals.
@@ -94,9 +93,30 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
 }
 
 // Run scheduler process that get data for all defined jobs sequential.
-func (s *Scheduler) Run(ctx context.Context) error {
-	s.log.Debug().Msgf("scheduler: starting serial scheduler")
+func (s *Scheduler) Run(ctx context.Context, parallel bool) error {
+	if parallel {
+		return s.runParallel(ctx)
+	}
 
+	return s.runSerial(ctx)
+}
+
+// Close scheduler.
+func (s *Scheduler) Close(err error) {
+	_ = err
+
+	s.log.Debug().Msg("scheduler: stopping")
+	close(s.newCfgCh)
+}
+
+// UpdateConf load new configuration.
+func (s *Scheduler) UpdateConf(cfg *conf.Configuration) {
+	s.newCfgCh <- cfg
+}
+
+// RunSerial scheduler process that get data for all defined jobs sequential.
+func (s *Scheduler) runSerial(ctx context.Context) error {
+	s.log.Debug().Msgf("scheduler: starting serial scheduler")
 	s.rescheduleTask()
 
 	timer := time.NewTimer(time.Second)
@@ -131,7 +151,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 }
 
 // RunParallel run scheduler in parallel mode that spawn goroutine for each defined job.
-func (s *Scheduler) RunParallel(ctx context.Context) error {
+func (s *Scheduler) runParallel(ctx context.Context) error {
 	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
 
 	for {
@@ -171,7 +191,7 @@ func (s *Scheduler) RunParallel(ctx context.Context) error {
 			cancel()
 
 			if err := group.Wait(); err != nil {
-				s.log.Error().Err(err).Msg("scheduler: wait for errors finished error")
+				s.log.Error().Err(err).Msg("scheduler: wait for finish error")
 			}
 
 			s.log.Debug().Msg("scheduler: all workers stopped")
@@ -180,19 +200,6 @@ func (s *Scheduler) RunParallel(ctx context.Context) error {
 			continue
 		}
 	}
-}
-
-// Close scheduler.
-func (s *Scheduler) Close(err error) {
-	_ = err
-
-	s.log.Debug().Msg("scheduler: stopping")
-	close(s.newCfgCh)
-}
-
-// UpdateConf load new configuration.
-func (s *Scheduler) UpdateConf(cfg *conf.Configuration) {
-	s.newCfgCh <- cfg
 }
 
 // handleJobWithMetrics wrap handleJob to gather some metrics and log errors.

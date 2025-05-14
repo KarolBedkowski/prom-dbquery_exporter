@@ -72,8 +72,8 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", queryParams).
-		Msg("db: genericQuery start execute")
+	llog.Debug().Str("sql", query.SQL).Interface("params", queryParams).
+		Msgf("db: genericQuery start execute with timeout=%s", timeout)
 
 	tx, err := conn.BeginTxx(ctx, nil)
 	if err != nil {
@@ -151,18 +151,17 @@ func (g *genericDatabase) configureConnection(ctx context.Context) {
 	}
 
 	if pool.MaxConnections > 0 {
-		llog.Debug().Int("max-conn", pool.MaxConnections).Msg("db: max connection set")
+		llog.Debug().Msgf("db: max connection set to %d", pool.MaxConnections)
 		g.conn.SetMaxOpenConns(pool.MaxConnections)
 	}
 
 	if pool.MaxIdleConnections > 0 {
-		llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("db: max idle connection set")
+		llog.Debug().Msgf("db: max idle connection set to %d", pool.MaxIdleConnections)
 		g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
 	}
 
 	if pool.ConnMaxLifeTime > 0 {
-		llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
-			Msg("db: connection max life time set")
+		llog.Debug().Msgf("db: connection max life time set to %s", pool.ConnMaxLifeTime)
 		g.conn.SetConnMaxLifetime(pool.ConnMaxLifeTime)
 	}
 }
@@ -177,8 +176,7 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 	}
 
 	llog := log.Ctx(ctx)
-	llog.Debug().Str("connstr", g.connStr).Str("driver", g.driver).
-		Msg("db: genericQuery connecting")
+	llog.Debug().Str("connstr", g.connStr).Str("driver", g.driver).Msg("db: genericQuery connecting")
 
 	var err error
 	if g.conn, err = sqlx.Open(g.driver, g.connStr); err != nil {

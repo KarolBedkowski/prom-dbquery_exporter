@@ -74,26 +74,19 @@ func main() {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
-	cfg, err := conf.LoadConfiguration(cliOpts.ConfigFilename, db.GlobalRegistry)
-	if err != nil {
+	cfg, err := conf.LoadConfiguration(cliOpts.ConfigFilename, db.GlobalRegistry, cliOpts)
+	if err != nil || cfg == nil {
 		log.Logger.Fatal().Err(err).Str("file", cliOpts.ConfigFilename).Msg("load config file error")
 	}
 
-	if cfg == nil {
-		panic("create configuration error")
-	}
-
-	cfg.RuntimeArgs = cliOpts
-
-	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
+	log.Logger.Debug().Interface("conf", cfg).Msg("configuration loaded")
 	metrics.UpdateConf()
 
 	if err := start(cfg); err != nil {
-		log.Logger.Fatal().Err(err).Msg("Start failed")
-		os.Exit(1)
+		log.Logger.Fatal().Err(err).Msg("start failed")
 	}
 
-	log.Logger.Info().Msg("finished..")
+	log.Logger.Info().Msg("finished.")
 }
 
 func start(cfg *conf.Configuration) error {
@@ -108,9 +101,9 @@ func start(cfg *conf.Configuration) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Collectors
 	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
 	runGroup.Add(webHandler.Run, webHandler.Stop)
+	runGroup.Add(func() error { return sched.Run(ctx, cfg.RuntimeArgs.ParallelScheduler) }, sched.Close)
 
 	// Termination handler.
 	term := make(chan os.Signal, 1)
@@ -118,8 +111,8 @@ func start(cfg *conf.Configuration) error {
 	runGroup.Add(
 		func() error {
 			<-term
+			log.Logger.Warn().Msg("received SIGTERM, exiting...")
 			cancel()
-			log.Logger.Warn().Msg("Received SIGTERM, exiting...")
 			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
 
 			return nil
@@ -133,14 +126,14 @@ func start(cfg *conf.Configuration) error {
 	runGroup.Add(
 		func() error {
 			for range hup {
-				log.Info().Msg("reloading configuration")
+				log.Debug().Msg("reload configuration started")
 
 				if newConf, err := cfg.ReloadConfiguration(db.GlobalRegistry); err == nil {
 					webHandler.UpdateConf(newConf)
 					sched.UpdateConf(newConf)
 					collectors.UpdateConf(newConf)
 					metrics.UpdateConf()
-					log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
+					log.Info().Interface("conf", newConf).Msg("configuration reloaded")
 				} else {
 					log.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
 				}
@@ -150,12 +143,6 @@ func start(cfg *conf.Configuration) error {
 		},
 		func(_ error) { close(hup) },
 	)
-
-	if cfg.RuntimeArgs.ParallelScheduler {
-		runGroup.Add(func() error { return sched.RunParallel(ctx) }, sched.Close)
-	} else {
-		runGroup.Add(func() error { return sched.Run(ctx) }, sched.Close)
-	}
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 	daemon.SdNotify(false, "STATUS=ready")       //nolint:errcheck

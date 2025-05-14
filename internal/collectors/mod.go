@@ -78,7 +78,7 @@ func (cs *Collectors) Run(ctx context.Context) error {
 
 			case task := <-cs.taskQueue:
 				if dbloader, ok := cs.collectors[task.DBName]; ok {
-					dbloader.addTask(task)
+					dbloader.addTask(ctx, task)
 				} else {
 					task.Output <- task.newResult(ErrAppNotConfigured, nil)
 				}

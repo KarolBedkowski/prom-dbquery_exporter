@@ -23,27 +23,28 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
+// workerID is last unique worker id.
+var workerID atomic.Uint64
+
 // collector handle task for one loader.
 type collector struct {
 	log    zerolog.Logger
 	loader db.Database
 	cfg    *conf.Database
-	// tasks is queue task to schedule.
-	tasks chan *Task
-	// workQueue is chan that distribute task to workers.
-	workQueue chan *Task
-	// workBgQueue is chan that distribute task created by scheduler to dedicated pool of workers.
-	workBgQueue chan *Task
-	dbName      string
+	dbName string
 
-	// normalWorkersGroup is pool of workers that handle normal tasks and scheduled task when
+	// tasksQueue is queue of incomming task to schedule.
+	tasksQueue chan *Task
+	// stdWorkerQueue is chan that distribute task to workers.
+	stdWorkerQueue chan *Task
+	// bgWorkQueue is chan that distribute task created by scheduler to dedicated pool of workers.
+	bgWorkQueue chan *Task
+
+	// stdWorkersGroup is pool of workers that handle normal tasks and scheduled task when
 	// background workers are disabled.
-	normalWorkersGroup errgroup.Group
+	stdWorkersGroup errgroup.Group
 	// bgWorkersGroup is pool of workers that handle only tasks created by scheduler.
 	bgWorkersGroup errgroup.Group
-
-	// workerID is last unique worker id
-	workerID atomic.Uint64
 }
 
 const tasksQueueSize = 10
@@ -55,27 +56,35 @@ func newCollector(name string, cfg *conf.Database) (*collector, error) {
 	}
 
 	col := &collector{
-		dbName:      name,
-		loader:      loader,
-		workQueue:   make(chan *Task, tasksQueueSize),
-		workBgQueue: make(chan *Task, tasksQueueSize),
-		cfg:         cfg,
-		log:         log.Logger.With().Str("dbname", name).Logger(),
+		dbName:         name,
+		loader:         loader,
+		stdWorkerQueue: make(chan *Task, tasksQueueSize),
+		bgWorkQueue:    make(chan *Task, tasksQueueSize),
+		cfg:            cfg,
+		log:            log.Logger.With().Str("dbname", name).Logger(),
 	}
 
-	col.normalWorkersGroup.SetLimit(cfg.MaxWorkers)
+	col.stdWorkersGroup.SetLimit(cfg.MaxWorkers)
 	col.bgWorkersGroup.SetLimit(cfg.BackgroundWorkers)
 
 	return col, nil
 }
 
-func (c *collector) addTask(task *Task) {
-	c.log.Debug().Msgf("collector: add new task; queue size: %d", len(c.tasks))
+func (c *collector) addTask(ctx context.Context, task *Task) {
+	c.log.Debug().Msgf("collector: add new task; queue size: %d", len(c.tasksQueue))
 
-	if c.tasks != nil {
-		c.tasks <- task
-	} else {
+	if c.tasksQueue == nil {
 		c.log.Warn().Msg("collector: try add new task to closed queue")
+
+		return
+	}
+
+	select {
+	case c.tasksQueue <- task:
+	case <-ctx.Done():
+		c.log.Warn().Err(ctx.Err()).Msg("context cancelled")
+	case <-task.Cancelled():
+		c.log.Warn().Msg("task cancelled")
 	}
 }
 
@@ -83,8 +92,8 @@ func (c *collector) addTask(task *Task) {
 func (c *collector) run(ctx context.Context) error {
 	c.log.Debug().Msg("collector: starting")
 
-	c.tasks = make(chan *Task, 1)
-	defer close(c.tasks)
+	c.tasksQueue = make(chan *Task, 1)
+	defer close(c.tasksQueue)
 
 	support.SetGoroutineLabels(context.Background(), "main_worker", c.dbName)
 
@@ -96,19 +105,19 @@ loop:
 
 			break loop
 
-		case task := <-c.tasks:
+		case task := <-c.tasksQueue:
 			if task.IsScheduledJob && c.cfg.BackgroundWorkers > 0 {
-				c.workBgQueue <- task
+				c.bgWorkQueue <- task
 				c.spawnBgWorker(ctx)
 			} else {
-				c.workQueue <- task
+				c.stdWorkerQueue <- task
 				c.spawnWorker(ctx)
 			}
 		}
 	}
 
 	_ = c.bgWorkersGroup.Wait()
-	_ = c.normalWorkersGroup.Wait()
+	_ = c.stdWorkersGroup.Wait()
 
 	c.log.Debug().Msg("collector: main worker exit")
 
@@ -117,12 +126,12 @@ loop:
 
 // spawnWorker start worker for normal queue.
 func (c *collector) spawnWorker(ctx context.Context) {
-	if len(c.workQueue) == 0 {
+	if len(c.stdWorkerQueue) == 0 {
 		return
 	}
 
-	c.normalWorkersGroup.TryGo(func() error {
-		c.worker(ctx, c.workQueue, false)
+	c.stdWorkersGroup.TryGo(func() error {
+		c.worker(ctx, c.stdWorkerQueue, false)
 
 		return nil
 	})
@@ -130,12 +139,12 @@ func (c *collector) spawnWorker(ctx context.Context) {
 
 // spawnBgWorker start worker for background queue.
 func (c *collector) spawnBgWorker(ctx context.Context) {
-	if len(c.workBgQueue) == 0 {
+	if len(c.bgWorkQueue) == 0 {
 		return
 	}
 
 	c.bgWorkersGroup.TryGo(func() error {
-		c.worker(ctx, c.workBgQueue, true)
+		c.worker(ctx, c.bgWorkQueue, true)
 
 		return nil
 	})
@@ -143,7 +152,7 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 
 // worker get process task from `workQueue` in loop. Exit when there is no new task for 1 sec.
 func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
-	idx := c.workerID.Add(1)
+	idx := workerID.Add(1)
 	idxstr := strconv.FormatUint(idx, 10)
 	wlog := c.log.With().Bool("bg", isBg).Uint64("worker_id", idx).Logger()
 
@@ -191,9 +200,6 @@ loop:
 func (c *collector) handleTask(ctx context.Context, wlog zerolog.Logger, task *Task) {
 	llog := wlog.With().Object("task", task).Logger()
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
 	// is task already cancelled?
 	select {
 	case <-task.Cancelled():
@@ -204,6 +210,9 @@ func (c *collector) handleTask(ctx context.Context, wlog zerolog.Logger, task *T
 		return
 	default:
 	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
 	// get result
 	res := make(chan *TaskResult, 1)
@@ -249,13 +258,12 @@ func (c *collector) queryDatabase(ctx context.Context, llog zerolog.Logger, task
 
 	llog.Debug().Msg("collector: result formatted")
 	support.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
-
 	res <- task.newResult(nil, output)
 }
 
 func (c *collector) handleQueryError(ctx context.Context, llog zerolog.Logger, task *Task, err error) *TaskResult {
-	// When OnError is defined - generate metrics according to this template
-	if task.Query.OnErrorTpl != nil {
+	// When OnError template is defined - generate metrics according to this template
+	if task.Query.OnErrorTpl == nil {
 		llog.Warn().Err(err).Msg("collector: query error handled by on error template")
 
 		if output, err := formatError(ctx, err, task.Query, c.cfg); err != nil {
@@ -270,17 +278,17 @@ func (c *collector) handleQueryError(ctx context.Context, llog zerolog.Logger, t
 	return task.newResult(fmt.Errorf("query error: %w", err), nil)
 }
 
+func (c *collector) stats() collectorStats {
+	return collectorStats{
+		dbstats:       c.loader.Stats(),
+		queueLength:   len(c.stdWorkerQueue),
+		queueBgLength: len(c.bgWorkQueue),
+	}
+}
+
 type collectorStats struct {
 	dbstats *db.DatabaseStats
 
 	queueLength   int
 	queueBgLength int
-}
-
-func (c *collector) stats() collectorStats {
-	return collectorStats{
-		dbstats:       c.loader.Stats(),
-		queueLength:   len(c.workQueue),
-		queueBgLength: len(c.workBgQueue),
-	}
 }
