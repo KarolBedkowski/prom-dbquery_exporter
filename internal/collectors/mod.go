@@ -33,7 +33,7 @@ func NewCollectors(cfg *conf.Configuration) (*Collectors, chan<- *Task) {
 		collectors: make(map[string]*collector),
 		cfg:        cfg,
 		log:        log.Logger.With().Str("module", "databases").Logger(),
-		taskQueue:  make(chan *Task),
+		taskQueue:  make(chan *Task, 1),
 		newConfCh:  make(chan *conf.Configuration, 1),
 	}
 

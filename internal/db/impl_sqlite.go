@@ -1,7 +1,7 @@
 //go:build sqlite
 // +build sqlite
 
-// impl_sqlite.go
+// impl_pg.go
 // Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
@@ -22,8 +22,7 @@ func init() {
 }
 
 func newSqliteLoader(cfg *conf.Database) (Database, error) {
-	params := url.Values{}
-
+	var params url.Values
 	var dbname string
 
 	for k, v := range cfg.Connection {
@@ -37,10 +36,6 @@ func newSqliteLoader(cfg *conf.Database) (Database, error) {
 		} else {
 			params.Add(k, vstr)
 		}
-	}
-
-	if dbname == "" {
-		return nil, ErrNoDatabaseName
 	}
 
 	var connstr strings.Builder

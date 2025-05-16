@@ -51,13 +51,8 @@ type InvalidFieldError struct {
 }
 
 // NewInvalidFieldError create InvalidFieldError.
-func NewInvalidFieldError(field string, value any) InvalidFieldError {
-	return InvalidFieldError{field, value, ""}
-}
-
-// WithMsg add message to InvalidFieldError.
-func (e InvalidFieldError) WithMsg(msg string) InvalidFieldError {
-	return InvalidFieldError{e.Field, e.Value, msg}
+func NewInvalidFieldError(field string, value any, message string) InvalidFieldError {
+	return InvalidFieldError{field, value, message}
 }
 
 func (e InvalidFieldError) Error() string {

@@ -13,12 +13,12 @@ import (
 )
 
 type standardParams struct {
-	params url.Values
-	dbname string
-	user   string
-	pass   string
-	host   string
-	port   string
+	params   url.Values
+	database string
+	user     string
+	pass     string
+	host     string
+	port     string
 }
 
 func newStandardParams(cfg map[string]any) standardParams {
@@ -32,7 +32,7 @@ func newStandardParams(cfg map[string]any) standardParams {
 
 		switch key {
 		case "database": //nolint: goconst
-			params.dbname = url.PathEscape(vstr)
+			params.database = url.PathEscape(vstr)
 		case "host":
 			params.host = url.PathEscape(vstr)
 		case "port":
@@ -43,6 +43,19 @@ func newStandardParams(cfg map[string]any) standardParams {
 			params.pass = url.PathEscape(vstr)
 		default:
 			params.params.Add(key, vstr)
+		}
+	}
+
+	return params
+}
+
+func paramsToValues(cfg map[string]any) url.Values {
+	params := url.Values{}
+
+	for k, v := range cfg {
+		if v != nil {
+			vstr := fmt.Sprintf("%v", v)
+			params.Add(k, vstr)
 		}
 	}
 

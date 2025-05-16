@@ -42,7 +42,7 @@ func validateCommon(dbcfg *conf.Database) error {
 
 	if port, ok := dbcfg.Connection["port"]; ok {
 		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
-			errs = multierror.Append(errs, conf.NewInvalidFieldError("port", port))
+			errs = multierror.Append(errs, conf.NewInvalidFieldError("port", port, "port must be in range 1-65535"))
 		}
 	}
 

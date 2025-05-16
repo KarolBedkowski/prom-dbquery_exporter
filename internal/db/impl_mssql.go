@@ -8,8 +8,6 @@
 package db
 
 import (
-	"fmt"
-	"net/url"
 
 	// import go-mssqldb only when mssql tag is enabled.
 	_ "github.com/denisenkom/go-mssqldb"
@@ -21,29 +19,14 @@ func init() {
 }
 
 func newMssqlLoader(cfg *conf.Database) (Database, error) {
-	params := url.Values{}
-	databaseConfigured := false
-
-	for k, v := range cfg.Connection {
-		if v != nil {
-			vstr := fmt.Sprintf("%v", v)
-			params.Add(k, vstr)
-
-			if k == "database" {
-				databaseConfigured = true
-			}
-		}
-	}
-
-	if !databaseConfigured {
-		return nil, InvalidConfigurationError("missing database")
-	}
-
+	params := paramsToValues(cfg.Connection)
 	connstr := params.Encode()
 
 	l := &genericDatabase{
-		connStr: connstr, driver: "mssql", initialSQL: cfg.InitialQuery,
-		dbConf: cfg,
+		connStr:    connstr,
+		driver:     "mssql",
+		initialSQL: cfg.InitialQuery,
+		dbConf:     cfg,
 	}
 
 	return l, nil

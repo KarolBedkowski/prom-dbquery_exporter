@@ -31,14 +31,12 @@ func newMysqlLoader(cfg *conf.Database) (Database, error) {
 		params.port = "3306"
 	}
 
-	if params.dbname == "" {
-		return nil, ErrNoDatabaseName
-	}
-
 	connstr := buildMysqlConnstr(params)
 	l := &genericDatabase{
-		connStr: connstr, driver: "mysql", initialSQL: cfg.InitialQuery,
-		dbConf: cfg,
+		connStr:    connstr,
+		driver:     "mysql",
+		initialSQL: cfg.InitialQuery,
+		dbConf:     cfg,
 	}
 
 	return l, nil
@@ -63,7 +61,7 @@ func buildMysqlConnstr(params standardParams) string {
 	connstr.WriteRune(':')
 	connstr.WriteString(params.port)
 	connstr.WriteString(")/")
-	connstr.WriteString(params.dbname)
+	connstr.WriteString(params.database)
 
 	if len(params.params) > 0 {
 		connstr.WriteRune('?')

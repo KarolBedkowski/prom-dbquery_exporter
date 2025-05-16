@@ -22,10 +22,6 @@ func init() {
 func newOracleLoader(cfg *conf.Database) (Database, error) {
 	params := newStandardParams(cfg.Connection)
 
-	if params.dbname == "" {
-		return nil, ErrNoDatabaseName
-	}
-
 	connstr := buildOracleConnstr(params)
 	l := &genericDatabase{
 		connStr: connstr, driver: "oracle", initialSQL: cfg.InitialQuery,
@@ -63,7 +59,7 @@ func buildOracleConnstr(params standardParams) string {
 	}
 
 	connstr.WriteRune('/')
-	connstr.WriteString(params.dbname)
+	connstr.WriteString(params.database)
 
 	if len(params.params) > 0 {
 		connstr.WriteRune('?')
