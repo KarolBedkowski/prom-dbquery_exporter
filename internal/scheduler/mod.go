@@ -35,6 +35,10 @@ func (s *scheduledTask) MarshalZerologObject(event *zerolog.Event) {
 	event.Object("job", &s.job).Time("next_run", s.nextRun)
 }
 
+type TaskQueue interface {
+	AddTask(ctx context.Context, task *collectors.Task)
+}
+
 // Scheduler is background process that load configured data into cache in some intervals.
 type Scheduler struct {
 	log        zerolog.Logger
@@ -42,7 +46,7 @@ type Scheduler struct {
 	cache      *support.Cache[[]byte]
 	tasks      []*scheduledTask
 	newCfgCh   chan *conf.Configuration
-	tasksQueue chan<- *collectors.Task
+	tasksQueue TaskQueue
 
 	scheduledTasksCnt     prometheus.Counter
 	scheduledTasksSuccess prometheus.Counter
@@ -51,7 +55,7 @@ type Scheduler struct {
 
 // NewScheduler create new scheduler that use `cache` and initial `cfg` configuration.
 func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
-	tasksQueue chan<- *collectors.Task,
+	tasksQueue TaskQueue,
 ) *Scheduler {
 	scheduler := &Scheduler{
 		cfg:        cfg,
@@ -266,8 +270,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	task, cancel := task.WithCancel()
 	defer cancel()
 
-	s.tasksQueue <- task
-
+	s.tasksQueue.AddTask(ctx, task)
 	support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
 
 	select {

@@ -24,16 +24,14 @@ type Collectors struct {
 	cfg        *conf.Configuration
 	collectors map[string]*collector
 	newConfCh  chan *conf.Configuration
-	taskQueue  chan *Task
 }
 
 // NewCollectors create new Databases object.
-func NewCollectors(cfg *conf.Configuration) (*Collectors, chan<- *Task) {
+func NewCollectors(cfg *conf.Configuration) *Collectors {
 	colls := &Collectors{
 		collectors: make(map[string]*collector),
 		cfg:        cfg,
 		log:        log.Logger.With().Str("module", "databases").Logger(),
-		taskQueue:  make(chan *Task, 1),
 		newConfCh:  make(chan *conf.Configuration, 1),
 	}
 
@@ -49,7 +47,7 @@ func NewCollectors(cfg *conf.Configuration) (*Collectors, chan<- *Task) {
 
 	prometheus.MustRegister(colls)
 
-	return colls, colls.taskQueue
+	return colls
 }
 
 func (cs *Collectors) Run(ctx context.Context) error {
@@ -66,6 +64,7 @@ func (cs *Collectors) Run(ctx context.Context) error {
 			select {
 			case <-ctx.Done():
 				cs.log.Debug().Msg("collectors: stopping...")
+				cs.collectors = nil
 				cancel()
 
 				if err := group.Wait(); err != nil {
@@ -75,13 +74,6 @@ func (cs *Collectors) Run(ctx context.Context) error {
 				cs.log.Debug().Msg("collectors: stopped")
 
 				return nil
-
-			case task := <-cs.taskQueue:
-				if dbloader, ok := cs.collectors[task.DBName]; ok {
-					dbloader.addTask(ctx, task)
-				} else {
-					task.Output <- task.newResult(ErrAppNotConfigured, nil)
-				}
 
 			case cfg := <-cs.newConfCh:
 				cs.log.Debug().Msg("collectors: stopping collectors for update configuration")
@@ -97,6 +89,18 @@ func (cs *Collectors) Run(ctx context.Context) error {
 				break loop
 			}
 		}
+	}
+}
+
+func (cs *Collectors) AddTask(ctx context.Context, task *Task) {
+	if cs.collectors == nil {
+		return
+	}
+
+	if dbloader, ok := cs.collectors[task.DBName]; ok {
+		dbloader.addTask(ctx, task)
+	} else {
+		task.Output <- task.newResult(ErrAppNotConfigured, nil)
 	}
 }
 

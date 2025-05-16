@@ -90,12 +90,10 @@ func main() {
 }
 
 func start(cfg *conf.Configuration) error {
-	collectors, taskQueue := collectors.NewCollectors(cfg)
-	defer close(taskQueue)
-
+	collectors := collectors.NewCollectors(cfg)
 	cache := support.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, cache, taskQueue)
-	sched := scheduler.NewScheduler(cache, cfg, taskQueue)
+	webHandler := server.NewWebHandler(cfg, cache, collectors)
+	sched := scheduler.NewScheduler(cache, cfg, collectors)
 	runGroup := run.Group{}
 
 	ctx, cancel := context.WithCancel(context.Background())

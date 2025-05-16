@@ -79,11 +79,11 @@ type queryHandler struct {
 	queryResultCache *support.Cache[[]byte]
 	// queryLocker protect from running the same request twice
 	queryLocker locker
-	taskQueue   chan<- *collectors.Task
+	taskQueue   TaskQueue
 }
 
 func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte],
-	taskQueue chan<- *collectors.Task,
+	taskQueue TaskQueue,
 ) *queryHandler {
 	return &queryHandler{
 		configuration:    c,
@@ -230,8 +230,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 		}
 
 		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
-		q.taskQueue <- task
-
+		q.taskQueue.AddTask(ctx, task)
 		support.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
 		dWriter.incScheduled()
 	}

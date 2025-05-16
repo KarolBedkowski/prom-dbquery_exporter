@@ -28,6 +28,10 @@ const (
 	defaultShutdownTimeout = time.Duration(2) * time.Second
 )
 
+type TaskQueue interface {
+	AddTask(ctx context.Context, task *collectors.Task)
+}
+
 // WebHandler handle incoming requests.
 type WebHandler struct {
 	handler     *queryHandler
@@ -38,7 +42,7 @@ type WebHandler struct {
 
 // NewWebHandler create new WebHandler.
 func NewWebHandler(cfg *conf.Configuration, cache *support.Cache[[]byte],
-	taskQueue chan<- *collectors.Task,
+	taskQueue TaskQueue,
 ) *WebHandler {
 	qh := newQueryHandler(cfg, cache, taskQueue)
 	http.Handle("/query", qh.Handler())
