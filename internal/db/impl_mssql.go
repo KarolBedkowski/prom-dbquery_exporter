@@ -8,7 +8,6 @@
 package db
 
 import (
-
 	// import go-mssqldb only when mssql tag is enabled.
 	_ "github.com/denisenkom/go-mssqldb"
 	"prom-dbquery_exporter.app/internal/conf"
@@ -19,14 +18,14 @@ func init() {
 }
 
 func newMssqlLoader(cfg *conf.Database) (Database, error) {
-	params := paramsToValues(cfg.Connection)
+	params := valuesFromParams(cfg.Connection)
 	connstr := params.Encode()
 
 	l := &genericDatabase{
 		connStr:    connstr,
 		driver:     "mssql",
 		initialSQL: cfg.InitialQuery,
-		dbConf:     cfg,
+		dbCfg:      cfg,
 	}
 
 	return l, nil

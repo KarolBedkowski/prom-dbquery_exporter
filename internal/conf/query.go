@@ -56,6 +56,9 @@ func (q *Query) MarshalZerologObject(e *zerolog.Event) {
 
 func (q *Query) setup(name string) {
 	q.Name = name
+	q.SQL = strings.TrimSpace(q.SQL)
+	q.Metrics = strings.TrimSpace(q.Metrics)
+	q.OnError = strings.TrimSpace(q.OnError)
 }
 
 func (q *Query) validate() error {
@@ -63,14 +66,11 @@ func (q *Query) validate() error {
 		return MissingFieldError("sql")
 	}
 
-	q.SQL = strings.TrimSpace(q.SQL)
-
-	m := strings.TrimSpace(q.Metrics)
-	if m == "" {
+	if q.Metrics == "" {
 		return MissingFieldError("metrics template")
 	}
 
-	tmpl, err := support.TemplateCompile(q.Name, m+"\n")
+	tmpl, err := support.TemplateCompile(q.Name, q.Metrics+"\n")
 	if err != nil {
 		return NewInvalidFieldError("metrics template", "", err.Error())
 	}
@@ -78,9 +78,8 @@ func (q *Query) validate() error {
 	q.MetricTpl = tmpl
 
 	// parse template for error response (if configured)
-	merr := strings.TrimSpace(q.OnError)
-	if merr != "" {
-		tmpl, err := support.TemplateCompile(q.Name, merr+"\n")
+	if q.OnError != "" {
+		tmpl, err := support.TemplateCompile(q.Name, q.OnError+"\n")
 		if err != nil {
 			return NewInvalidFieldError("on error template", "", err.Error())
 		}

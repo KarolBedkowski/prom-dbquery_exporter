@@ -1,15 +1,15 @@
 package support
 
-import (
-	"context"
-)
-
 //
 // syncer.go
 // Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
 //
 // Distributed under terms of the GPLv3 license.
 //
+
+import (
+	"context"
+)
 
 // LockError is error returned when lock failed.
 type LockError struct {

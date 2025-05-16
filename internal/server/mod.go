@@ -116,5 +116,5 @@ func (w *WebHandler) Stop(err error) {
 // UpdateConf reload configuration in all handlers.
 func (w *WebHandler) UpdateConf(newConf *conf.Configuration) {
 	w.handler.UpdateConf(newConf)
-	w.infoHandler.Configuration = newConf
+	w.infoHandler.cfg = newConf
 }

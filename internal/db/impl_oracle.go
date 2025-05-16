@@ -25,7 +25,7 @@ func newOracleLoader(cfg *conf.Database) (Database, error) {
 	connstr := buildOracleConnstr(params)
 	l := &genericDatabase{
 		connStr: connstr, driver: "oracle", initialSQL: cfg.InitialQuery,
-		dbConf: cfg,
+		dbCfg: cfg,
 	}
 
 	return l, nil

@@ -238,12 +238,12 @@ func (cs *Collectors) stats() []collectorStats {
 func (cs *Collectors) createCollectors() error {
 	collectors := make(map[string]*collector)
 
-	for dbName, dbConf := range cs.cfg.Database {
-		if !dbConf.Valid {
+	for dbName, dbCfg := range cs.cfg.Database {
+		if !dbCfg.Valid {
 			continue
 		}
 
-		dbloader, err := newCollector(dbName, dbConf)
+		dbloader, err := newCollector(dbName, dbCfg)
 		if err != nil {
 			cs.log.Error().Err(err).Str("dbname", dbName).Msg("create collector error")
 

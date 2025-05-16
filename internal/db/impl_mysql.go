@@ -36,7 +36,7 @@ func newMysqlLoader(cfg *conf.Database) (Database, error) {
 		connStr:    connstr,
 		driver:     "mysql",
 		initialSQL: cfg.InitialQuery,
-		dbConf:     cfg,
+		dbCfg:      cfg,
 	}
 
 	return l, nil

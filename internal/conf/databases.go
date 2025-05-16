@@ -34,15 +34,18 @@ func (p *PoolConfiguration) validate() error {
 	var err *multierror.Error
 
 	if p.MaxConnections < 0 {
-		err = multierror.Append(err, NewInvalidFieldError("max_connections", p.MaxConnections, "value must positive number or 0"))
+		err = multierror.Append(err,
+			NewInvalidFieldError("max_connections", p.MaxConnections, "value must positive number or 0"))
 	}
 
 	if p.MaxIdleConnections < 0 {
-		err = multierror.Append(err, NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections, "value must positive number or 0"))
+		err = multierror.Append(err,
+			NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections, "value must positive number or 0"))
 	}
 
 	if p.ConnMaxLifeTime < 0 {
-		err = multierror.Append(err, NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections, "value must positive number or 0"))
+		err = multierror.Append(err,
+			NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections, "value must positive number or 0"))
 	}
 
 	if p.ConnMaxLifeTime.Seconds() < 1 && p.ConnMaxLifeTime > 0 {

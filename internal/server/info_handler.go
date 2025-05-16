@@ -73,16 +73,15 @@ var funcMap = template.FuncMap{
 
 // infoHandler handle request and return information about current configuration.
 type infoHandler struct {
-	Configuration *conf.Configuration
-
+	cfg  *conf.Configuration
 	tmpl *template.Template
 }
 
 // newInfoHandler create new info handler with logging and instrumentation.
-func newInfoHandler(conf *conf.Configuration) *infoHandler {
+func newInfoHandler(cfg *conf.Configuration) *infoHandler {
 	return &infoHandler{
-		Configuration: conf,
-		tmpl:          template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl)),
+		cfg:  cfg,
+		tmpl: template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl)),
 	}
 }
 
@@ -107,7 +106,7 @@ func (q *infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	if err := q.tmpl.Execute(w, q.Configuration); err != nil {
+	if err := q.tmpl.Execute(w, q.cfg); err != nil {
 		log.Logger.Error().Err(err).Msg("infohandler: executing template error")
 	}
 }

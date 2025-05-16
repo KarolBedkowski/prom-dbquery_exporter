@@ -50,7 +50,7 @@ func newPostgresLoader(cfg *conf.Database) (Database, error) {
 		connStr:    connStr,
 		driver:     "postgres",
 		initialSQL: cfg.InitialQuery,
-		dbConf:     cfg,
+		dbCfg:      cfg,
 	}
 
 	return l, nil

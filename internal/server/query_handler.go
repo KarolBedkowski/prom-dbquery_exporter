@@ -11,13 +11,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"maps"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 
-	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
@@ -75,21 +72,19 @@ func (l *locker) unlock(queryKey string) {
 
 // queryHandler handle all request for metrics.
 type queryHandler struct {
-	configuration    *conf.Configuration
-	queryResultCache *support.Cache[[]byte]
-	// queryLocker protect from running the same request twice
-	queryLocker locker
-	taskQueue   TaskQueue
+	cfg         *conf.Configuration
+	resultCache *support.Cache[[]byte]
+	// locker protect from running the same request twice
+	locker    locker
+	taskQueue TaskQueue
 }
 
-func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte],
-	taskQueue TaskQueue,
-) *queryHandler {
+func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte], taskQueue TaskQueue) *queryHandler {
 	return &queryHandler{
-		configuration:    c,
-		queryLocker:      newLocker(),
-		queryResultCache: cache,
-		taskQueue:        taskQueue,
+		cfg:         c,
+		locker:      newLocker(),
+		resultCache: cache,
+		taskQueue:   taskQueue,
 	}
 }
 
@@ -104,13 +99,13 @@ func (q *queryHandler) Handler() http.Handler {
 
 // SetConfiguration update handler configuration.
 func (q *queryHandler) UpdateConf(c *conf.Configuration) {
-	q.configuration = c
+	q.cfg = c
 
-	q.queryResultCache.Clear()
+	q.resultCache.Clear()
 }
 
 func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
-	ctx, cancel := context.WithTimeout(req.Context(), q.configuration.Global.RequestTimeout)
+	ctx, cancel := context.WithTimeout(req.Context(), q.cfg.Global.RequestTimeout)
 	defer cancel()
 
 	logger := log.Ctx(ctx)
@@ -119,7 +114,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	support.SetGoroutineLabels(ctx, "req_id", requestID.String(), "req", req.URL.String())
 
 	// prevent to run the same request twice
-	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
+	if locker, ok := q.locker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
 		logger.Warn().Msgf("query already in progress, started by %s", locker)
 		http.Error(writer, "query in progress", http.StatusInternalServerError)
 		support.TraceErrorf(ctx, "query locked by %s", locker)
@@ -127,9 +122,9 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		return
 	}
 
-	defer q.queryLocker.unlock(req.URL.RawQuery)
+	defer q.locker.unlock(req.URL.RawQuery)
 
-	parameters, err := q.parseRequestParameters(req)
+	parameters, err := newRequestParams(req, q.cfg)
 	if err != nil {
 		logger.Info().Err(err).Msg("parse request parameters error")
 		http.Error(writer, "invalid parameters", http.StatusBadRequest)
@@ -148,7 +143,9 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	defer close(cancelCh)
 
 	support.TracePrintf(ctx, "start querying db")
+
 	output := q.queryDatabases(ctx, parameters, &dWriter, cancelCh)
+	defer close(output)
 
 	support.TracePrintf(ctx, "start reading data, scheduled: %d", dWriter.scheduled)
 	q.writeResult(ctx, &dWriter, output)
@@ -164,30 +161,30 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 }
 
 func (q *queryHandler) getFromCache(query *conf.Query, dbName string, params map[string]any) ([]byte, bool) {
-	if q.configuration.RuntimeArgs.DisableCache || len(params) > 0 || query.CachingTime == 0 {
+	if q.cfg.RuntimeArgs.DisableCache || len(params) > 0 || query.CachingTime == 0 {
 		return nil, false
 	}
 
 	queryKey := query.Name + "@" + dbName
 
-	return q.queryResultCache.Get(queryKey)
+	return q.resultCache.Get(queryKey)
 }
 
 func (q *queryHandler) putIntoCache(task *collectors.Task, data []byte) {
 	query := task.Query
 
 	// do not cache query with user params
-	if q.configuration.RuntimeArgs.DisableCache || query == nil || len(task.Params) > 0 || query.CachingTime == 0 {
+	if q.cfg.RuntimeArgs.DisableCache || query == nil || len(task.Params) > 0 || query.CachingTime == 0 {
 		return
 	}
 
 	queryKey := query.Name + "@" + task.DBName
 
-	q.queryResultCache.Put(queryKey, query.CachingTime, data)
+	q.resultCache.Put(queryKey, query.CachingTime, data)
 }
 
 func (q *queryHandler) validateOutput(output []byte) error {
-	if q.configuration.RuntimeArgs.ValidateOutput {
+	if q.cfg.RuntimeArgs.ValidateOutput {
 		var parser expfmt.TextParser
 		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
 			return fmt.Errorf("validate result error: %w", err)
@@ -283,71 +280,4 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 			return
 		}
 	}
-}
-
-func (q *queryHandler) parseRequestParameters(req *http.Request) (*requestParameters, error) {
-	var errs *multierror.Error
-
-	dbNames := deduplicateStringList(req.URL.Query()["database"])
-	if len(dbNames) == 0 {
-		errs = multierror.Append(errs, InvalidRequestParameterError("missing database parameter"))
-	}
-
-	queryNames := req.URL.Query()["query"]
-
-	for _, g := range req.URL.Query()["group"] {
-		q := q.configuration.GroupQueries(g)
-		if len(q) > 0 {
-			queryNames = append(queryNames, q...)
-		} else {
-			errs = multierror.Append(errs, InvalidRequestParameterError("unknown group "+g))
-		}
-	}
-
-	queryNames = deduplicateStringList(queryNames)
-	if len(queryNames) == 0 {
-		errs = multierror.Append(errs, InvalidRequestParameterError("missing query or group parameter"))
-	}
-
-	reqParams := &requestParameters{dbNames, queryNames, paramsFromQuery(req), nil}
-
-	for _, name := range queryNames {
-		if query, ok := q.configuration.Query[name]; ok {
-			reqParams.queries = append(reqParams.queries, query)
-		} else {
-			errs = multierror.Append(errs, InvalidRequestParameterError("unknown query "+name))
-		}
-	}
-
-	if len(reqParams.queries) == 0 {
-		errs = multierror.Append(errs, InvalidRequestParameterError("no valid query given"))
-	}
-
-	return reqParams, errs.ErrorOrNil()
-}
-
-func paramsFromQuery(req *http.Request) map[string]any {
-	params := make(map[string]any)
-
-	for k, v := range req.URL.Query() {
-		// standard parameters
-		if k != "query" && k != "group" && k != "database" && len(v) > 0 {
-			params[k] = v[0]
-		}
-	}
-
-	return params
-}
-
-func deduplicateStringList(inp []string) []string {
-	if len(inp) <= 1 {
-		return inp
-	}
-
-	tmpMap := make(map[string]bool, len(inp))
-	for _, s := range inp {
-		tmpMap[s] = true
-	}
-
-	return slices.Collect(maps.Keys(tmpMap))
 }

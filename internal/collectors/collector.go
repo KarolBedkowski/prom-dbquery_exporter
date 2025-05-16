@@ -33,7 +33,7 @@ type collector struct {
 	cfg      *conf.Database
 	name     string
 
-	// tasksQueue is queue of incomming task to schedule.
+	// tasksQueue is queue of incoming task to schedule.
 	tasksQueue chan *Task
 	// stdWorkerQueue is chan that distribute task to workers.
 	stdWorkerQueue chan *Task

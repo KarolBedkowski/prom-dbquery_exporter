@@ -49,7 +49,7 @@ func newStandardParams(cfg map[string]any) standardParams {
 	return params
 }
 
-func paramsToValues(cfg map[string]any) url.Values {
+func valuesFromParams(cfg map[string]any) url.Values {
 	params := url.Values{}
 
 	for k, v := range cfg {

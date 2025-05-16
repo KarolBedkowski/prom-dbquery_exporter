@@ -18,7 +18,9 @@ import (
 
 // Job is configuration for one scheduler job.
 type Job struct {
-	Query    string
+	// Query name.
+	Query string
+	// Database name
 	Database string
 	Interval time.Duration
 

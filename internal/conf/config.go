@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog"
@@ -20,7 +21,8 @@ type Configuration struct {
 	Database map[string]*Database
 	// Queries
 	Query map[string]*Query
-	Jobs  []*Job
+	// background jobs configuration
+	Jobs []*Job
 	// Global application settings
 	Global GlobalConf
 
@@ -54,14 +56,10 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 // GroupQueries return queries that belong to given group.
 func (c *Configuration) GroupQueries(group string) []string {
 	var queries []string
-outerloop:
-	for name, q := range c.Query {
-		for _, gr := range q.Groups {
-			if gr == group {
-				queries = append(queries, name)
 
-				continue outerloop
-			}
+	for name, q := range c.Query {
+		if slices.Contains(q.Groups, group) {
+			queries = append(queries, name)
 		}
 	}
 

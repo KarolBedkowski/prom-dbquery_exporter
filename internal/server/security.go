@@ -82,7 +82,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 
 		tlsconf, err := web.ConfigToTLSConfig(&config.TLSConfig)
 		if err != nil {
-			return nil, fmt.Errorf("config tls error: %w", err)
+			return nil, fmt.Errorf("tls configuration error: %w", err)
 		}
 
 		tlsconf.NextProtos = server.TLSConfig.NextProtos

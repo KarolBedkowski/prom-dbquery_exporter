@@ -28,19 +28,19 @@ func TemplateCompile(name, tmpl string) (*template.Template, error) {
 		}
 
 		if _, err := buf.WriteString(line); err != nil {
-			return nil, fmt.Errorf("template %s trim error: %w", name, err)
+			return nil, fmt.Errorf("template %s prepare error: %w", name, err)
 		}
 
 		buf.WriteRune('\n')
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, fmt.Errorf("template %s trim error: %w", name, err)
+		return nil, fmt.Errorf("template %s prepare error: %w", name, err)
 	}
 
 	t, err := template.New(name).Funcs(FuncMap).Parse(buf.String())
 	if err != nil {
-		return nil, fmt.Errorf("template %s compile error: %w", name, err)
+		return nil, fmt.Errorf("template %s parse error: %w", name, err)
 	}
 
 	return t, nil
