@@ -251,7 +251,7 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 			task := res.Task
 
 			if res.Error != nil {
-				logger.Error().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
+				logger.Warn().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
 				support.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
 				dWriter.writeError(ctx, "# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error")
 
