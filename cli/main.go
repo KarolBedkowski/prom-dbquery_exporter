@@ -96,7 +96,7 @@ func start(cfg *conf.Configuration) error {
 	sched := scheduler.NewScheduler(cache, cfg, collectors)
 	runGroup := run.Group{}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
 	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
@@ -104,18 +104,16 @@ func start(cfg *conf.Configuration) error {
 	runGroup.Add(func() error { return sched.Run(ctx, cfg.RuntimeArgs.ParallelScheduler) }, sched.Close)
 
 	// Termination handler.
-	term := make(chan os.Signal, 1)
-	signal.Notify(term, os.Interrupt, syscall.SIGTERM)
 	runGroup.Add(
 		func() error {
-			<-term
+			<-ctx.Done()
 			log.Logger.Warn().Msg("received SIGTERM, exiting...")
 			cancel()
 			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
 
 			return nil
 		},
-		func(_ error) { close(term) },
+		func(_ error) {},
 	)
 
 	// Reload handler.
