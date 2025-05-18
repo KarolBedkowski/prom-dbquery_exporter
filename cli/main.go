@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -66,7 +65,6 @@ func main() {
 		os.Exit(0)
 	}
 
-	runtime.GOMAXPROCS(runtime.NumCPU())
 	support.InitializeLogger(cliOpts.LogLevel, cliOpts.LogFormat)
 	printWelcome()
 
