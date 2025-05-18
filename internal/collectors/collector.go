@@ -158,11 +158,12 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
 	idx := workerID.Add(1)
 	idxstr := strconv.FormatUint(idx, 10)
-	wlog := c.log.With().Bool("bg", isBg).Uint64("worker_id", idx).Logger()
+	llog := c.log.With().Bool("bg", isBg).Uint64("worker_id", idx).Logger()
+	ctx = llog.WithContext(ctx)
 
 	workersCreatedCnt.WithLabelValues(c.name).Inc()
 	support.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.name, "bg", strconv.FormatBool(isBg))
-	wlog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
+	llog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
 
 	// stop worker after 1 second of inactivity
 	shutdownTimer := time.NewTimer(workerShutdownDelay)
@@ -186,11 +187,11 @@ loop:
 
 		case task, ok := <-workQueue:
 			if ok {
-				wlog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
+				llog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
 				support.SetGoroutineLabels(ctx, "query", task.QueryName, "worker", idxstr, "db", c.name, "req_id", task.ReqID)
 				tasksQueueWaitTime.WithLabelValues(c.name).Observe(time.Since(task.RequestStart).Seconds())
 
-				c.handleTask(ctx, wlog, task)
+				c.handleTask(ctx, task)
 			}
 
 		case <-shutdownTimer.C:
@@ -198,11 +199,11 @@ loop:
 		}
 	}
 
-	wlog.Debug().Msg("collector: worker stopped")
+	llog.Debug().Msg("collector: worker stopped")
 }
 
-func (c *collector) handleTask(ctx context.Context, wlog zerolog.Logger, task *Task) {
-	llog := wlog.With().Object("task", task).Logger()
+func (c *collector) handleTask(ctx context.Context, task *Task) {
+	llog := log.Ctx(ctx).With().Object("task", task).Logger()
 
 	// is task already cancelled?
 	select {
@@ -220,7 +221,7 @@ func (c *collector) handleTask(ctx context.Context, wlog zerolog.Logger, task *T
 
 	// get result
 	res := make(chan *TaskResult, 1)
-	go c.queryDatabase(ctx, wlog, task, res)
+	go c.queryDatabase(ctx, task, res)
 
 	// check is task cancelled in meantime
 	select {
@@ -237,14 +238,16 @@ func (c *collector) handleTask(ctx context.Context, wlog zerolog.Logger, task *T
 }
 
 // queryDatabase get result from loader.
-func (c *collector) queryDatabase(ctx context.Context, llog zerolog.Logger, task *Task, res chan *TaskResult) {
+func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *TaskResult) {
+	llog := log.Ctx(ctx)
+
 	support.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
 	llog.Debug().Msg("collector: start query")
 
 	result, err := c.database.Query(ctx, task.Query, task.Params)
 	if err != nil {
 		metrics.IncProcessErrorsCnt("query")
-		res <- c.handleQueryError(ctx, llog, task, err)
+		res <- c.handleQueryError(ctx, task, err)
 
 		return
 	}
@@ -265,9 +268,10 @@ func (c *collector) queryDatabase(ctx context.Context, llog zerolog.Logger, task
 	res <- task.newResult(nil, output)
 }
 
-func (c *collector) handleQueryError(ctx context.Context, llog zerolog.Logger, task *Task, err error) *TaskResult {
+func (c *collector) handleQueryError(ctx context.Context, task *Task, err error) *TaskResult {
 	// When OnError template is defined - generate metrics according to this template
 	if task.Query.OnErrorTpl != nil {
+		llog := log.Ctx(ctx)
 		llog.Warn().Err(err).Msg("collector: query error handled by on error template")
 
 		if output, err := formatError(ctx, err, task.Query, c.cfg); err != nil {

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/support"
@@ -51,7 +52,7 @@ func (g *genericDatabase) Stats() *DatabaseStats {
 // Query get data from database.
 func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
 ) (*QueryResult, error) {
-	llog := support.GetLoggerFromCtx(ctx).With().Str("db", g.dbCfg.Name).Str("query", query.Name).Logger()
+	llog := loggerFromCtx(ctx).With().Str("db", g.dbCfg.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
 	result := &QueryResult{Start: time.Now()}
 
@@ -270,4 +271,12 @@ func (g *genericDatabase) queryTimeout(q *conf.Query) time.Duration {
 	}
 
 	return timeout
+}
+
+func loggerFromCtx(ctx context.Context) zerolog.Logger {
+	if llog := log.Ctx(ctx); llog != nil {
+		return *llog
+	}
+
+	return log.Logger
 }

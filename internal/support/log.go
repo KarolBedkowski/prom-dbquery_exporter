@@ -56,7 +56,7 @@ func outputIsConsole() bool {
 	return fileInfo != nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
 }
 
-func GetLoggerFromCtx(ctx context.Context) zerolog.Logger {
+func LoggerFromCtx(ctx context.Context) zerolog.Logger {
 	if llog := log.Ctx(ctx); llog != nil {
 		return *llog
 	}

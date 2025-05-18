@@ -31,7 +31,7 @@ func init() {
 }
 
 func printVersion() {
-	fmt.Println(version.Print("dbquery_exporter")) //nolint:forbidigo
+	fmt.Println(version.Print(AppName)) //nolint:forbidigo
 
 	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
 		fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
