@@ -47,7 +47,10 @@ type collector struct {
 	bgWorkersGroup errgroup.Group
 }
 
-const tasksQueueSize = 10
+const (
+	tasksQueueSize      = 10
+	workerShutdownDelay = 10 * time.Second
+)
 
 func newCollector(name string, cfg *conf.Database) (*collector, error) {
 	database, err := db.GlobalRegistry.GetInstance(cfg)
@@ -151,7 +154,7 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 	})
 }
 
-// worker get process task from `workQueue` in loop. Exit when there is no new task for 1 sec.
+// worker get process task from `workQueue` in loop. Exit when there is no new task for `workerShutdownDelay`.
 func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
 	idx := workerID.Add(1)
 	idxstr := strconv.FormatUint(idx, 10)
@@ -162,7 +165,7 @@ func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool)
 	wlog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
 
 	// stop worker after 1 second of inactivity
-	shutdownTimer := time.NewTimer(time.Second)
+	shutdownTimer := time.NewTimer(workerShutdownDelay)
 	defer shutdownTimer.Stop()
 
 loop:
@@ -175,7 +178,7 @@ loop:
 			}
 		}
 
-		shutdownTimer.Reset(time.Second)
+		shutdownTimer.Reset(workerShutdownDelay)
 
 		select {
 		case <-ctx.Done():
