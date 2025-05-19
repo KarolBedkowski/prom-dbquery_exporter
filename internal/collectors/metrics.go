@@ -20,7 +20,7 @@ var (
 			Name:      "workers_created_total",
 			Help:      "Total number of created workers",
 		},
-		[]string{"loader"})
+		[]string{"loader", "kind"})
 	tasksQueueWaitTime = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: metrics.MetricsNamespace,
@@ -28,7 +28,7 @@ var (
 			Help:      "A histogram of time what log task waiting for handle.",
 			Buckets:   []float64{0.05, 0.1, 0.2, 0.5, 1, 5, 10, 30, 60, 120, 300},
 		},
-		[]string{"loader"})
+		[]string{"loader", "kind"})
 )
 
 func init() {
@@ -96,5 +96,17 @@ var (
 		"dbquery_exporter_collector_queue_len",
 		"Number of task in queue",
 		[]string{"loader", "queue"}, nil,
+	)
+
+	collectorCount = prometheus.NewDesc(
+		"dbquery_exporter_collectors_count",
+		"Number of active loaders in pool",
+		nil, nil,
+	)
+
+	collectorActive = prometheus.NewDesc(
+		"dbquery_exporter_collector_active",
+		"Collector status",
+		[]string{"loader"}, nil,
 	)
 )

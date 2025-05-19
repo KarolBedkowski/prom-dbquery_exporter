@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
@@ -154,6 +155,14 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 	})
 }
 
+func workerKind(isBg bool) string {
+	if isBg {
+		return "bg"
+	}
+
+	return "std"
+}
+
 // worker get process task from `workQueue` in loop. Exit when there is no new task for `workerShutdownDelay`.
 func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
 	idx := workerID.Add(1)
@@ -161,7 +170,7 @@ func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool)
 	llog := c.log.With().Bool("bg", isBg).Uint64("worker_id", idx).Logger()
 	ctx = llog.WithContext(ctx)
 
-	workersCreatedCnt.WithLabelValues(c.name).Inc()
+	workersCreatedCnt.WithLabelValues(c.name, workerKind(isBg)).Inc()
 	support.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.name, "bg", strconv.FormatBool(isBg))
 	llog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
 
@@ -189,7 +198,7 @@ loop:
 			if ok {
 				llog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
 				support.SetGoroutineLabels(ctx, "query", task.QueryName, "worker", idxstr, "db", c.name, "req_id", task.ReqID)
-				tasksQueueWaitTime.WithLabelValues(c.name).Observe(time.Since(task.RequestStart).Seconds())
+				tasksQueueWaitTime.WithLabelValues(c.name, workerKind(task.IsScheduledJob)).Observe(time.Since(task.RequestStart).Seconds())
 
 				c.handleTask(ctx, task)
 			}
@@ -286,17 +295,98 @@ func (c *collector) handleQueryError(ctx context.Context, task *Task, err error)
 	return task.newResult(fmt.Errorf("query error: %w", err), nil)
 }
 
-func (c *collector) stats() collectorStats {
-	return collectorStats{
-		dbstats:       c.database.Stats(),
-		queueLength:   len(c.stdWorkerQueue),
-		queueBgLength: len(c.bgWorkQueue),
+func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) { //nolint:funlen
+	resCh <- prometheus.MustNewConstMetric(
+		collectorActive,
+		prometheus.GaugeValue,
+		1.0,
+		c.name,
+	)
+
+	stat := c.database.Stats()
+	if stat == nil {
+		return
 	}
-}
 
-type collectorStats struct {
-	dbstats *db.DatabaseStats
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolOpenConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.DBStats.OpenConnections),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolActConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.DBStats.InUse),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolIdleConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.DBStats.Idle),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolconfMaxConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.DBStats.MaxOpenConnections),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnWaitCntDesc,
+		prometheus.CounterValue,
+		float64(stat.DBStats.WaitCount),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnIdleClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.DBStats.MaxIdleClosed),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnIdleTimeClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.DBStats.MaxIdleTimeClosed),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnLifeTimeClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.DBStats.MaxLifetimeClosed),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnWaitTimeDesc,
+		prometheus.CounterValue,
+		stat.DBStats.WaitDuration.Seconds(),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnTotalConnectedDesc,
+		prometheus.CounterValue,
+		float64(stat.TotalOpenedConnections),
+		stat.Name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnTotalFailedDesc,
+		prometheus.CounterValue,
+		float64(stat.TotalFailedConnections),
+		stat.Name,
+	)
 
-	queueLength   int
-	queueBgLength int
+	resCh <- prometheus.MustNewConstMetric(
+		collectorQueueLengthDesc,
+		prometheus.GaugeValue,
+		float64(len(c.stdWorkerQueue)),
+		stat.Name,
+		"main",
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		collectorQueueLengthDesc,
+		prometheus.GaugeValue,
+		float64(len(c.bgWorkQueue)),
+		stat.Name,
+		"bg",
+	)
 }

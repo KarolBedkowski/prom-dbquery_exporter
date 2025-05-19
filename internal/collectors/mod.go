@@ -15,7 +15,6 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 // Collectors is collection of all configured databases.
@@ -34,16 +33,6 @@ func NewCollectors(cfg *conf.Configuration) *Collectors {
 		log:        log.Logger.With().Str("module", "databases").Logger(),
 		newConfCh:  make(chan *conf.Configuration, 1),
 	}
-
-	prometheus.MustRegister(
-		prometheus.NewGaugeFunc(
-			prometheus.GaugeOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "loaders_in_pool",
-				Help:      "Number of active loaders in pool",
-			},
-			colls.collectorsLen,
-		))
 
 	prometheus.MustRegister(colls)
 
@@ -117,122 +106,16 @@ func (cs *Collectors) Describe(ch chan<- *prometheus.Desc) {
 	prometheus.DescribeByCollect(cs, ch)
 }
 
-func (cs *Collectors) Collect(resCh chan<- prometheus.Metric) { //nolint:funlen
-	if cs.collectors == nil {
-		return
+func (cs *Collectors) Collect(resCh chan<- prometheus.Metric) {
+	resCh <- prometheus.MustNewConstMetric(
+		collectorCount,
+		prometheus.GaugeValue,
+		float64(len(cs.collectors)),
+	)
+
+	for _, c := range cs.collectors {
+		c.collectMetrics(resCh)
 	}
-
-	cstats := cs.stats()
-
-	for _, cstat := range cstats {
-		stat := cstat.dbstats
-
-		if stat == nil {
-			continue
-		}
-
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolOpenConnsDesc,
-			prometheus.GaugeValue,
-			float64(stat.DBStats.OpenConnections),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolActConnsDesc,
-			prometheus.GaugeValue,
-			float64(stat.DBStats.InUse),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolIdleConnsDesc,
-			prometheus.GaugeValue,
-			float64(stat.DBStats.Idle),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolconfMaxConnsDesc,
-			prometheus.GaugeValue,
-			float64(stat.DBStats.MaxOpenConnections),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolConnWaitCntDesc,
-			prometheus.CounterValue,
-			float64(stat.DBStats.WaitCount),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolConnIdleClosedDesc,
-			prometheus.CounterValue,
-			float64(stat.DBStats.MaxIdleClosed),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolConnIdleTimeClosedDesc,
-			prometheus.CounterValue,
-			float64(stat.DBStats.MaxIdleTimeClosed),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolConnLifeTimeClosedDesc,
-			prometheus.CounterValue,
-			float64(stat.DBStats.MaxLifetimeClosed),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolConnWaitTimeDesc,
-			prometheus.CounterValue,
-			stat.DBStats.WaitDuration.Seconds(),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolConnTotalConnectedDesc,
-			prometheus.CounterValue,
-			float64(stat.TotalOpenedConnections),
-			stat.Name,
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			dbpoolConnTotalFailedDesc,
-			prometheus.CounterValue,
-			float64(stat.TotalFailedConnections),
-			stat.Name,
-		)
-
-		resCh <- prometheus.MustNewConstMetric(
-			collectorQueueLengthDesc,
-			prometheus.GaugeValue,
-			float64(cstat.queueLength),
-			stat.Name,
-			"main",
-		)
-		resCh <- prometheus.MustNewConstMetric(
-			collectorQueueLengthDesc,
-			prometheus.GaugeValue,
-			float64(cstat.queueBgLength),
-			stat.Name,
-			"bg",
-		)
-	}
-}
-
-// collectorsLen return number or loaders in pool.
-func (cs *Collectors) collectorsLen() float64 {
-	if cs == nil {
-		return 0
-	}
-
-	return float64(len(cs.collectors))
-}
-
-// stats return stats for each loaders.
-func (cs *Collectors) stats() []collectorStats {
-	stats := make([]collectorStats, 0, len(cs.collectors))
-
-	for _, l := range cs.collectors {
-		stats = append(stats, l.stats())
-	}
-
-	return stats
 }
 
 func (cs *Collectors) createCollectors() error {
