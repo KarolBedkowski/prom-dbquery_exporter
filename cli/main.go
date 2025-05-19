@@ -33,7 +33,7 @@ func printVersion() {
 	fmt.Println(version.Print(AppName)) //nolint:forbidigo
 
 	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
-		fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
+		fmt.Println("NO DATABASES SUPPORTED, check compilation flags.") //nolint:forbidigo
 	} else {
 		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
 	}
@@ -48,7 +48,7 @@ func printWelcome() {
 		Msgf("starting %s", AppName)
 
 	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
-		log.Logger.Fatal().Msg("no databases supported, check compile flags")
+		log.Logger.Fatal().Msg("no databases supported, check compilation flags")
 	} else {
 		log.Logger.Log().Msgf("supported databases: %s", sdb)
 	}
@@ -68,13 +68,13 @@ func main() {
 	support.InitializeLogger(cliOpts.LogLevel, cliOpts.LogFormat)
 	printWelcome()
 
-	if err := enableSDNotify(); err != nil {
+	if err := startSDWatchdog(); err != nil {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
 	cfg, err := conf.LoadConfiguration(cliOpts.ConfigFilename, db.GlobalRegistry, cliOpts)
 	if err != nil || cfg == nil {
-		log.Logger.Fatal().Err(err).Str("file", cliOpts.ConfigFilename).Msg("load config file error")
+		log.Logger.Fatal().Err(err).Str("file", cliOpts.ConfigFilename).Msg("failed load config file")
 	}
 
 	log.Logger.Debug().Interface("conf", cfg).Msg("configuration loaded")
@@ -145,7 +145,7 @@ func start(cfg *conf.Configuration) error {
 	return runGroup.Run() //nolint:wrapcheck
 }
 
-func enableSDNotify() error {
+func startSDWatchdog() error {
 	ok, err := daemon.SdNotify(false, "STATUS=starting")
 	if err != nil {
 		return fmt.Errorf("send sd status error: %w", err)
@@ -171,9 +171,11 @@ func enableSDNotify() error {
 	go func() {
 		tick := time.Tick(interval)
 		for range tick {
-			_, _ = daemon.SdNotify(false, daemon.SdNotifyWatchdog)
+			daemon.SdNotify(false, daemon.SdNotifyWatchdog) //nolint:errcheck
 		}
 	}()
+
+	log.Logger.Info().Err(err).Msg("systemd watchdog enabled")
 
 	return nil
 }

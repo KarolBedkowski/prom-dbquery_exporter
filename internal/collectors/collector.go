@@ -121,8 +121,12 @@ loop:
 		}
 	}
 
-	_ = c.bgWorkersGroup.Wait()
-	_ = c.stdWorkersGroup.Wait()
+	if err := c.bgWorkersGroup.Wait(); err != nil {
+		c.log.Error().Err(err).Msg("collector: wait for background workers error")
+	}
+	if err := c.stdWorkersGroup.Wait(); err != nil {
+		c.log.Error().Err(err).Msg("collector: wait for standard workers error")
+	}
 
 	c.log.Debug().Msg("collector: main worker exit")
 

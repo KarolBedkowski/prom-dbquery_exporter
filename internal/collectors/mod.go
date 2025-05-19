@@ -43,7 +43,7 @@ func (cs *Collectors) Run(ctx context.Context) error {
 	for {
 		cs.log.Debug().Msg("collectors: starting...")
 
-		group, cancel, err := cs.startLoaders()
+		group, cancel, err := cs.startCollectors()
 		if err != nil {
 			return err
 		}
@@ -145,7 +145,7 @@ func (cs *Collectors) createCollectors() error {
 	return nil
 }
 
-func (cs *Collectors) startLoaders() (*errgroup.Group, context.CancelFunc, error) {
+func (cs *Collectors) startCollectors() (*errgroup.Group, context.CancelFunc, error) {
 	if err := cs.createCollectors(); err != nil {
 		return nil, nil, err
 	}
