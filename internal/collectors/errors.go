@@ -15,7 +15,7 @@ func (i InvalidConfigurationError) Error() string {
 }
 
 // ErrLoaderStopped is generated on request to closed loader.
-var ErrAppNotConfigured = errors.New("app not configured")
+var ErrAppNotConfigured = errors.New("not configured")
 
 type InternalError string
 

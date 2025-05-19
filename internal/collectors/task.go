@@ -63,7 +63,6 @@ func (d *Task) newResult(err error, result []byte) *TaskResult {
 func (d *Task) cancel() {
 	if d.CancelCh != nil {
 		close(d.CancelCh)
-		d.CancelCh = nil
 	}
 }
 

@@ -122,6 +122,7 @@ func start(cfg *conf.Configuration) error {
 		func() error {
 			for range hup {
 				log.Debug().Msg("reload configuration started")
+				daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
 
 				if newConf, err := cfg.ReloadConfiguration(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
 					webHandler.UpdateConf(newConf)
@@ -132,6 +133,8 @@ func start(cfg *conf.Configuration) error {
 				} else {
 					log.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
 				}
+
+				daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 			}
 
 			return nil
@@ -140,7 +143,6 @@ func start(cfg *conf.Configuration) error {
 	)
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
-	daemon.SdNotify(false, "STATUS=ready")       //nolint:errcheck
 	log.Logger.Log().Msgf("%s READY!", AppName)
 
 	return runGroup.Run() //nolint:wrapcheck
