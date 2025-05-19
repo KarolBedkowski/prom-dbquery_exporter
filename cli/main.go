@@ -58,23 +58,24 @@ func printWelcome() {
 
 // Main is main function for cli.
 func main() {
-	cliOpts := conf.NewRuntimeArgs()
+	conf.ParseCliArgs()
 
-	if cliOpts.ShowVersion {
+	if conf.Args.ShowVersion {
 		printVersion()
 		os.Exit(0)
 	}
 
-	support.InitializeLogger(cliOpts.LogLevel, cliOpts.LogFormat)
+	support.InitializeLogger(conf.Args.LogLevel, conf.Args.LogFormat)
 	printWelcome()
+	log.Logger.Debug().Interface("args", conf.Args).Msg("cli arguments")
 
 	if err := startSDWatchdog(); err != nil {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
-	cfg, err := conf.LoadConfiguration(cliOpts.ConfigFilename, db.GlobalRegistry, cliOpts)
+	cfg, err := conf.LoadConfiguration(conf.Args.ConfigFilename, db.GlobalRegistry)
 	if err != nil || cfg == nil {
-		log.Logger.Fatal().Err(err).Str("file", cliOpts.ConfigFilename).Msg("failed load config file")
+		log.Logger.Fatal().Err(err).Str("file", conf.Args.ConfigFilename).Msg("failed load config file")
 	}
 
 	log.Logger.Debug().Interface("conf", cfg).Msg("configuration loaded")
@@ -99,7 +100,7 @@ func start(cfg *conf.Configuration) error {
 
 	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
 	runGroup.Add(webHandler.Run, webHandler.Stop)
-	runGroup.Add(func() error { return sched.Run(ctx, cfg.RuntimeArgs.ParallelScheduler) }, sched.Close)
+	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, sched.Close)
 
 	// Termination handler.
 	runGroup.Add(
@@ -122,7 +123,7 @@ func start(cfg *conf.Configuration) error {
 			for range hup {
 				log.Debug().Msg("reload configuration started")
 
-				if newConf, err := cfg.ReloadConfiguration(db.GlobalRegistry); err == nil {
+				if newConf, err := cfg.ReloadConfiguration(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
 					webHandler.UpdateConf(newConf)
 					sched.UpdateConf(newConf)
 					collectors.UpdateConf(newConf)

@@ -9,7 +9,7 @@ import "flag"
 // Distributed under terms of the GPLv3 license.
 //
 
-type RuntimeArgs struct {
+type CliArguments struct {
 	ConfigFilename string
 
 	// Flags
@@ -31,30 +31,28 @@ type RuntimeArgs struct {
 	LogFormat string
 }
 
-func NewRuntimeArgs() RuntimeArgs {
-	opts := RuntimeArgs{}
+var Args CliArguments
 
-	flag.BoolVar(&opts.ShowVersion, "version", false, "Print version information.")
+func ParseCliArgs() {
+	flag.BoolVar(&Args.ShowVersion, "version", false, "Print version information.")
 
-	flag.StringVar(&opts.ConfigFilename, "config.file", "dbquery.yaml",
+	flag.StringVar(&Args.ConfigFilename, "config.file", "dbquery.yaml",
 		"Path to configuration file.")
 
-	flag.StringVar(&opts.ListenAddress, "web.listen-address", ":9122",
+	flag.StringVar(&Args.ListenAddress, "web.listen-address", ":9122",
 		"Address to listen on for web interface and telemetry.")
-	flag.StringVar(&opts.WebConfig, "web.config", "",
+	flag.StringVar(&Args.WebConfig, "web.config", "",
 		"Path to config yaml file that can enable TLS or authentication.")
-	flag.BoolVar(&opts.EnableInfo, "enable-info", false, "Enable /info endpoint")
+	flag.BoolVar(&Args.EnableInfo, "enable-info", false, "Enable /info endpoint")
 
-	flag.StringVar(&opts.LogLevel, "log.level", "info",
+	flag.StringVar(&Args.LogLevel, "log.level", "info",
 		"Logging level (debug, info, warn, error, fatal)")
-	flag.StringVar(&opts.LogFormat, "log.format", "logfmt",
+	flag.StringVar(&Args.LogFormat, "log.format", "logfmt",
 		"Logging log format (logfmt, json).")
 
-	flag.BoolVar(&opts.DisableCache, "no-cache", false, "Disable query result caching")
-	flag.BoolVar(&opts.ParallelScheduler, "parallel-scheduler", false, "Run scheduler ask parallel")
-	flag.BoolVar(&opts.ValidateOutput, "validate-output", false, "Enable output validation")
+	flag.BoolVar(&Args.DisableCache, "no-cache", false, "Disable query result caching")
+	flag.BoolVar(&Args.ParallelScheduler, "parallel-scheduler", false, "Run scheduler ask parallel")
+	flag.BoolVar(&Args.ValidateOutput, "validate-output", false, "Enable output validation")
 
 	flag.Parse()
-
-	return opts
 }

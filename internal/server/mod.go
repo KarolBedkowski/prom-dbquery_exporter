@@ -48,7 +48,7 @@ func NewWebHandler(cfg *conf.Configuration, cache *support.Cache[[]byte],
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)
-	if cfg.RuntimeArgs.EnableInfo {
+	if conf.Args.EnableInfo {
 		http.Handle("/info", ih.Handler())
 	}
 
@@ -58,8 +58,8 @@ func NewWebHandler(cfg *conf.Configuration, cache *support.Cache[[]byte],
 		cfg:         cfg,
 	}
 
-	local := strings.HasPrefix(cfg.RuntimeArgs.ListenAddress, "127.0.0.1:") ||
-		strings.HasPrefix(cfg.RuntimeArgs.ListenAddress, "localhost:")
+	local := strings.HasPrefix(conf.Args.ListenAddress, "127.0.0.1:") ||
+		strings.HasPrefix(conf.Args.ListenAddress, "localhost:")
 
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
@@ -80,7 +80,7 @@ func NewWebHandler(cfg *conf.Configuration, cache *support.Cache[[]byte],
 
 // Run webhandler.
 func (w *WebHandler) Run() error {
-	log.Logger.Info().Msgf("webhandler: listening on %s", w.cfg.RuntimeArgs.ListenAddress)
+	log.Logger.Info().Msgf("webhandler: listening on %s", conf.Args.ListenAddress)
 
 	rwTimeout := defaultRwTimeout
 	if w.cfg.Global.RequestTimeout > 0 {
@@ -88,13 +88,13 @@ func (w *WebHandler) Run() error {
 	}
 
 	w.server = &http.Server{
-		Addr:           w.cfg.RuntimeArgs.ListenAddress,
+		Addr:           conf.Args.ListenAddress,
 		ReadTimeout:    rwTimeout,
 		WriteTimeout:   rwTimeout,
 		MaxHeaderBytes: defaultMaxHeaderBytes,
 	}
 
-	if err := listenAndServe(w.server, w.cfg.RuntimeArgs.WebConfig); err != nil {
+	if err := listenAndServe(w.server, conf.Args.WebConfig); err != nil {
 		return fmt.Errorf("listen and serve failed: %w", err)
 	}
 

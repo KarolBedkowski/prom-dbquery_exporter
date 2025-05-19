@@ -25,16 +25,12 @@ type Configuration struct {
 	Jobs []*Job
 	// Global application settings
 	Global GlobalConf
-
-	// Runtime configuration
-	RuntimeArgs RuntimeArgs `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	event.Object("global", &c.Global).
-		Interface("jobs", c.Jobs).
-		Interface("cliOptions", c.RuntimeArgs)
+		Interface("jobs", c.Jobs)
 
 	d := zerolog.Dict()
 
@@ -67,9 +63,9 @@ func (c *Configuration) GroupQueries(group string) []string {
 }
 
 // LoadConfiguration from filename.
-func LoadConfiguration(filename string, dbp DatabaseProvider, ra RuntimeArgs) (*Configuration, error) {
+func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
-	conf := &Configuration{RuntimeArgs: ra}
+	conf := &Configuration{}
 
 	logger.Info().Msgf("Loading config file %s", filename)
 
@@ -105,8 +101,8 @@ func LoadConfiguration(filename string, dbp DatabaseProvider, ra RuntimeArgs) (*
 }
 
 // LoadConfiguration from filename.
-func (c *Configuration) ReloadConfiguration(dbp DatabaseProvider) (*Configuration, error) {
-	newCfg, err := LoadConfiguration(c.RuntimeArgs.ConfigFilename, dbp, c.RuntimeArgs)
+func (c *Configuration) ReloadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, error) {
+	newCfg, err := LoadConfiguration(filename, dbp)
 	if err != nil {
 		return nil, err
 	}

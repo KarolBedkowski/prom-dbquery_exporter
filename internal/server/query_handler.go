@@ -161,7 +161,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 }
 
 func (q *queryHandler) getFromCache(query *conf.Query, dbName string, params map[string]any) ([]byte, bool) {
-	if q.cfg.RuntimeArgs.DisableCache || len(params) > 0 || query.CachingTime == 0 {
+	if conf.Args.DisableCache || len(params) > 0 || query.CachingTime == 0 {
 		return nil, false
 	}
 
@@ -174,7 +174,7 @@ func (q *queryHandler) putIntoCache(task *collectors.Task, data []byte) {
 	query := task.Query
 
 	// do not cache query with user params
-	if q.cfg.RuntimeArgs.DisableCache || query == nil || len(task.Params) > 0 || query.CachingTime == 0 {
+	if conf.Args.DisableCache || query == nil || len(task.Params) > 0 || query.CachingTime == 0 {
 		return
 	}
 
@@ -184,7 +184,7 @@ func (q *queryHandler) putIntoCache(task *collectors.Task, data []byte) {
 }
 
 func (q *queryHandler) validateOutput(output []byte) error {
-	if q.cfg.RuntimeArgs.ValidateOutput {
+	if conf.Args.ValidateOutput {
 		var parser expfmt.TextParser
 		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
 			return fmt.Errorf("validate result error: %w", err)
