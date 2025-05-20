@@ -303,7 +303,7 @@ func (c *collector) handleQueryError(ctx context.Context, task *Task, err error)
 
 func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) { //nolint:funlen
 	resCh <- prometheus.MustNewConstMetric(
-		collectorActive,
+		collectorActiveDesc,
 		prometheus.GaugeValue,
 		1.0,
 		c.name,

@@ -108,7 +108,7 @@ func (cs *Collectors) Describe(ch chan<- *prometheus.Desc) {
 
 func (cs *Collectors) Collect(resCh chan<- prometheus.Metric) {
 	resCh <- prometheus.MustNewConstMetric(
-		collectorCount,
+		collectorCountDesc,
 		prometheus.GaugeValue,
 		float64(len(cs.collectors)),
 	)
