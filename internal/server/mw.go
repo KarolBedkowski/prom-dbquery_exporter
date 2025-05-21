@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 )
 
@@ -55,7 +56,11 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 		start := time.Now()
 
 		ctx := request.Context()
-		llog := log.Ctx(ctx).With().
+		requestID, _ := hlog.IDFromCtx(ctx)
+		llog := log.With().Logger().With().Str("req_id", requestID.String()).Logger()
+		request = request.WithContext(llog.WithContext(ctx))
+
+		llog = llog.With().
 			Str("remote", request.RemoteAddr).
 			Str("uri", request.RequestURI).
 			Str("method", request.Method).

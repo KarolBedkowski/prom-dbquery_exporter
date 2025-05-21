@@ -42,10 +42,6 @@ func (d *dataWriter) write(ctx context.Context, data []byte) {
 	}
 }
 
-func (d *dataWriter) writeError(ctx context.Context, data string) {
-	d.write(ctx, append([]byte(data), '\n'))
-}
-
 func (d *dataWriter) incScheduled() {
 	d.scheduled++
 }

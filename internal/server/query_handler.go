@@ -89,12 +89,20 @@ func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte], taskQu
 }
 
 func (q *queryHandler) Handler() http.Handler {
-	h := newLogMiddleware(promhttp.InstrumentHandlerDuration(newReqDurationWrapper("query"), q), "query", false)
-	h = support.NewTraceMiddleware("dbquery_exporter")(h)
-	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
-	h = hlog.NewHandler(log.Logger)(h)
+	var handler http.Handler = q
+	// 5. log request traces
+	handler = support.NewTraceMiddleware("dbquery_exporter")(handler)
+	// 4. update logger, log req, response
+	handler = newLogMiddleware(handler, "query", false)
+	// 3. add logger to ctx
+	handler = hlog.NewHandler(log.Logger)(handler)
+	// 2. set request_handler
+	handler = hlog.RequestIDHandler("req_id", "X-Request-Id")(handler)
+	// 1. metrics
+	handler = promhttp.InstrumentHandlerInFlight(newReqInflightWrapper("query"), handler)
+	handler = promhttp.InstrumentHandlerDuration(newReqDurationWrapper("query"), handler)
 
-	return h
+	return handler
 }
 
 // SetConfiguration update handler configuration.
@@ -108,8 +116,8 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	ctx, cancel := context.WithTimeout(req.Context(), q.cfg.Global.RequestTimeout)
 	defer cancel()
 
-	logger := log.Ctx(ctx)
 	requestID, _ := hlog.IDFromCtx(ctx)
+	logger := log.Ctx(ctx)
 
 	support.SetGoroutineLabels(ctx, "req_id", requestID.String(), "req", req.URL.String())
 
@@ -253,7 +261,7 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 			if res.Error != nil {
 				logger.Warn().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
 				support.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
-				dWriter.writeError(ctx, "# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error")
+				dWriter.write(ctx, []byte("# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error\n"))
 
 				continue
 			}
