@@ -41,7 +41,7 @@ var (
 	reqInFlightCnt = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: metrics.MetricsNamespace,
-			Name:      "query_database_requests_in_flight",
+			Name:      "requests_in_flight",
 			Help:      "Number of concurrent request to the DBQuery exporter",
 		},
 		[]string{"handler"},
@@ -52,6 +52,7 @@ func init() {
 	prometheus.MustRegister(queryTotalCnt)
 	prometheus.MustRegister(queryErrorCnt)
 	prometheus.MustRegister(reqDuration)
+	prometheus.MustRegister(reqInFlightCnt)
 }
 
 // NewReqDurationWrapper create new ObserverVec for InstrumentHandlerDuration.
@@ -62,9 +63,4 @@ func newReqDurationWrapper(handler string) prometheus.ObserverVec {
 // NewReqDurationWrapper create new ObserverVec for InstrumentHandlerDuration.
 func newReqInflightWrapper(handler string) prometheus.Gauge { //nolint:ireturn
 	return reqInFlightCnt.With(prometheus.Labels{"handler": handler})
-}
-
-// IncQueryTotalErrCnt increment query_database_errors_total metric.
-func IncQueryTotalErrCnt(dbName string) {
-	queryErrorCnt.WithLabelValues(dbName).Inc()
 }
