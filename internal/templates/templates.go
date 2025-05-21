@@ -2,7 +2,7 @@
 // templates.go
 //
 
-package support
+package templates
 
 import (
 	"bufio"

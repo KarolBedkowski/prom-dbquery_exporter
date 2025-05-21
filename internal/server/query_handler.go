@@ -20,10 +20,11 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/cache"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/debug"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 const maxLockTime = time.Duration(20) * time.Minute
@@ -73,13 +74,13 @@ func (l *locker) unlock(queryKey string) {
 // queryHandler handle all request for metrics.
 type queryHandler struct {
 	cfg         *conf.Configuration
-	resultCache *support.Cache[[]byte]
+	resultCache *cache.Cache[[]byte]
 	// locker protect from running the same request twice
 	locker    locker
 	taskQueue TaskQueue
 }
 
-func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte], taskQueue TaskQueue) *queryHandler {
+func newQueryHandler(c *conf.Configuration, cache *cache.Cache[[]byte], taskQueue TaskQueue) *queryHandler {
 	return &queryHandler{
 		cfg:         c,
 		locker:      newLocker(),
@@ -91,7 +92,7 @@ func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte], taskQu
 func (q *queryHandler) Handler() http.Handler {
 	var handler http.Handler = q
 	// 5. log request traces
-	handler = support.NewTraceMiddleware("dbquery_exporter")(handler)
+	handler = debug.NewTraceMiddleware("dbquery_exporter")(handler)
 	// 4. update logger, log req, response
 	handler = newLogMiddleware(handler, "query", false)
 	// 3. add logger to ctx
@@ -119,13 +120,13 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	requestID, _ := hlog.IDFromCtx(ctx)
 	logger := log.Ctx(ctx)
 
-	support.SetGoroutineLabels(ctx, "req_id", requestID.String(), "req", req.URL.String())
+	debug.SetGoroutineLabels(ctx, "req_id", requestID.String(), "req", req.URL.String())
 
 	// prevent to run the same request twice
 	if locker, ok := q.locker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
 		logger.Warn().Msgf("query already in progress, started by %s", locker)
 		http.Error(writer, "query in progress", http.StatusInternalServerError)
-		support.TraceErrorf(ctx, "query locked by %s", locker)
+		debug.TraceErrorf(ctx, "query locked by %s", locker)
 
 		return
 	}
@@ -136,7 +137,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	if err != nil {
 		logger.Info().Err(err).Msg("parse request parameters error")
 		http.Error(writer, "invalid parameters", http.StatusBadRequest)
-		support.TraceErrorf(ctx, "bad request")
+		debug.TraceErrorf(ctx, "bad request")
 
 		return
 	}
@@ -150,12 +151,12 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	cancelCh := make(chan struct{}, 1)
 	defer close(cancelCh)
 
-	support.TracePrintf(ctx, "start querying db")
+	debug.TracePrintf(ctx, "start querying db")
 
 	output := q.queryDatabases(ctx, parameters, &dWriter, cancelCh)
 	defer close(output)
 
-	support.TracePrintf(ctx, "start reading data, scheduled: %d", dWriter.scheduled)
+	debug.TracePrintf(ctx, "start reading data, scheduled: %d", dWriter.scheduled)
 	q.writeResult(ctx, &dWriter, output)
 
 	logger.Debug().Int("written", dWriter.written).
@@ -217,7 +218,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 
 		if data, ok := q.getFromCache(query, dbName, parameters.extraParameters); ok {
 			logger.Debug().Str("dbname", dbName).Str("query", query.Name).Msg("queryhandler: query result from cache")
-			support.TracePrintf(ctx, "data from cache for %q from %q", query.Name, dbName)
+			debug.TracePrintf(ctx, "data from cache for %q from %q", query.Name, dbName)
 			dWriter.write(ctx, data)
 
 			continue
@@ -236,7 +237,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 
 		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
 		q.taskQueue.AddTask(ctx, task)
-		support.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
+		debug.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
 		dWriter.incScheduled()
 	}
 
@@ -260,18 +261,18 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 
 			if res.Error != nil {
 				logger.Warn().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
-				support.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
+				debug.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
 				dWriter.write(ctx, []byte("# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error\n"))
 
 				continue
 			}
 
 			logger.Debug().Object("res", res).Msg("queryhandler: write result")
-			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
+			debug.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
 
 			if err := q.validateOutput(res.Result); err != nil {
 				logger.Warn().Err(err).Object("task", task).Msg("queryhandler: validate output error")
-				support.TracePrintf(ctx, "validate result of query %q from %q: %v", task.QueryName, task.DBName, err)
+				debug.TracePrintf(ctx, "validate result of query %q from %q: %v", task.QueryName, task.DBName, err)
 
 				continue
 			}
@@ -283,7 +284,7 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 			err := ctx.Err()
 			logger.Warn().Err(err).Msg("queryhandler: context cancelled")
 			metrics.IncProcessErrorsCnt(metrics.ProcessCancelError)
-			support.TraceErrorf(ctx, "result error: %s", err)
+			debug.TraceErrorf(ctx, "result error: %s", err)
 
 			return
 		}

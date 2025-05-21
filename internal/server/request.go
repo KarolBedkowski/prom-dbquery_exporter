@@ -18,8 +18,8 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/debug"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 type dataWriter struct {
@@ -35,7 +35,7 @@ func (d *dataWriter) writeHeaders() {
 func (d *dataWriter) write(ctx context.Context, data []byte) {
 	if _, err := d.writer.Write(data); err != nil {
 		log.Ctx(ctx).Error().Err(err).Msg("queryhandler: write error")
-		support.TraceErrorf(ctx, "write error: %s", err)
+		debug.TraceErrorf(ctx, "write error: %s", err)
 		metrics.IncProcessErrorsCnt(metrics.ProcessWriteError)
 	} else {
 		d.written++

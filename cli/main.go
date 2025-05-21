@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	stdlog "log"
 	"os"
 	"os/signal"
 	"syscall"
@@ -13,13 +14,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	cversion "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/cache"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/db"
 	"prom-dbquery_exporter.app/internal/scheduler"
 	"prom-dbquery_exporter.app/internal/server"
-	"prom-dbquery_exporter.app/internal/support"
+	"prom-dbquery_exporter.app/internal/templates"
 )
 
 const AppName = "dbquery_exporter"
@@ -37,7 +40,7 @@ func printVersion() {
 		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
 	}
 
-	fmt.Printf("Available template functions: %s\n", support.AvailableTmplFunctions()) //nolint:forbidigo
+	fmt.Printf("Available template functions: %s\n", templates.AvailableTmplFunctions()) //nolint:forbidigo
 }
 
 func printWelcome() {
@@ -52,7 +55,7 @@ func printWelcome() {
 		log.Logger.Log().Msgf("supported databases: %s", sdb)
 	}
 
-	log.Logger.Log().Msgf("available template functions: %s", support.AvailableTmplFunctions())
+	log.Logger.Log().Msgf("available template functions: %s", templates.AvailableTmplFunctions())
 }
 
 // Main is main function for cli.
@@ -64,7 +67,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	support.InitializeLogger(conf.Args.LogLevel, conf.Args.LogFormat)
+	initializeLogger(conf.Args.LogLevel, conf.Args.LogFormat)
 	printWelcome()
 	log.Logger.Debug().Interface("args", conf.Args).Msg("cli arguments")
 
@@ -88,7 +91,7 @@ func main() {
 
 func start(cfg *conf.Configuration) error {
 	collectors := collectors.NewCollectors(cfg)
-	cache := support.NewCache[[]byte]("query_cache")
+	cache := cache.NewCache[[]byte]("query_cache")
 	webHandler := server.NewWebHandler(cfg, cache, collectors)
 	sched := scheduler.NewScheduler(cache, cfg, collectors)
 	runGroup := run.Group{}
@@ -178,4 +181,42 @@ func startSDWatchdog() error {
 	log.Logger.Info().Err(err).Msg("systemd watchdog enabled")
 
 	return nil
+}
+
+// InitializeLogger set log level and optional log filename.
+func initializeLogger(level string, format string) {
+	var llog zerolog.Logger
+
+	switch format {
+	default:
+		log.Error().Msg("logger: unknown log format; using logfmt")
+
+		fallthrough
+	case "logfmt":
+		llog = log.Output(zerolog.ConsoleWriter{
+			Out:        os.Stderr,
+			NoColor:    !outputIsConsole(),
+			TimeFormat: time.RFC3339,
+		})
+	case "json":
+		llog = log.Logger
+	}
+
+	if l, err := zerolog.ParseLevel(level); err == nil {
+		zerolog.SetGlobalLevel(l)
+	} else {
+		log.Error().Msgf("logger: unknown log level '%s'; using debug", level)
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
+
+	log.Logger = llog.With().Caller().Logger()
+
+	stdlog.SetFlags(0)
+	stdlog.SetOutput(log.Logger)
+}
+
+func outputIsConsole() bool {
+	fileInfo, _ := os.Stdout.Stat()
+
+	return fileInfo != nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
 }

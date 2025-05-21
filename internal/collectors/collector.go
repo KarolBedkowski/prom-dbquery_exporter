@@ -20,8 +20,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/db"
+	"prom-dbquery_exporter.app/internal/debug"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 // workerID is last unique worker id.
@@ -100,7 +100,7 @@ func (c *collector) run(ctx context.Context) error {
 	c.tasksQueue = make(chan *Task, 1)
 	defer close(c.tasksQueue)
 
-	support.SetGoroutineLabels(context.Background(), "main_worker", c.name)
+	debug.SetGoroutineLabels(context.Background(), "main_worker", c.name)
 
 loop:
 	for {
@@ -176,7 +176,7 @@ func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool)
 	ctx = llog.WithContext(ctx)
 
 	workersCreatedCnt.WithLabelValues(c.name, workerKind(isBg)).Inc()
-	support.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.name, "bg", strconv.FormatBool(isBg))
+	debug.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.name, "bg", strconv.FormatBool(isBg))
 	llog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
 
 	// stop worker after 1 second of inactivity
@@ -202,7 +202,7 @@ loop:
 		case task, ok := <-workQueue:
 			if ok {
 				llog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
-				support.SetGoroutineLabels(ctx, "query", task.QueryName, "worker", idxstr, "db", c.name, "req_id", task.ReqID)
+				debug.SetGoroutineLabels(ctx, "query", task.QueryName, "worker", idxstr, "db", c.name, "req_id", task.ReqID)
 				tasksQueueWaitTime.WithLabelValues(c.name, workerKind(task.IsScheduledJob)).
 					Observe(time.Since(task.RequestStart).Seconds())
 
@@ -256,7 +256,7 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *TaskResult) {
 	llog := log.Ctx(ctx)
 
-	support.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
+	debug.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
 	llog.Debug().Msg("collector: start query")
 
 	result, err := c.database.Query(ctx, task.Query, task.Params)
@@ -279,7 +279,7 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *Tas
 	}
 
 	llog.Debug().Msg("collector: result formatted")
-	support.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
+	debug.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
 	res <- task.newResult(nil, output)
 }
 

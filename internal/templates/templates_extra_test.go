@@ -1,7 +1,7 @@
 //go:build tmpl_extra_func
 // +build tmpl_extra_func
 
-package support
+package templates
 
 //
 // templates_test.go

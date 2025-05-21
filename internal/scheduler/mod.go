@@ -18,10 +18,11 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/trace"
 	"golang.org/x/sync/errgroup"
+	"prom-dbquery_exporter.app/internal/cache"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/debug"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 var (
@@ -73,14 +74,14 @@ type TaskQueue interface {
 type Scheduler struct {
 	log        zerolog.Logger
 	cfg        *conf.Configuration
-	cache      *support.Cache[[]byte]
+	cache      *cache.Cache[[]byte]
 	tasks      []*scheduledTask
 	newCfgCh   chan *conf.Configuration
 	tasksQueue TaskQueue
 }
 
 // NewScheduler create new scheduler that use `cache` and initial `cfg` configuration.
-func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
+func NewScheduler(cache *cache.Cache[[]byte], cfg *conf.Configuration,
 	tasksQueue TaskQueue,
 ) *Scheduler {
 	scheduler := &Scheduler{
@@ -217,9 +218,9 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 
 	ctx = llog.WithContext(ctx)
 
-	if support.TraceMaxEvents > 0 {
+	if debug.TraceMaxEvents > 0 {
 		tr := trace.New("dbquery_exporter.scheduler", "scheduler: "+job.Database+"/"+job.Query)
-		tr.SetMaxEvents(support.TraceMaxEvents)
+		tr.SetMaxEvents(debug.TraceMaxEvents)
 		defer tr.Finish()
 
 		ctx = trace.NewContext(ctx, tr)
@@ -228,7 +229,7 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	if err := s.handleJob(ctx, job); err != nil {
 		scheduledTasksFailed.Inc()
 
-		support.TraceErrorf(ctx, "scheduled %q to %q error: %v", job.Query, job.Database, err)
+		debug.TraceErrorf(ctx, "scheduled %q to %q error: %v", job.Query, job.Database, err)
 		llog.Error().Err(err).Msg("scheduler: error execute job")
 	} else {
 		scheduledTasksSuccess.Inc()
@@ -271,7 +272,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	defer cancel()
 
 	s.tasksQueue.AddTask(ctx, task)
-	support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
+	debug.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
 
 	select {
 	case <-ctx.Done():

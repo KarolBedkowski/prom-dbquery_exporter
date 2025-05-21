@@ -7,6 +7,7 @@ package db
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,7 +16,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/support"
+	"prom-dbquery_exporter.app/internal/debug"
 )
 
 const (
@@ -56,7 +57,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	ctx = llog.WithContext(ctx)
 	result := &QueryResult{Start: time.Now()}
 
-	support.TracePrintf(ctx, "db: opening connection")
+	debug.TracePrintf(ctx, "db: opening connection")
 
 	conn, err := g.getConnection(ctx)
 	if err != nil {
@@ -67,7 +68,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	defer conn.Close()
 
 	// prepare query parameters; combine parameters from query and params
-	queryParams := support.CloneMap(query.Params, params)
+	queryParams := CloneMap(query.Params, params)
 	timeout := g.queryTimeout(query)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -82,7 +83,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	support.TracePrintf(ctx, "db: begin query %q", query.Name)
+	debug.TracePrintf(ctx, "db: begin query %q", query.Name)
 
 	rows, err := tx.NamedQuery(query.SQL, queryParams)
 	if err != nil {
@@ -232,7 +233,7 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 	// launch initial sqls if defined
 	for idx, sql := range g.initialSQL {
 		llog.Debug().Str("sql", sql).Msg("db: generic: execute initial sql")
-		support.TracePrintf(ctx, "db: execute initial sql")
+		debug.TracePrintf(ctx, "db: execute initial sql")
 
 		if err := g.executeInitialQuery(ctx, sql, conn); err != nil {
 			conn.Close()
@@ -279,4 +280,17 @@ func loggerFromCtx(ctx context.Context) zerolog.Logger {
 	}
 
 	return log.Logger
+}
+
+// CloneMap create clone of `inp` map and optionally update it with values
+// from extra maps.
+func CloneMap[K comparable, V any](inp map[K]V, extra ...map[K]V) map[K]V {
+	res := make(map[K]V, len(inp)+1)
+	maps.Copy(res, inp)
+
+	for _, e := range extra {
+		maps.Copy(res, e)
+	}
+
+	return res
 }

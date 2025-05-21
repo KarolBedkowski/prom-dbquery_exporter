@@ -1,7 +1,7 @@
 //go:build tmpl_extra_func
 // +build tmpl_extra_func
 
-package support
+package templates
 
 //
 // templates_extra.go
@@ -9,6 +9,7 @@ package support
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"reflect"
 	"strconv"
@@ -72,14 +73,16 @@ func (r *reflectBucketGenerator[T]) generate(input any, valueKey string) []map[s
 	res := make([]map[string]any, 0, len(r.buckets)+1)
 
 	for i, b := range r.buckets {
-		row := CloneMap(resKeyVal)
+		row := make(map[string]any, len(resKeyVal)+2) //nolint:mnd
+		maps.Copy(row, resKeyVal)
 		row["le"] = r.formatter(b)
 		row["count"] = bucketsCnt[i]
 		res = append(res, row)
 	}
 
 	// inf
-	row := CloneMap(resKeyVal)
+	row := make(map[string]any, len(resKeyVal)+2) //nolint:mnd
+	maps.Copy(row, resKeyVal)
 	row["le"] = "+Inf"
 	row["count"] = allCnt
 	res = append(res, row)
