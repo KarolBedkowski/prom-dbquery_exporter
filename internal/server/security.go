@@ -204,7 +204,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 		}
 	}
 
-	metrics.IncProcessErrorsCnt("unauthorized")
+	metrics.IncProcessErrorsCnt(metrics.ProcessAuthError)
 	writer.Header().Set("WWW-Authenticate", "Basic")
 	http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }

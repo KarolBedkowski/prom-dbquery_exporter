@@ -36,7 +36,7 @@ func (d *dataWriter) write(ctx context.Context, data []byte) {
 	if _, err := d.writer.Write(data); err != nil {
 		log.Ctx(ctx).Error().Err(err).Msg("queryhandler: write error")
 		support.TraceErrorf(ctx, "write error: %s", err)
-		metrics.IncProcessErrorsCnt("write")
+		metrics.IncProcessErrorsCnt(metrics.ProcessWriteError)
 	} else {
 		d.written++
 	}

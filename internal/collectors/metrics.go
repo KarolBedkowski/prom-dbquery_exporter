@@ -30,11 +30,23 @@ var (
 			Buckets:   []float64{0.05, 0.1, 0.2, 0.5, 1, 5, 10, 30, 60, 120, 300},
 		},
 		[]string{"database", "kind"})
+
+	// queryDuration is duration of query.
+	queryDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "query_duration_seconds",
+			Help:      "Duration of query by the DBQuery exporter",
+			Buckets:   []float64{0.05, 0.1, 0.2, 0.5, 1, 5, 10, 30, 60, 120, 300},
+		},
+		[]string{"query", "database"},
+	)
 )
 
 func init() {
 	prometheus.MustRegister(workersCreatedCnt)
 	prometheus.MustRegister(tasksQueueWaitTime)
+	prometheus.MustRegister(queryDuration)
 }
 
 var (

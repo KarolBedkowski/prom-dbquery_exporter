@@ -12,10 +12,36 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/metrics"
 )
+
+var (
+	queryCacheHits = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "cache_hit_total",
+			Help:      "Number of data loaded from cache",
+		},
+		[]string{"name"},
+	)
+
+	queryCacheMiss = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "cache_miss_total",
+			Help:      "Number of data not found in cache",
+		},
+		[]string{"name"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(queryCacheHits)
+	prometheus.MustRegister(queryCacheMiss)
+}
 
 type (
 	// Cache with per item expire time.
@@ -43,26 +69,26 @@ func NewCache[T any](name string) *Cache[T] {
 
 // Get key from cache if exists and not expired.
 func (r *Cache[T]) Get(key string) (T, bool) {
+	r.logger.Debug().Msgf("get from cache: key=%s", key)
+
 	r.lock.Lock()
 	defer r.lock.Unlock()
 
-	r.logger.Debug().Msgf("get from cache: key=%s", key)
-
 	item, ok := r.cache[key]
 	if !ok {
-		metrics.IncQueryCacheMiss(r.name)
+		queryCacheMiss.WithLabelValues(r.name).Inc()
 
 		return *new(T), false
 	}
 
 	if item.expireTS.After(time.Now()) {
-		metrics.IncQueryCacheHits(r.name)
+		queryCacheHits.WithLabelValues(r.name).Inc()
 
 		return item.content, true
 	}
 
 	delete(r.cache, key)
-	metrics.IncQueryCacheMiss(r.name)
+	queryCacheMiss.WithLabelValues(r.name).Inc()
 
 	return *new(T), false
 }

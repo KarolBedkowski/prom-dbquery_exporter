@@ -17,7 +17,6 @@ import (
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 const infoTmpl = `
@@ -88,7 +87,7 @@ func newInfoHandler(cfg *conf.Configuration) *infoHandler {
 func (q *infoHandler) Handler() http.Handler {
 	h := newLogMiddleware(
 		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWrapper("info"),
+			newReqDurationWrapper("info"),
 			q), "info", false)
 
 	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)

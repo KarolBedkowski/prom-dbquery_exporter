@@ -261,18 +261,18 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *Tas
 
 	result, err := c.database.Query(ctx, task.Query, task.Params)
 	if err != nil {
-		metrics.IncProcessErrorsCnt("query")
+		metrics.IncProcessErrorsCnt(metrics.ProcessQueryError)
 		res <- c.handleQueryError(ctx, task, err)
 
 		return
 	}
 
-	metrics.ObserveQueryDuration(task.QueryName, task.DBName, result.Duration)
+	queryDuration.WithLabelValues(task.QueryName, task.DBName).Observe(result.Duration)
 	llog.Debug().Msgf("collector: result received in %0.5f", result.Duration)
 
 	output, err := formatResult(ctx, result, task.Query, c.cfg)
 	if err != nil {
-		metrics.IncProcessErrorsCnt("format")
+		metrics.IncProcessErrorsCnt(metrics.ProcessFormatError)
 		res <- task.newResult(fmt.Errorf("format error: %w", err), nil)
 
 		return

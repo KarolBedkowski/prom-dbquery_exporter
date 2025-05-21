@@ -17,7 +17,6 @@ import (
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/db"
-	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/scheduler"
 	"prom-dbquery_exporter.app/internal/server"
 	"prom-dbquery_exporter.app/internal/support"
@@ -79,7 +78,6 @@ func main() {
 	}
 
 	log.Logger.Debug().Interface("conf", cfg).Msg("configuration loaded")
-	metrics.UpdateConf()
 
 	if err := start(cfg); err != nil {
 		log.Logger.Fatal().Err(err).Msg("start failed")
@@ -128,7 +126,6 @@ func start(cfg *conf.Configuration) error {
 					webHandler.UpdateConf(newConf)
 					sched.UpdateConf(newConf)
 					collectors.UpdateConf(newConf)
-					metrics.UpdateConf()
 					log.Info().Interface("conf", newConf).Msg("configuration reloaded")
 				} else {
 					log.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")

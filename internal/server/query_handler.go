@@ -89,7 +89,7 @@ func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte], taskQu
 }
 
 func (q *queryHandler) Handler() http.Handler {
-	h := newLogMiddleware(promhttp.InstrumentHandlerDuration(metrics.NewReqDurationWrapper("query"), q), "query", false)
+	h := newLogMiddleware(promhttp.InstrumentHandlerDuration(newReqDurationWrapper("query"), q), "query", false)
 	h = support.NewTraceMiddleware("dbquery_exporter")(h)
 	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
 	h = hlog.NewHandler(log.Logger)(h)
@@ -155,7 +155,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		Msg("queryhandler: all database queries finished")
 
 	if dWriter.written == 0 {
-		metrics.IncProcessErrorsCnt("bad_requests")
+		metrics.IncProcessErrorsCnt(metrics.ProcessBadRequestError)
 		http.Error(writer, "error", http.StatusBadRequest)
 	}
 }
@@ -205,7 +205,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 	reqID, _ := hlog.IDFromCtx(ctx)
 
 	for dbName, query := range parameters.iter() {
-		metrics.IncQueryTotalCnt(query.Name, dbName)
+		queryTotalCnt.WithLabelValues(query.Name, dbName).Inc()
 
 		if data, ok := q.getFromCache(query, dbName, parameters.extraParameters); ok {
 			logger.Debug().Str("dbname", dbName).Str("query", query.Name).Msg("queryhandler: query result from cache")
@@ -274,7 +274,7 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 		case <-ctx.Done():
 			err := ctx.Err()
 			logger.Warn().Err(err).Msg("queryhandler: context cancelled")
-			metrics.IncProcessErrorsCnt("cancel")
+			metrics.IncProcessErrorsCnt(metrics.ProcessCancelError)
 			support.TraceErrorf(ctx, "result error: %s", err)
 
 			return

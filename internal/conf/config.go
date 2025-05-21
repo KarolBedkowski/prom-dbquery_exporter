@@ -97,6 +97,8 @@ func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, e
 		return nil, newConfigurationError("validate error").Wrap(err)
 	}
 
+	configReloadTime.SetToCurrentTime()
+
 	return conf, nil
 }
 
