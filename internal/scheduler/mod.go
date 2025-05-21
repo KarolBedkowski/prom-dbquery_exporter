@@ -24,6 +24,36 @@ import (
 	"prom-dbquery_exporter.app/internal/support"
 )
 
+var (
+	scheduledTasksCnt = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "task_scheduled_total",
+			Help:      "Total number of scheduled tasks",
+		},
+	)
+	scheduledTasksSuccess = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "task_success_total",
+			Help:      "Total number of tasks finished with success",
+		},
+	)
+	scheduledTasksFailed = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "task_failed_total",
+			Help:      "Total number of tasks finished with error",
+		},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(scheduledTasksCnt)
+	prometheus.MustRegister(scheduledTasksSuccess)
+	prometheus.MustRegister(scheduledTasksFailed)
+}
+
 type scheduledTask struct {
 	// nextRun is time when task should be run when scheduler run in serial mode
 	nextRun time.Time
@@ -47,10 +77,6 @@ type Scheduler struct {
 	tasks      []*scheduledTask
 	newCfgCh   chan *conf.Configuration
 	tasksQueue TaskQueue
-
-	scheduledTasksCnt     prometheus.Counter
-	scheduledTasksSuccess prometheus.Counter
-	scheduledTasksFailed  prometheus.Counter
 }
 
 // NewScheduler create new scheduler that use `cache` and initial `cfg` configuration.
@@ -63,33 +89,7 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
 		log:        log.Logger.With().Str("module", "scheduler").Logger(),
 		newCfgCh:   make(chan *conf.Configuration, 1),
 		tasksQueue: tasksQueue,
-
-		scheduledTasksCnt: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "task_scheduled_total",
-				Help:      "Total number of scheduled tasks",
-			},
-		),
-		scheduledTasksSuccess: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "task_success_total",
-				Help:      "Total number of tasks finished with success",
-			},
-		),
-		scheduledTasksFailed: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "task_failed_total",
-				Help:      "Total number of tasks finished with error",
-			},
-		),
 	}
-
-	prometheus.MustRegister(scheduler.scheduledTasksCnt)
-	prometheus.MustRegister(scheduler.scheduledTasksSuccess)
-	prometheus.MustRegister(scheduler.scheduledTasksFailed)
 
 	scheduler.UpdateConf(cfg)
 
@@ -210,7 +210,7 @@ func (s *Scheduler) runParallel(ctx context.Context) error {
 func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	startTS := time.Now()
 
-	s.scheduledTasksCnt.Inc()
+	scheduledTasksCnt.Inc()
 
 	llog := s.log.With().Str("dbname", job.Database).Str("query", job.Query).Int("job_idx", job.Idx).Logger()
 	llog.Debug().Msg("scheduler: job processing start")
@@ -226,12 +226,12 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	}
 
 	if err := s.handleJob(ctx, job); err != nil {
-		s.scheduledTasksFailed.Inc()
+		scheduledTasksFailed.Inc()
 
 		support.TraceErrorf(ctx, "scheduled %q to %q error: %v", job.Query, job.Database, err)
 		llog.Error().Err(err).Msg("scheduler: error execute job")
 	} else {
-		s.scheduledTasksSuccess.Inc()
+		scheduledTasksSuccess.Inc()
 		llog.Debug().Msg("scheduler: execute job finished")
 	}
 

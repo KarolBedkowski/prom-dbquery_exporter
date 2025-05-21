@@ -49,7 +49,7 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 		Count:          len(qRes.Records),
 	}
 
-	log.Ctx(ctx).Debug().Interface("res", res).Msg("format result")
+	log.Ctx(ctx).Debug().Interface("res", res).Msg("result: executing template")
 
 	var output bytes.Buffer
 
@@ -70,7 +70,7 @@ func formatError(ctx context.Context, err error, query *conf.Query,
 		Error:    err.Error(),
 	}
 
-	log.Ctx(ctx).Debug().Object("query", query).Interface("res", res).Msg("format result on_error")
+	log.Ctx(ctx).Debug().Object("query", query).Interface("res", res).Msg("result: executing on_error template")
 
 	var output bytes.Buffer
 
