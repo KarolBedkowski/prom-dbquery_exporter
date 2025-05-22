@@ -1,4 +1,4 @@
-# dbquery_exporter v0.9.x
+# dbquery_exporter v0.11.x
 
 The dbquery_exporter allow to scrap metrics from supported SQL databases by user-defined SQL-s
 and templates.
@@ -10,7 +10,7 @@ Support: SQLite, PostgrSQL/Cockroach, Oracle, MySQL/MariaDB/TiDB and MSSQL (not 
 
 ### Dependency
 
-* golang 1.21+
+* golang 1.23+
 * see: go.mod
 
 #### Database drivers
