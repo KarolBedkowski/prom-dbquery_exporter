@@ -1,11 +1,12 @@
 #
 # Makefile
 #
-VERSION=dev
-REVISION=`git describe --always`
+VERSION=`git describe --always`
+REVISION=`git rev-parse HEAD`
 DATE=`date +%Y%m%d%H%M%S`
 USER=`whoami`
-BRANCH=`git branch | grep '^\*' | cut -d ' ' -f 2`
+# BRANCH=`git branch | grep '^\*' | cut -d ' ' -f 2`
+BRANCH=`git rev-parse --abbrev-ref HEAD`
 LDFLAGS=" -w -s \
 	-X github.com/prometheus/common/version.Version=$(VERSION) \
 	-X github.com/prometheus/common/version.Revision=$(REVISION) \
