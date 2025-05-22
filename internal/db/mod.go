@@ -42,9 +42,9 @@ type DatabaseStats struct {
 	TotalFailedConnections uint32
 }
 
-type dbDefinition struct {
-	instFunc     func(cfg *conf.Database) (Database, error)
-	validateFunc func(cfg *conf.Database) error
+type dbDefinition interface {
+	instanate(cfg *conf.Database) (Database, error)
+	validateConf(cfg *conf.Database) error
 }
 
 type Registry struct {
@@ -81,11 +81,7 @@ func (d Registry) Validate(cfg *conf.Database) error {
 	}
 
 	var errs *multierror.Error
-
-	if def.validateFunc != nil {
-		errs = multierror.Append(errs, def.validateFunc(cfg))
-	}
-
+	errs = multierror.Append(errs, def.validateConf(cfg))
 	errs = multierror.Append(errs, validateCommon(cfg))
 
 	return errs.ErrorOrNil()
@@ -94,7 +90,7 @@ func (d Registry) Validate(cfg *conf.Database) error {
 // CreateLoader returns configured Loader for given configuration.
 func (d Registry) GetInstance(cfg *conf.Database) (Database, error) {
 	if db, ok := d.dbDefs[cfg.Driver]; ok {
-		return db.instFunc(cfg)
+		return db.instanate(cfg)
 	}
 
 	return nil, InvalidConfigurationError(fmt.Sprintf("unsupported database type '%s'", cfg.Driver))

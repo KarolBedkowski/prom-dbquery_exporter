@@ -18,10 +18,12 @@ import (
 )
 
 func init() {
-	registerDatabase(dbDefinition{newSqliteLoader, validateSqliteConf}, "sqlite3", "sqlite")
+	registerDatabase(sqliteDef{}, "sqlite3", "sqlite")
 }
 
-func newSqliteLoader(cfg *conf.Database) (Database, error) {
+type sqliteDef struct{}
+
+func (sqliteDef) instanate(cfg *conf.Database) (Database, error) {
 	var (
 		params url.Values
 		dbname string
@@ -63,6 +65,6 @@ func newSqliteLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func validateSqliteConf(cfg *conf.Database) error {
+func (sqliteDef) validateConf(cfg *conf.Database) error {
 	return checkConnectionParam(cfg, "database")
 }

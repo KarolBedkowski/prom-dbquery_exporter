@@ -18,11 +18,13 @@ import (
 )
 
 func init() {
-	registerDatabase(dbDefinition{newPostgresLoader, validatePostgresConf},
+	registerDatabase(postgresqlDef{},
 		"postgresql", "postgres", "cockroach", "cockroachdb")
 }
 
-func newPostgresLoader(cfg *conf.Database) (Database, error) {
+type postgresqlDef struct{}
+
+func (postgresqlDef) instanate(cfg *conf.Database) (Database, error) {
 	var connStr string
 	if val, ok := cfg.Connection["connstr"]; ok && val != "" {
 		connStr, ok = val.(string)
@@ -56,7 +58,7 @@ func newPostgresLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func validatePostgresConf(cfg *conf.Database) error {
+func (postgresqlDef) validateConf(cfg *conf.Database) error {
 	// if connstr is confiured to not check other parameters
 	if checkConnectionParam(cfg, "connstr") == nil {
 		return nil

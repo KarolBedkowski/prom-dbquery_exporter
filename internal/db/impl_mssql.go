@@ -14,10 +14,12 @@ import (
 )
 
 func init() {
-	registerDatabase(dbDefinition{newMssqlLoader, validateMssqlConf}, "mssql")
+	registerDatabase(mssqlDef{}, "mssql")
 }
 
-func newMssqlLoader(cfg *conf.Database) (Database, error) {
+type mssqlDef struct{}
+
+func (mssqlDef) instanate(cfg *conf.Database) (Database, error) {
 	params := valuesFromParams(cfg.Connection)
 	connstr := params.Encode()
 
@@ -31,6 +33,6 @@ func newMssqlLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func validateMssqlConf(cfg *conf.Database) error {
+func (mssqlDef) validateConf(cfg *conf.Database) error {
 	return checkConnectionParam(cfg, "database")
 }

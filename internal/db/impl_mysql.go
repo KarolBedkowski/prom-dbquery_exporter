@@ -16,10 +16,12 @@ import (
 )
 
 func init() {
-	registerDatabase(dbDefinition{newMysqlLoader, validateMysqlConf}, "mssql", "mariadb", "tidb")
+	registerDatabase(mysqlDef{}, "mssql", "mariadb", "tidb")
 }
 
-func newMysqlLoader(cfg *conf.Database) (Database, error) {
+type mysqlDef struct{}
+
+func (m mysqlDef) instanate(cfg *conf.Database) (Database, error) {
 	params := newStandardParams(cfg.Connection)
 
 	// defaults
@@ -31,7 +33,7 @@ func newMysqlLoader(cfg *conf.Database) (Database, error) {
 		params.port = "3306"
 	}
 
-	connstr := buildMysqlConnstr(params)
+	connstr := m.connstr(params)
 	l := &genericDatabase{
 		connStr:    connstr,
 		driver:     "mysql",
@@ -42,7 +44,7 @@ func newMysqlLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func buildMysqlConnstr(params standardParams) string {
+func (mysqlDef) connstr(params standardParams) string {
 	var connstr strings.Builder
 
 	if params.user != "" {
@@ -71,6 +73,6 @@ func buildMysqlConnstr(params standardParams) string {
 	return connstr.String()
 }
 
-func validateMysqlConf(cfg *conf.Database) error {
+func (mysqlDef) validateConf(cfg *conf.Database) error {
 	return checkConnectionParam(cfg, "database")
 }

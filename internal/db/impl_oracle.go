@@ -16,13 +16,15 @@ import (
 )
 
 func init() {
-	registerDatabase(dbDefinition{newOracleLoader, validateOracleConf}, "oracle", "oci8")
+	registerDatabase(oracleDef{}, "oracle", "oci8")
 }
 
-func newOracleLoader(cfg *conf.Database) (Database, error) {
+type oracleDef struct{}
+
+func (o oracleDef) instanate(cfg *conf.Database) (Database, error) {
 	params := newStandardParams(cfg.Connection)
 
-	connstr := buildOracleConnstr(params)
+	connstr := o.connstr(params)
 	l := &genericDatabase{
 		connStr: connstr, driver: "oracle", initialSQL: cfg.InitialQuery,
 		dbCfg: cfg,
@@ -31,11 +33,11 @@ func newOracleLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func validateOracleConf(cfg *conf.Database) error {
+func (oracleDef) validateConf(cfg *conf.Database) error {
 	return checkConnectionParam(cfg, "database", "host")
 }
 
-func buildOracleConnstr(params standardParams) string {
+func (oracleDef) connstr(params standardParams) string {
 	var connstr strings.Builder
 
 	connstr.WriteString("oracle://")
