@@ -63,7 +63,7 @@ func (c *Configuration) GroupQueries(group string) []string {
 }
 
 // LoadConfiguration from filename.
-func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, error) {
+func Load(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
 	conf := &Configuration{}
 
@@ -103,8 +103,8 @@ func LoadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, e
 }
 
 // LoadConfiguration from filename.
-func (c *Configuration) ReloadConfiguration(filename string, dbp DatabaseProvider) (*Configuration, error) {
-	newCfg, err := LoadConfiguration(filename, dbp)
+func (c *Configuration) Reload(filename string, dbp DatabaseProvider) (*Configuration, error) {
+	newCfg, err := Load(filename, dbp)
 	if err != nil {
 		return nil, err
 	}

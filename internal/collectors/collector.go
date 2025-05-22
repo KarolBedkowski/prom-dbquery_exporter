@@ -160,23 +160,13 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 	})
 }
 
-func workerKind(isBg bool) string {
-	if isBg {
-		return "bg"
-	}
-
-	return "std"
-}
-
 // worker get process task from `workQueue` in loop. Exit when there is no new task for `workerShutdownDelay`.
 func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
-	idx := workerID.Add(1)
-	idxstr := strconv.FormatUint(idx, 10)
+	idx, idxstr := generateWorkerID()
 	llog := c.log.With().Bool("bg", isBg).Uint64("worker_id", idx).Logger()
 	ctx = llog.WithContext(ctx)
 
 	workersCreatedCnt.WithLabelValues(c.name, workerKind(isBg)).Inc()
-	debug.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.name, "bg", strconv.FormatBool(isBg))
 	llog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
 
 	// stop worker after 1 second of inactivity
@@ -185,6 +175,8 @@ func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool)
 
 loop:
 	for {
+		debug.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.name, "king", workerKind(isBg))
+
 		// reset worker shutdown timer after each iteration.
 		if !shutdownTimer.Stop() {
 			select {
@@ -203,8 +195,6 @@ loop:
 			if ok {
 				llog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
 				debug.SetGoroutineLabels(ctx, "query", task.QueryName, "worker", idxstr, "db", c.name, "req_id", task.ReqID)
-				tasksQueueWaitTime.WithLabelValues(c.name, workerKind(task.IsScheduledJob)).
-					Observe(time.Since(task.RequestStart).Seconds())
 
 				c.handleTask(ctx, task)
 			}
@@ -218,6 +208,9 @@ loop:
 }
 
 func (c *collector) handleTask(ctx context.Context, task *Task) {
+	tasksQueueWaitTime.WithLabelValues(c.name, workerKind(task.IsScheduledJob)).
+		Observe(time.Since(task.RequestStart).Seconds())
+
 	llog := log.Ctx(ctx).With().Object("task", task).Logger()
 
 	// is task already cancelled?
@@ -236,7 +229,7 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 
 	// get result
 	res := make(chan *TaskResult, 1)
-	go c.queryDatabase(ctx, task, res)
+	go c.query(ctx, task, res)
 
 	// check is task cancelled in meantime
 	select {
@@ -252,8 +245,8 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 	}
 }
 
-// queryDatabase get result from loader.
-func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *TaskResult) {
+// query get result from loader.
+func (c *collector) query(ctx context.Context, task *Task, res chan *TaskResult) {
 	llog := log.Ctx(ctx)
 
 	debug.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
@@ -395,4 +388,19 @@ func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) { //nolint:fu
 		stat.Name,
 		"bg",
 	)
+}
+
+func workerKind(isBg bool) string {
+	if isBg {
+		return "bg"
+	}
+
+	return "std"
+}
+
+func generateWorkerID() (uint64, string) {
+	idx := workerID.Add(1)
+	idxstr := strconv.FormatUint(idx, 10)
+
+	return idx, idxstr
 }

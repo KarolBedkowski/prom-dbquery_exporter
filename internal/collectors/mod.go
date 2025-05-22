@@ -25,8 +25,8 @@ type Collectors struct {
 	newConfCh  chan *conf.Configuration
 }
 
-// NewCollectors create new Databases object.
-func NewCollectors(cfg *conf.Configuration) *Collectors {
+// New create new Collectors object.
+func New(cfg *conf.Configuration) *Collectors {
 	colls := &Collectors{
 		collectors: make(map[string]*collector),
 		cfg:        cfg,

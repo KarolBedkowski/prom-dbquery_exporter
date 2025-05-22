@@ -58,8 +58,8 @@ type (
 	}
 )
 
-// NewCache create  new cache object.
-func NewCache[T any](name string) *Cache[T] {
+// New create  new cache object.
+func New[T any](name string) *Cache[T] {
 	return &Cache[T]{
 		name:   name,
 		cache:  make(map[string]cacheItem[T]),
@@ -125,18 +125,3 @@ func (r *Cache[T]) Content() []string {
 
 	return res
 }
-
-// func (r *Cache) purgeExpired() {
-// 	r.lock.Lock()
-// 	var toDel []string
-// 	now := time.Now()
-// 	for k, v := range r.cache {
-// 		if v.expireTS.Before(now) {
-// 			toDel = append(toDel, k)
-// 		}
-// 	}
-// 	for _, k := range toDel {
-// 		delete(r.cache, k)
-// 	}
-// 	r.lock.Unlock()
-// }

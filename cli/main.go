@@ -75,7 +75,7 @@ func main() {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
-	cfg, err := conf.LoadConfiguration(conf.Args.ConfigFilename, db.GlobalRegistry)
+	cfg, err := conf.Load(conf.Args.ConfigFilename, db.GlobalRegistry)
 	if err != nil || cfg == nil {
 		log.Logger.Fatal().Err(err).Str("file", conf.Args.ConfigFilename).Msg("failed load config file")
 	}
@@ -86,14 +86,14 @@ func main() {
 		log.Logger.Fatal().Err(err).Msg("start failed")
 	}
 
-	log.Logger.Info().Msg("finished.")
+	log.Logger.Log().Msg("finished.")
 }
 
 func start(cfg *conf.Configuration) error {
-	collectors := collectors.NewCollectors(cfg)
-	cache := cache.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, cache, collectors)
-	sched := scheduler.NewScheduler(cache, cfg, collectors)
+	collectors := collectors.New(cfg)
+	cache := cache.New[[]byte]("query_cache")
+	webHandler := server.New(cfg, cache, collectors)
+	sched := scheduler.New(cache, cfg, collectors)
 	runGroup := run.Group{}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -125,7 +125,7 @@ func start(cfg *conf.Configuration) error {
 				log.Debug().Msg("reload configuration started")
 				daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
 
-				if newConf, err := cfg.ReloadConfiguration(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
+				if newConf, err := cfg.Reload(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
 					webHandler.UpdateConf(newConf)
 					sched.UpdateConf(newConf)
 					collectors.UpdateConf(newConf)

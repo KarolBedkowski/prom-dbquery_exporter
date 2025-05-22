@@ -68,7 +68,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	defer conn.Close()
 
 	// prepare query parameters; combine parameters from query and params
-	queryParams := CloneMap(query.Params, params)
+	queryParams := cloneMap(query.Params, params)
 	timeout := g.queryTimeout(query)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
@@ -188,7 +188,7 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 	g.configure(ctx)
 
 	// check is database is working
-	if err := g.pingDatabase(ctx); err != nil {
+	if err := g.ping(ctx); err != nil {
 		_ = g.conn.Close()
 		g.conn = nil
 
@@ -200,7 +200,7 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 	return nil
 }
 
-func (g *genericDatabase) pingDatabase(ctx context.Context) error {
+func (g *genericDatabase) ping(ctx context.Context) error {
 	lctx, cancel := context.WithTimeout(ctx, g.dbCfg.ConnectTimeout)
 	defer cancel()
 
@@ -282,9 +282,9 @@ func loggerFromCtx(ctx context.Context) zerolog.Logger {
 	return log.Logger
 }
 
-// CloneMap create clone of `inp` map and optionally update it with values
+// cloneMap create clone of `inp` map and optionally update it with values
 // from extra maps.
-func CloneMap[K comparable, V any](inp map[K]V, extra ...map[K]V) map[K]V {
+func cloneMap[K comparable, V any](inp map[K]V, extra ...map[K]V) map[K]V {
 	res := make(map[K]V, len(inp)+1)
 	maps.Copy(res, inp)
 

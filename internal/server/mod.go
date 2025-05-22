@@ -40,8 +40,8 @@ type WebHandler struct {
 	cfg         *conf.Configuration
 }
 
-// NewWebHandler create new WebHandler.
-func NewWebHandler(cfg *conf.Configuration, cache *cache.Cache[[]byte],
+// New create new WebHandler.
+func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 	taskQueue TaskQueue,
 ) *WebHandler {
 	qh := newQueryHandler(cfg, cache, taskQueue)
