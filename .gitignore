@@ -8,3 +8,5 @@ tags
 *.crt
 *.log
 tmp/
+# Added by goreleaser init:
+dist/

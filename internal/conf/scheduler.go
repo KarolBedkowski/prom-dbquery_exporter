@@ -18,7 +18,9 @@ import (
 
 // Job is configuration for one scheduler job.
 type Job struct {
-	Query    string
+	// Query name.
+	Query string
+	// Database name
 	Database string
 	Interval time.Duration
 
@@ -42,17 +44,15 @@ func (j *Job) validate(ctx context.Context, cfg *Configuration) error {
 	var errs *multierror.Error
 
 	if j.Database == "" {
-		errs = multierror.Append(errs, MissingFieldError{"database"})
+		errs = multierror.Append(errs, MissingFieldError("database"))
 	} else if _, ok := cfg.Database[j.Database]; !ok {
-		errs = multierror.Append(errs, NewInvalidFieldError("database", j.Database).
-			WithMsg("unknown database"))
+		errs = multierror.Append(errs, NewInvalidFieldError("database", j.Database, "unknown database"))
 	}
 
 	if j.Query == "" {
-		errs = multierror.Append(errs, MissingFieldError{"query"})
+		errs = multierror.Append(errs, MissingFieldError("query"))
 	} else if _, ok := cfg.Query[j.Query]; !ok {
-		errs = multierror.Append(errs, NewInvalidFieldError("query", j.Database).
-			WithMsg("unknown query"))
+		errs = multierror.Append(errs, NewInvalidFieldError("query", j.Database, "unknown query"))
 	}
 
 	err := errs.ErrorOrNil()

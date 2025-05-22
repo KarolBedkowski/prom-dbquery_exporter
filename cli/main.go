@@ -2,11 +2,10 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
+	stdlog "log"
 	"os"
 	"os/signal"
-	"runtime"
 	"syscall"
 	"time"
 
@@ -15,134 +14,106 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	cversion "github.com/prometheus/client_golang/prometheus/collectors/version"
 	"github.com/prometheus/common/version"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/cache"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
 	"prom-dbquery_exporter.app/internal/db"
-	"prom-dbquery_exporter.app/internal/metrics"
 	"prom-dbquery_exporter.app/internal/scheduler"
 	"prom-dbquery_exporter.app/internal/server"
-	"prom-dbquery_exporter.app/internal/support"
+	"prom-dbquery_exporter.app/internal/templates"
 )
 
+const AppName = "dbquery_exporter"
+
 func init() {
-	prometheus.MustRegister(cversion.NewCollector("dbquery_exporter"))
+	prometheus.MustRegister(cversion.NewCollector(AppName))
 }
 
 func printVersion() {
-	fmt.Println(version.Print("DBQuery exporter")) //nolint:forbidigo
+	fmt.Println(version.Print(AppName)) //nolint:forbidigo
 
-	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
-		fmt.Println("NO DATABASES SUPPORTED, check compile flags.") //nolint:forbidigo
+	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
+		fmt.Println("NO DATABASES SUPPORTED, check compilation flags.") //nolint:forbidigo
 	} else {
 		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
 	}
 
-	fmt.Printf("Available template functions: %s\n", support.AvailableTmplFunctions()) //nolint:forbidigo
+	fmt.Printf("Available template functions: %s\n", templates.AvailableTmplFunctions()) //nolint:forbidigo
 }
 
 func printWelcome() {
-	log.Logger.Info().
+	log.Logger.Log().
 		Str("version", version.Info()).
 		Str("build_ctx", version.BuildContext()).
-		Msg("starting DBQuery exporter")
+		Msgf("starting %s", AppName)
 
-	if sdb := db.SupportedDatabases(); len(sdb) == 0 {
-		log.Logger.Fatal().Msg("no databases supported, check compile flags")
+	if sdb := db.GlobalRegistry.List(); len(sdb) == 0 {
+		log.Logger.Fatal().Msg("no databases supported, check compilation flags")
 	} else {
-		log.Logger.Info().Msgf("supported databases: %s", sdb)
+		log.Logger.Log().Msgf("supported databases: %s", sdb)
 	}
 
-	log.Logger.Info().Msgf("available template functions: %s", support.AvailableTmplFunctions())
+	log.Logger.Log().Msgf("available template functions: %s", templates.AvailableTmplFunctions())
 }
 
 // Main is main function for cli.
 func main() {
-	var (
-		showVersion = flag.Bool("version", false, "Print version information.")
-		configFile  = flag.String("config.file", "dbquery.yaml",
-			"Path to configuration file.")
-		listenAddress = flag.String("web.listen-address", ":9122",
-			"Address to listen on for web interface and telemetry.")
-		loglevel = flag.String("log.level", "info",
-			"Logging level (debug, info, warn, error, fatal)")
-		logformat = flag.String("log.format", "logfmt",
-			"Logging log format (logfmt, json).")
-		webConfig = flag.String("web.config", "",
-			"Path to config yaml file that can enable TLS or authentication.")
-		disableCache            = flag.Bool("no-cache", false, "Disable query result caching")
-		enableSchedulerParallel = flag.Bool("parallel-scheduler", false, "Run scheduler ask parallel")
-		validateOutput          = flag.Bool("validate-output", false, "Enable output validation")
-		enableInfo              = flag.Bool("enable-info", false, "Enable /info endpoint")
-	)
+	conf.ParseCliArgs()
 
-	flag.Parse()
-
-	if *showVersion {
+	if conf.Args.ShowVersion {
 		printVersion()
 		os.Exit(0)
 	}
 
-	runtime.GOMAXPROCS(runtime.NumCPU())
-
-	support.InitializeLogger(*loglevel, *logformat)
+	initializeLogger(conf.Args.LogLevel, conf.Args.LogFormat)
 	printWelcome()
+	log.Logger.Debug().Interface("args", conf.Args).Msg("cli arguments")
 
-	if err := enableSDNotify(); err != nil {
+	if err := startSDWatchdog(); err != nil {
 		log.Logger.Warn().Err(err).Msg("initialize systemd error")
 	}
 
-	cfg, err := conf.LoadConfiguration(*configFile)
-	if err != nil {
-		log.Logger.Fatal().Err(err).Str("file", *configFile).Msg("load config file error")
+	cfg, err := conf.Load(conf.Args.ConfigFilename, db.GlobalRegistry)
+	if err != nil || cfg == nil {
+		log.Logger.Fatal().Err(err).Str("file", conf.Args.ConfigFilename).Msg("failed load config file")
 	}
 
-	if cfg == nil {
-		panic("create configuration error")
+	log.Logger.Debug().Interface("conf", cfg).Msg("configuration loaded")
+
+	if err := start(cfg); err != nil {
+		log.Logger.Fatal().Err(err).Msg("start failed")
 	}
 
-	cfg.SetCliOptions(disableCache, enableSchedulerParallel, validateOutput, enableInfo)
-
-	log.Logger.Debug().Interface("configuration", cfg).Msg("configuration loaded")
-	metrics.UpdateConf()
-
-	if err := start(cfg, *listenAddress, *webConfig); err != nil {
-		log.Logger.Fatal().Err(err).Msg("Start failed")
-		os.Exit(1)
-	}
-
-	log.Logger.Info().Msg("finished..")
+	log.Logger.Log().Msg("finished.")
 }
 
-func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
-	collectors, taskQueue := collectors.NewCollectors(cfg)
-	defer close(taskQueue)
-
-	cache := support.NewCache[[]byte]("query_cache")
-	webHandler := server.NewWebHandler(cfg, listenAddress, webConfig, cache, taskQueue)
-	sched := scheduler.NewScheduler(cache, cfg, taskQueue)
+func start(cfg *conf.Configuration) error {
+	collectors := collectors.New(cfg)
+	cache := cache.New[[]byte]("query_cache")
+	webHandler := server.New(cfg, cache, collectors)
+	sched := scheduler.New(cache, cfg, collectors)
 	runGroup := run.Group{}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	// Collectors
 	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
 	runGroup.Add(webHandler.Run, webHandler.Stop)
+	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, sched.Close)
 
 	// Termination handler.
-	term := make(chan os.Signal, 1)
-	signal.Notify(term, os.Interrupt, syscall.SIGTERM)
 	runGroup.Add(
 		func() error {
-			<-term
+			<-ctx.Done()
+			log.Logger.Warn().Msg("received SIGTERM, exiting...")
 			cancel()
-			log.Logger.Warn().Msg("Received SIGTERM, exiting...")
 			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
 
 			return nil
 		},
-		func(_ error) { close(term) },
+		func(_ error) {},
 	)
 
 	// Reload handler.
@@ -151,18 +122,19 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 	runGroup.Add(
 		func() error {
 			for range hup {
-				log.Info().Msg("reloading configuration")
+				log.Debug().Msg("reload configuration started")
+				daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
 
-				if newConf, err := conf.LoadConfiguration(cfg.ConfigFilename); err == nil {
-					newConf.CopyRuntimeOptions(cfg)
+				if newConf, err := cfg.Reload(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
 					webHandler.UpdateConf(newConf)
 					sched.UpdateConf(newConf)
 					collectors.UpdateConf(newConf)
-					metrics.UpdateConf()
-					log.Info().Interface("configuration", newConf).Msg("configuration reloaded")
+					log.Info().Interface("conf", newConf).Msg("configuration reloaded")
 				} else {
 					log.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
 				}
+
+				daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 			}
 
 			return nil
@@ -170,19 +142,13 @@ func start(cfg *conf.Configuration, listenAddress, webConfig string) error {
 		func(_ error) { close(hup) },
 	)
 
-	if cfg.ParallelScheduler {
-		runGroup.Add(func() error { return sched.RunParallel(ctx) }, sched.Close)
-	} else {
-		runGroup.Add(func() error { return sched.Run(ctx) }, sched.Close)
-	}
-
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
-	daemon.SdNotify(false, "STATUS=ready")       //nolint:errcheck
+	log.Logger.Log().Msgf("%s READY!", AppName)
 
 	return runGroup.Run() //nolint:wrapcheck
 }
 
-func enableSDNotify() error {
+func startSDWatchdog() error {
 	ok, err := daemon.SdNotify(false, "STATUS=starting")
 	if err != nil {
 		return fmt.Errorf("send sd status error: %w", err)
@@ -208,9 +174,49 @@ func enableSDNotify() error {
 	go func() {
 		tick := time.Tick(interval)
 		for range tick {
-			_, _ = daemon.SdNotify(false, daemon.SdNotifyWatchdog)
+			daemon.SdNotify(false, daemon.SdNotifyWatchdog) //nolint:errcheck
 		}
 	}()
 
+	log.Logger.Info().Err(err).Msg("systemd watchdog enabled")
+
 	return nil
+}
+
+// InitializeLogger set log level and optional log filename.
+func initializeLogger(level string, format string) {
+	var llog zerolog.Logger
+
+	switch format {
+	default:
+		log.Error().Msg("logger: unknown log format; using logfmt")
+
+		fallthrough
+	case "logfmt":
+		llog = log.Output(zerolog.ConsoleWriter{
+			Out:        os.Stderr,
+			NoColor:    !outputIsConsole(),
+			TimeFormat: time.RFC3339,
+		})
+	case "json":
+		llog = log.Logger
+	}
+
+	if l, err := zerolog.ParseLevel(level); err == nil {
+		zerolog.SetGlobalLevel(l)
+	} else {
+		log.Error().Msgf("logger: unknown log level '%s'; using debug", level)
+		zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	}
+
+	log.Logger = llog.With().Caller().Logger()
+
+	stdlog.SetFlags(0)
+	stdlog.SetOutput(log.Logger)
+}
+
+func outputIsConsole() bool {
+	fileInfo, _ := os.Stdout.Stat()
+
+	return fileInfo != nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
 }

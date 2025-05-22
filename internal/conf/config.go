@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog"
@@ -20,17 +21,10 @@ type Configuration struct {
 	Database map[string]*Database
 	// Queries
 	Query map[string]*Query
-	Jobs  []*Job
+	// background jobs configuration
+	Jobs []*Job
 	// Global application settings
 	Global GlobalConf
-
-	// Runtime configuration
-
-	ConfigFilename    string `yaml:"-"`
-	DisableCache      bool   `yaml:"-"`
-	ParallelScheduler bool   `yaml:"-"`
-	ValidateOutput    bool   `yaml:"-"`
-	EnableInfo        bool   `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
@@ -53,26 +47,15 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	}
 
 	event.Dict("query", qd)
-
-	event.Dict("cli", zerolog.Dict().
-		Str("config_filename", c.ConfigFilename).
-		Bool("disable_cache", c.DisableCache).
-		Bool("parallel_scheduler", c.ParallelScheduler).
-		Bool("validate_output", c.ValidateOutput).
-		Bool("enable_info", c.EnableInfo))
 }
 
 // GroupQueries return queries that belong to given group.
 func (c *Configuration) GroupQueries(group string) []string {
 	var queries []string
-outerloop:
-	for name, q := range c.Query {
-		for _, gr := range q.Groups {
-			if gr == group {
-				queries = append(queries, name)
 
-				continue outerloop
-			}
+	for name, q := range c.Query {
+		if slices.Contains(q.Groups, group) {
+			queries = append(queries, name)
 		}
 	}
 
@@ -80,11 +63,9 @@ outerloop:
 }
 
 // LoadConfiguration from filename.
-func LoadConfiguration(filename string) (*Configuration, error) {
+func Load(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
-	conf := &Configuration{
-		ConfigFilename: filename,
-	}
+	conf := &Configuration{}
 
 	logger.Info().Msgf("Loading config file %s", filename)
 
@@ -112,36 +93,23 @@ func LoadConfiguration(filename string) (*Configuration, error) {
 	}
 
 	ctx := logger.WithContext(context.Background())
-	if err = conf.validate(ctx); err != nil {
+	if err = conf.validate(ctx, dbp); err != nil {
 		return nil, newConfigurationError("validate error").Wrap(err)
 	}
+
+	configReloadTime.SetToCurrentTime()
 
 	return conf, nil
 }
 
-func (c *Configuration) CopyRuntimeOptions(oldcfg *Configuration) {
-	c.DisableCache = oldcfg.DisableCache
-	c.ParallelScheduler = oldcfg.ParallelScheduler
-	c.ValidateOutput = oldcfg.ValidateOutput
-	c.EnableInfo = oldcfg.EnableInfo
-}
-
-func (c *Configuration) SetCliOptions(disableCache, parallelScheduler, validateOutput, enableInfo *bool) {
-	if disableCache != nil {
-		c.DisableCache = *disableCache
+// LoadConfiguration from filename.
+func (c *Configuration) Reload(filename string, dbp DatabaseProvider) (*Configuration, error) {
+	newCfg, err := Load(filename, dbp)
+	if err != nil {
+		return nil, err
 	}
 
-	if parallelScheduler != nil {
-		c.ParallelScheduler = *parallelScheduler
-	}
-
-	if validateOutput != nil {
-		c.ValidateOutput = *validateOutput
-	}
-
-	if enableInfo != nil {
-		c.EnableInfo = *enableInfo
-	}
+	return newCfg, nil
 }
 
 func (c *Configuration) validateJobs(ctx context.Context) error {
@@ -168,12 +136,13 @@ func (c *Configuration) validateJobs(ctx context.Context) error {
 	return errs.ErrorOrNil()
 }
 
-func (c *Configuration) validate(ctx context.Context) error {
-	var errs *multierror.Error
+type DatabaseProvider interface {
+	Validate(d *Database) error
+	IsSupported(d *Database) bool
+}
 
-	if len(c.Database) == 0 {
-		errs = multierror.Append(errs, newConfigurationError("no database configured"))
-	}
+func (c *Configuration) validate(ctx context.Context, dbp DatabaseProvider) error {
+	var errs *multierror.Error
 
 	if err := c.Global.validate(); err != nil {
 		errs = multierror.Append(errs, newConfigurationError("validate global settings error").Wrap(err))
@@ -190,14 +159,37 @@ func (c *Configuration) validate(ctx context.Context) error {
 		}
 	}
 
+	errs = multierror.Append(errs, c.validateDatabases(ctx, dbp), c.validateJobs(ctx))
+
+	return errs.ErrorOrNil()
+}
+
+func (c *Configuration) validateDatabases(ctx context.Context, dbp DatabaseProvider) error {
+	if len(c.Database) == 0 {
+		return newConfigurationError("no database configured")
+	}
+
+	var (
+		errs            *multierror.Error
+		anyDbConfigured bool
+	)
+
 	for name, db := range c.Database {
-		if err := db.validate(); err != nil {
-			errs = multierror.Append(errs, newConfigurationError(
-				fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
+		if dbp.IsSupported(db) {
+			if err := db.validate(dbp); err != nil {
+				errs = multierror.Append(errs, newConfigurationError(
+					fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
+			} else {
+				anyDbConfigured = true
+			}
+		} else {
+			log.Ctx(ctx).Error().Str("database", name).Msgf("database %s is not supported", db.Driver)
 		}
 	}
 
-	errs = multierror.Append(errs, c.validateJobs(ctx))
+	if !anyDbConfigured {
+		errs = multierror.Append(errs, newConfigurationError("all databases have invalid configuration"))
+	}
 
 	return errs.ErrorOrNil()
 }

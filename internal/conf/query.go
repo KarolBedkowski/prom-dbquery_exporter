@@ -7,7 +7,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
-	"prom-dbquery_exporter.app/internal/support"
+	"prom-dbquery_exporter.app/internal/templates"
 )
 
 //
@@ -56,33 +56,32 @@ func (q *Query) MarshalZerologObject(e *zerolog.Event) {
 
 func (q *Query) setup(name string) {
 	q.Name = name
+	q.SQL = strings.TrimSpace(q.SQL)
+	q.Metrics = strings.TrimSpace(q.Metrics)
+	q.OnError = strings.TrimSpace(q.OnError)
 }
 
 func (q *Query) validate() error {
 	if q.SQL == "" {
-		return MissingFieldError{"sql"}
+		return MissingFieldError("sql")
 	}
 
-	q.SQL = strings.TrimSpace(q.SQL)
-
-	m := strings.TrimSpace(q.Metrics)
-	if m == "" {
-		return MissingFieldError{"metrics template"}
+	if q.Metrics == "" {
+		return MissingFieldError("metrics template")
 	}
 
-	tmpl, err := support.TemplateCompile(q.Name, m+"\n")
+	tmpl, err := templates.TemplateCompile(q.Name, q.Metrics+"\n")
 	if err != nil {
-		return NewInvalidFieldError("metrics template", "").WithMsg(err.Error())
+		return NewInvalidFieldError("metrics template", "", err.Error())
 	}
 
 	q.MetricTpl = tmpl
 
 	// parse template for error response (if configured)
-	merr := strings.TrimSpace(q.OnError)
-	if merr != "" {
-		tmpl, err := support.TemplateCompile(q.Name, merr+"\n")
+	if q.OnError != "" {
+		tmpl, err := templates.TemplateCompile(q.Name, q.OnError+"\n")
 		if err != nil {
-			return NewInvalidFieldError("on error template", "").WithMsg(err.Error())
+			return NewInvalidFieldError("on error template", "", err.Error())
 		}
 
 		q.OnErrorTpl = tmpl

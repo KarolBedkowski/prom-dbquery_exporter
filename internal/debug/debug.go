@@ -8,7 +8,7 @@
 // Distributed under terms of the GPLv3 license.
 //
 
-package support
+package debug
 
 import (
 	"context"

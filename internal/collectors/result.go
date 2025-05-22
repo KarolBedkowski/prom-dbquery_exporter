@@ -38,9 +38,6 @@ type resultTmplData struct {
 func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 	db *conf.Database,
 ) ([]byte, error) {
-	llog := log.Ctx(ctx)
-	llog.Debug().Msg("format result")
-
 	res := resultTmplData{
 		Query:          query.Name,
 		Database:       db.Name,
@@ -51,6 +48,8 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 		QueryDuration:  qRes.Duration,
 		Count:          len(qRes.Records),
 	}
+
+	log.Ctx(ctx).Debug().Interface("res", res).Msg("result: executing template")
 
 	var output bytes.Buffer
 
@@ -64,9 +63,6 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 func formatError(ctx context.Context, err error, query *conf.Query,
 	db *conf.Database,
 ) ([]byte, error) {
-	llog := log.Ctx(ctx)
-	llog.Debug().Object("query", query).Msg("format result on error")
-
 	res := resultTmplData{
 		Query:    query.Name,
 		Database: db.Name,
@@ -74,10 +70,12 @@ func formatError(ctx context.Context, err error, query *conf.Query,
 		Error:    err.Error(),
 	}
 
+	log.Ctx(ctx).Debug().Object("query", query).Interface("res", res).Msg("result: executing on_error template")
+
 	var output bytes.Buffer
 
 	if err := query.OnErrorTpl.Execute(&output, &res); err != nil {
-		return nil, fmt.Errorf("execute template error: %w", err)
+		return nil, fmt.Errorf("execute on_error template error: %w", err)
 	}
 
 	return output.Bytes(), nil

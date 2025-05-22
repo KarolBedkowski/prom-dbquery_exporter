@@ -17,9 +17,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/cache"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 const (
@@ -28,37 +28,38 @@ const (
 	defaultShutdownTimeout = time.Duration(2) * time.Second
 )
 
-// WebHandler handle incoming requests.
-type WebHandler struct {
-	handler       *queryHandler
-	infoHandler   *infoHandler
-	server        *http.Server
-	cfg           *conf.Configuration
-	listenAddress string
-	webConfig     string
+type TaskQueue interface {
+	AddTask(ctx context.Context, task *collectors.Task)
 }
 
-// NewWebHandler create new WebHandler.
-func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig string, cache *support.Cache[[]byte],
-	taskQueue chan<- *collectors.Task,
+// WebHandler handle incoming requests.
+type WebHandler struct {
+	handler     *queryHandler
+	infoHandler *infoHandler
+	server      *http.Server
+	cfg         *conf.Configuration
+}
+
+// New create new WebHandler.
+func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
+	taskQueue TaskQueue,
 ) *WebHandler {
 	qh := newQueryHandler(cfg, cache, taskQueue)
 	http.Handle("/query", qh.Handler())
 
 	ih := newInfoHandler(cfg)
-	if cfg.EnableInfo {
+	if conf.Args.EnableInfo {
 		http.Handle("/info", ih.Handler())
 	}
 
 	webHandler := &WebHandler{
-		handler:       qh,
-		infoHandler:   ih,
-		listenAddress: listenAddress,
-		webConfig:     webConfig,
-		cfg:           cfg,
+		handler:     qh,
+		infoHandler: ih,
+		cfg:         cfg,
 	}
 
-	local := strings.HasPrefix(listenAddress, "127.0.0.1:") || strings.HasPrefix(listenAddress, "localhost:")
+	local := strings.HasPrefix(conf.Args.ListenAddress, "127.0.0.1:") ||
+		strings.HasPrefix(conf.Args.ListenAddress, "localhost:")
 
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
@@ -79,7 +80,7 @@ func NewWebHandler(cfg *conf.Configuration, listenAddress string, webConfig stri
 
 // Run webhandler.
 func (w *WebHandler) Run() error {
-	log.Logger.Info().Msgf("webhandler: listening on %s", w.listenAddress)
+	log.Logger.Info().Msgf("webhandler: listening on %s", conf.Args.ListenAddress)
 
 	rwTimeout := defaultRwTimeout
 	if w.cfg.Global.RequestTimeout > 0 {
@@ -87,13 +88,13 @@ func (w *WebHandler) Run() error {
 	}
 
 	w.server = &http.Server{
-		Addr:           w.listenAddress,
+		Addr:           conf.Args.ListenAddress,
 		ReadTimeout:    rwTimeout,
 		WriteTimeout:   rwTimeout,
 		MaxHeaderBytes: defaultMaxHeaderBytes,
 	}
 
-	if err := listenAndServe(w.server, w.webConfig); err != nil {
+	if err := listenAndServe(w.server, conf.Args.WebConfig); err != nil {
 		return fmt.Errorf("listen and serve failed: %w", err)
 	}
 
@@ -115,5 +116,5 @@ func (w *WebHandler) Stop(err error) {
 // UpdateConf reload configuration in all handlers.
 func (w *WebHandler) UpdateConf(newConf *conf.Configuration) {
 	w.handler.UpdateConf(newConf)
-	w.infoHandler.Configuration = newConf
+	w.infoHandler.cfg = newConf
 }

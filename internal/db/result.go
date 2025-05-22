@@ -44,7 +44,7 @@ func newRecord(rows *sqlx.Rows) (Record, error) {
 	return rec, nil
 }
 
-func createRecords(rows *sqlx.Rows) ([]Record, error) {
+func recordsFromRows(rows *sqlx.Rows) ([]Record, error) {
 	var records []Record
 
 	for rows.Next() {

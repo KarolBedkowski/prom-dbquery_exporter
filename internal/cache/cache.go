@@ -1,4 +1,4 @@
-package support
+package cache
 
 //
 // cache.go
@@ -12,18 +12,44 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
+var (
+	queryCacheHits = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "cache_hit_total",
+			Help:      "Number of data loaded from cache",
+		},
+		[]string{"name"},
+	)
+
+	queryCacheMiss = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "cache_miss_total",
+			Help:      "Number of data not found in cache",
+		},
+		[]string{"name"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(queryCacheHits)
+	prometheus.MustRegister(queryCacheMiss)
+}
+
 type (
 	// Cache with per item expire time.
 	Cache[T any] struct {
-		cache     map[string]cacheItem[T]
-		name      string
-		cacheLock sync.Mutex
-		logger    zerolog.Logger
+		cache  map[string]cacheItem[T]
+		name   string
+		lock   sync.Mutex
+		logger zerolog.Logger
 	}
 
 	cacheItem[T any] struct {
@@ -32,8 +58,8 @@ type (
 	}
 )
 
-// NewCache create  new cache object.
-func NewCache[T any](name string) *Cache[T] {
+// New create  new cache object.
+func New[T any](name string) *Cache[T] {
 	return &Cache[T]{
 		name:   name,
 		cache:  make(map[string]cacheItem[T]),
@@ -43,34 +69,34 @@ func NewCache[T any](name string) *Cache[T] {
 
 // Get key from cache if exists and not expired.
 func (r *Cache[T]) Get(key string) (T, bool) {
-	r.cacheLock.Lock()
-	defer r.cacheLock.Unlock()
-
 	r.logger.Debug().Msgf("get from cache: key=%s", key)
+
+	r.lock.Lock()
+	defer r.lock.Unlock()
 
 	item, ok := r.cache[key]
 	if !ok {
-		metrics.IncQueryCacheMiss(r.name)
+		queryCacheMiss.WithLabelValues(r.name).Inc()
 
 		return *new(T), false
 	}
 
 	if item.expireTS.After(time.Now()) {
-		metrics.IncQueryCacheHits(r.name)
+		queryCacheHits.WithLabelValues(r.name).Inc()
 
 		return item.content, true
 	}
 
 	delete(r.cache, key)
-	metrics.IncQueryCacheMiss(r.name)
+	queryCacheMiss.WithLabelValues(r.name).Inc()
 
 	return *new(T), false
 }
 
 // Put data into cache.
 func (r *Cache[T]) Put(key string, ttl time.Duration, data T) {
-	r.cacheLock.Lock()
-	defer r.cacheLock.Unlock()
+	r.lock.Lock()
+	defer r.lock.Unlock()
 
 	r.logger.Debug().Msgf("put into cache: key=%s; ttl=%s", key, ttl)
 	r.cache[key] = cacheItem[T]{
@@ -81,16 +107,16 @@ func (r *Cache[T]) Put(key string, ttl time.Duration, data T) {
 
 // Clear whole cache.
 func (r *Cache[T]) Clear() {
-	r.cacheLock.Lock()
-	defer r.cacheLock.Unlock()
+	r.lock.Lock()
+	defer r.lock.Unlock()
 
 	r.logger.Debug().Msg("clear cache")
 	clear(r.cache)
 }
 
 func (r *Cache[T]) Content() []string {
-	r.cacheLock.Lock()
-	defer r.cacheLock.Unlock()
+	r.lock.Lock()
+	defer r.lock.Unlock()
 
 	res := make([]string, 0, len(r.cache))
 	for k, v := range r.cache {
@@ -99,18 +125,3 @@ func (r *Cache[T]) Content() []string {
 
 	return res
 }
-
-// func (r *Cache) purgeExpired() {
-// 	r.cacheLock.Lock()
-// 	var toDel []string
-// 	now := time.Now()
-// 	for k, v := range r.cache {
-// 		if v.expireTS.Before(now) {
-// 			toDel = append(toDel, k)
-// 		}
-// 	}
-// 	for _, k := range toDel {
-// 		delete(r.cache, k)
-// 	}
-// 	r.cacheLock.Unlock()
-// }

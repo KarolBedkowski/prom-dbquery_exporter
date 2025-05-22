@@ -11,22 +11,20 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"maps"
 	"net/http"
-	"slices"
 	"sync"
 	"time"
 
-	"github.com/hashicorp/go-multierror"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/expfmt"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
+	"prom-dbquery_exporter.app/internal/cache"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/debug"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
 
 const maxLockTime = time.Duration(20) * time.Minute
@@ -75,65 +73,71 @@ func (l *locker) unlock(queryKey string) {
 
 // queryHandler handle all request for metrics.
 type queryHandler struct {
-	configuration    *conf.Configuration
-	queryResultCache *support.Cache[[]byte]
-	// queryLocker protect from running the same request twice
-	queryLocker locker
-	taskQueue   chan<- *collectors.Task
+	cfg         *conf.Configuration
+	resultCache *cache.Cache[[]byte]
+	// locker protect from running the same request twice
+	locker    locker
+	taskQueue TaskQueue
 }
 
-func newQueryHandler(c *conf.Configuration, cache *support.Cache[[]byte],
-	taskQueue chan<- *collectors.Task,
-) *queryHandler {
+func newQueryHandler(c *conf.Configuration, cache *cache.Cache[[]byte], taskQueue TaskQueue) *queryHandler {
 	return &queryHandler{
-		configuration:    c,
-		queryLocker:      newLocker(),
-		queryResultCache: cache,
-		taskQueue:        taskQueue,
+		cfg:         c,
+		locker:      newLocker(),
+		resultCache: cache,
+		taskQueue:   taskQueue,
 	}
 }
 
 func (q *queryHandler) Handler() http.Handler {
-	h := newLogMiddleware(promhttp.InstrumentHandlerDuration(metrics.NewReqDurationWrapper("query"), q), "query", false)
-	h = support.NewTraceMiddleware("dbquery_exporter")(h)
-	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
-	h = hlog.NewHandler(log.Logger)(h)
+	var handler http.Handler = q
+	// 5. log request traces
+	handler = debug.NewTraceMiddleware("dbquery_exporter")(handler)
+	// 4. update logger, log req, response
+	handler = newLogMiddleware(handler, "query", false)
+	// 3. add logger to ctx
+	handler = hlog.NewHandler(log.Logger)(handler)
+	// 2. set request_handler
+	handler = hlog.RequestIDHandler("req_id", "X-Request-Id")(handler)
+	// 1. metrics
+	handler = promhttp.InstrumentHandlerInFlight(newReqInflightWrapper("query"), handler)
+	handler = promhttp.InstrumentHandlerDuration(newReqDurationWrapper("query"), handler)
 
-	return h
+	return handler
 }
 
 // SetConfiguration update handler configuration.
 func (q *queryHandler) UpdateConf(c *conf.Configuration) {
-	q.configuration = c
+	q.cfg = c
 
-	q.queryResultCache.Clear()
+	q.resultCache.Clear()
 }
 
 func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
-	ctx, cancel := context.WithTimeout(req.Context(), q.configuration.Global.RequestTimeout)
+	ctx, cancel := context.WithTimeout(req.Context(), q.cfg.Global.RequestTimeout)
 	defer cancel()
 
-	logger := log.Ctx(ctx)
 	requestID, _ := hlog.IDFromCtx(ctx)
+	logger := log.Ctx(ctx)
 
-	support.SetGoroutineLabels(ctx, "req_id", requestID.String(), "req", req.URL.String())
+	debug.SetGoroutineLabels(ctx, "req_id", requestID.String(), "req", req.URL.String())
 
 	// prevent to run the same request twice
-	if locker, ok := q.queryLocker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
+	if locker, ok := q.locker.tryLock(req.URL.RawQuery, requestID.String()); !ok {
 		logger.Warn().Msgf("query already in progress, started by %s", locker)
 		http.Error(writer, "query in progress", http.StatusInternalServerError)
-		support.TraceErrorf(ctx, "query locked by %s", locker)
+		debug.TraceErrorf(ctx, "query locked by %s", locker)
 
 		return
 	}
 
-	defer q.queryLocker.unlock(req.URL.RawQuery)
+	defer q.locker.unlock(req.URL.RawQuery)
 
-	parameters, err := q.parseRequestParameters(req)
+	parameters, err := newRequestParams(req, q.cfg)
 	if err != nil {
 		logger.Info().Err(err).Msg("parse request parameters error")
 		http.Error(writer, "invalid parameters", http.StatusBadRequest)
-		support.TraceErrorf(ctx, "bad request")
+		debug.TraceErrorf(ctx, "bad request")
 
 		return
 	}
@@ -147,10 +151,12 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	cancelCh := make(chan struct{}, 1)
 	defer close(cancelCh)
 
-	support.TracePrintf(ctx, "start querying db")
-	output := q.queryDatabases(ctx, parameters, &dWriter, cancelCh)
+	debug.TracePrintf(ctx, "start querying db")
 
-	support.TracePrintf(ctx, "start reading data, scheduled: %d", dWriter.scheduled)
+	output := q.queryDatabases(ctx, parameters, &dWriter, cancelCh)
+	defer close(output)
+
+	debug.TracePrintf(ctx, "start reading data, scheduled: %d", dWriter.scheduled)
 	q.writeResult(ctx, &dWriter, output)
 
 	logger.Debug().Int("written", dWriter.written).
@@ -158,36 +164,36 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		Msg("queryhandler: all database queries finished")
 
 	if dWriter.written == 0 {
-		metrics.IncProcessErrorsCnt("bad_requests")
+		metrics.IncProcessErrorsCnt(metrics.ProcessBadRequestError)
 		http.Error(writer, "error", http.StatusBadRequest)
 	}
 }
 
 func (q *queryHandler) getFromCache(query *conf.Query, dbName string, params map[string]any) ([]byte, bool) {
-	if q.configuration.DisableCache || len(params) > 0 || query.CachingTime == 0 {
+	if conf.Args.DisableCache || len(params) > 0 || query.CachingTime == 0 {
 		return nil, false
 	}
 
 	queryKey := query.Name + "@" + dbName
 
-	return q.queryResultCache.Get(queryKey)
+	return q.resultCache.Get(queryKey)
 }
 
 func (q *queryHandler) putIntoCache(task *collectors.Task, data []byte) {
 	query := task.Query
 
 	// do not cache query with user params
-	if q.configuration.DisableCache || query == nil || len(task.Params) > 0 || query.CachingTime == 0 {
+	if conf.Args.DisableCache || query == nil || len(task.Params) > 0 || query.CachingTime == 0 {
 		return
 	}
 
 	queryKey := query.Name + "@" + task.DBName
 
-	q.queryResultCache.Put(queryKey, query.CachingTime, data)
+	q.resultCache.Put(queryKey, query.CachingTime, data)
 }
 
 func (q *queryHandler) validateOutput(output []byte) error {
-	if q.configuration.ValidateOutput {
+	if conf.Args.ValidateOutput {
 		var parser expfmt.TextParser
 		if _, err := parser.TextToMetricFamilies(bytes.NewReader(output)); err != nil {
 			return fmt.Errorf("validate result error: %w", err)
@@ -208,11 +214,11 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 	reqID, _ := hlog.IDFromCtx(ctx)
 
 	for dbName, query := range parameters.iter() {
-		metrics.IncQueryTotalCnt(query.Name, dbName)
+		queryTotalCnt.WithLabelValues(query.Name, dbName).Inc()
 
 		if data, ok := q.getFromCache(query, dbName, parameters.extraParameters); ok {
 			logger.Debug().Str("dbname", dbName).Str("query", query.Name).Msg("queryhandler: query result from cache")
-			support.TracePrintf(ctx, "data from cache for %q from %q", query.Name, dbName)
+			debug.TracePrintf(ctx, "data from cache for %q from %q", query.Name, dbName)
 			dWriter.write(ctx, data)
 
 			continue
@@ -230,9 +236,8 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 		}
 
 		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
-		q.taskQueue <- task
-
-		support.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
+		q.taskQueue.AddTask(ctx, task)
+		debug.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
 		dWriter.incScheduled()
 	}
 
@@ -255,19 +260,19 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 			task := res.Task
 
 			if res.Error != nil {
-				logger.Error().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
-				support.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
-				dWriter.writeError(ctx, "# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error")
+				logger.Warn().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
+				debug.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
+				dWriter.write(ctx, []byte("# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error\n"))
 
 				continue
 			}
 
 			logger.Debug().Object("res", res).Msg("queryhandler: write result")
-			support.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
+			debug.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
 
 			if err := q.validateOutput(res.Result); err != nil {
-				logger.Error().Err(err).Object("task", task).Msg("queryhandler: validate output error")
-				support.TracePrintf(ctx, "validate result of query %q from %q: %v", task.QueryName, task.DBName, err)
+				logger.Warn().Err(err).Object("task", task).Msg("queryhandler: validate output error")
+				debug.TracePrintf(ctx, "validate result of query %q from %q: %v", task.QueryName, task.DBName, err)
 
 				continue
 			}
@@ -277,78 +282,11 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 
 		case <-ctx.Done():
 			err := ctx.Err()
-			logger.Error().Err(err).Msg("queryhandler: context cancelled")
-			metrics.IncProcessErrorsCnt("cancel")
-			support.TraceErrorf(ctx, "result error: %s", err)
+			logger.Warn().Err(err).Msg("queryhandler: context cancelled")
+			metrics.IncProcessErrorsCnt(metrics.ProcessCancelError)
+			debug.TraceErrorf(ctx, "result error: %s", err)
 
 			return
 		}
 	}
-}
-
-func (q *queryHandler) parseRequestParameters(req *http.Request) (*requestParameters, error) {
-	var errs *multierror.Error
-
-	dbNames := deduplicateStringList(req.URL.Query()["database"])
-	if len(dbNames) == 0 {
-		errs = multierror.Append(errs, InvalidRequestParameterError("missing database parameter"))
-	}
-
-	queryNames := req.URL.Query()["query"]
-
-	for _, g := range req.URL.Query()["group"] {
-		q := q.configuration.GroupQueries(g)
-		if len(q) > 0 {
-			queryNames = append(queryNames, q...)
-		} else {
-			errs = multierror.Append(errs, InvalidRequestParameterError("unknown group "+g))
-		}
-	}
-
-	queryNames = deduplicateStringList(queryNames)
-	if len(queryNames) == 0 {
-		errs = multierror.Append(errs, InvalidRequestParameterError("missing query or group parameter"))
-	}
-
-	reqParams := &requestParameters{dbNames, queryNames, paramsFromQuery(req), nil}
-
-	for _, name := range queryNames {
-		if query, ok := q.configuration.Query[name]; ok {
-			reqParams.queries = append(reqParams.queries, query)
-		} else {
-			errs = multierror.Append(errs, InvalidRequestParameterError("unknown query "+name))
-		}
-	}
-
-	if len(reqParams.queries) == 0 {
-		errs = multierror.Append(errs, InvalidRequestParameterError("no valid query given"))
-	}
-
-	return reqParams, errs.ErrorOrNil()
-}
-
-func paramsFromQuery(req *http.Request) map[string]any {
-	params := make(map[string]any)
-
-	for k, v := range req.URL.Query() {
-		// standard parameters
-		if k != "query" && k != "group" && k != "database" && len(v) > 0 {
-			params[k] = v[0]
-		}
-	}
-
-	return params
-}
-
-func deduplicateStringList(inp []string) []string {
-	if len(inp) <= 1 {
-		return inp
-	}
-
-	tmpMap := make(map[string]bool, len(inp))
-	for _, s := range inp {
-		tmpMap[s] = true
-	}
-
-	return slices.Collect(maps.Keys(tmpMap))
 }

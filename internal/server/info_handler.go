@@ -17,7 +17,6 @@ import (
 	"github.com/rs/zerolog/hlog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 const infoTmpl = `
@@ -73,29 +72,27 @@ var funcMap = template.FuncMap{
 
 // infoHandler handle request and return information about current configuration.
 type infoHandler struct {
-	Configuration *conf.Configuration
-
+	cfg  *conf.Configuration
 	tmpl *template.Template
 }
 
 // newInfoHandler create new info handler with logging and instrumentation.
-func newInfoHandler(conf *conf.Configuration) *infoHandler {
+func newInfoHandler(cfg *conf.Configuration) *infoHandler {
 	return &infoHandler{
-		Configuration: conf,
-		tmpl:          template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl)),
+		cfg:  cfg,
+		tmpl: template.Must(template.New("info").Funcs(funcMap).Parse(infoTmpl)),
 	}
 }
 
 func (q *infoHandler) Handler() http.Handler {
-	h := newLogMiddleware(
-		promhttp.InstrumentHandlerDuration(
-			metrics.NewReqDurationWrapper("info"),
-			q), "info", false)
+	var handler http.Handler = q
 
-	h = hlog.RequestIDHandler("req_id", "X-Request-Id")(h)
-	h = hlog.NewHandler(log.Logger)(h)
+	handler = newLogMiddleware(handler, "info", false)
+	handler = hlog.RequestIDHandler("req_id", "X-Request-Id")(handler)
+	handler = hlog.NewHandler(log.Logger)(handler)
+	handler = promhttp.InstrumentHandlerDuration(newReqDurationWrapper("info"), handler)
 
-	return h
+	return handler
 }
 
 func (q *infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -107,7 +104,7 @@ func (q *infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
-	if err := q.tmpl.Execute(w, q.Configuration); err != nil {
+	if err := q.tmpl.Execute(w, q.cfg); err != nil {
 		log.Logger.Error().Err(err).Msg("infohandler: executing template error")
 	}
 }

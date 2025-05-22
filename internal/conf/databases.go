@@ -8,7 +8,7 @@
 package conf
 
 import (
-	"strings"
+	"fmt"
 	"time"
 
 	"github.com/hashicorp/go-multierror"
@@ -34,15 +34,18 @@ func (p *PoolConfiguration) validate() error {
 	var err *multierror.Error
 
 	if p.MaxConnections < 0 {
-		err = multierror.Append(err, NewInvalidFieldError("max_connections", p.MaxConnections))
+		err = multierror.Append(err,
+			NewInvalidFieldError("max_connections", p.MaxConnections, "value must positive number or 0"))
 	}
 
 	if p.MaxIdleConnections < 0 {
-		err = multierror.Append(err, NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections))
+		err = multierror.Append(err,
+			NewInvalidFieldError("max_idle_connections", p.MaxIdleConnections, "value must positive number or 0"))
 	}
 
 	if p.ConnMaxLifeTime < 0 {
-		err = multierror.Append(err, NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections))
+		err = multierror.Append(err,
+			NewInvalidFieldError("conn_max_life_time", p.MaxIdleConnections, "value must positive number or 0"))
 	}
 
 	if p.ConnMaxLifeTime.Seconds() < 1 && p.ConnMaxLifeTime > 0 {
@@ -73,6 +76,8 @@ type Database struct {
 	// Connection and ping timeout
 	ConnectTimeout time.Duration `yaml:"connect_timeout"`
 
+	// Has database valid configuration?
+	Valid bool
 	// Number of connection dedicated to run only jobs by scheduler
 	BackgroundWorkers int `yaml:"background_workers"`
 	// Max workers is defined by pool max_connections-background_workers
@@ -102,49 +107,6 @@ func (d *Database) MarshalZerologObject(event *zerolog.Event) {
 	}
 
 	event.Dict("connection", conn)
-}
-
-// CheckConnectionParam return true when all keys exists
-// and is not empty.
-func (d *Database) CheckConnectionParam(keys ...string) error {
-	var missing []string
-
-	for _, key := range keys {
-		val, ok := d.Connection[key]
-		if !ok {
-			missing = append(missing, key)
-		} else if val, ok := val.(string); ok {
-			if strings.TrimSpace(val) == "" {
-				missing = append(missing, key)
-			}
-		}
-	}
-
-	if len(missing) > 0 {
-		return MissingFieldError{strings.Join(missing, ", ")}
-	}
-
-	return nil
-}
-
-func (d *Database) validatePG() error {
-	if d.CheckConnectionParam("connstr") == nil {
-		return nil
-	}
-
-	var errs *multierror.Error
-
-	if err := d.CheckConnectionParam("database"); err != nil {
-		if err := d.CheckConnectionParam("dbname"); err != nil {
-			errs = multierror.Append(errs, MissingFieldError{"'database' or 'dbname'"})
-		}
-	}
-
-	if err := d.CheckConnectionParam("user"); err != nil {
-		errs = multierror.Append(errs, err)
-	}
-
-	return errs.ErrorOrNil()
 }
 
 func (d *Database) setup(name string) {
@@ -178,47 +140,18 @@ func (d *Database) setup(name string) {
 	}
 }
 
-func (d *Database) validateCommon() error {
-	var errs *multierror.Error
-
-	if port, ok := d.Connection["port"]; ok {
-		if v, ok := port.(int); !ok || v < 1 || v > 65535 {
-			errs = multierror.Append(errs, NewInvalidFieldError("port", port))
-		}
-	}
-
-	if d.Timeout.Seconds() < 1 && d.Timeout > 0 {
-		log.Logger.Warn().Msgf("configuration: database %v: timeout < 1s: %s", d.Name, d.Timeout)
-	}
-
-	if d.ConnectTimeout.Seconds() < 1 && d.ConnectTimeout > 0 {
-		log.Logger.Warn().Msgf("configuration: database %v: connect_timeout < 1s: %s", d.Name, d.ConnectTimeout)
-	}
-
-	return errs.ErrorOrNil()
-}
-
-func (d *Database) validate() error {
-	var err *multierror.Error
-
-	switch d.Driver {
-	case "":
-		return MissingFieldError{"driver"}
-	case "postgresql", "postgres", "cockroach", "cockroachdb":
-		err = multierror.Append(err, d.validatePG())
-	case "mysql", "mariadb", "tidb", "oracle", "oci8":
-		err = multierror.Append(err, d.CheckConnectionParam("database", "host", "port", "user", "password"))
-	case "sqlite3", "sqlite", "mssql":
-		err = multierror.Append(err, d.CheckConnectionParam("database"))
-	default:
-		return NewInvalidFieldError("database", d.Driver).WithMsg("unknown database")
+func (d *Database) validate(dbp DatabaseProvider) error {
+	if err := dbp.Validate(d); err != nil {
+		return fmt.Errorf("database configuration error: %w", err)
 	}
 
 	if d.Pool != nil {
-		err = multierror.Append(err, d.Pool.validate())
+		if err := d.Pool.validate(); err != nil {
+			return fmt.Errorf("database pool configuration error: %w", err)
+		}
 	}
 
-	err = multierror.Append(err, d.validateCommon())
+	d.Valid = true
 
-	return err.ErrorOrNil()
+	return nil
 }

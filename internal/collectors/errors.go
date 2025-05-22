@@ -14,13 +14,11 @@ func (i InvalidConfigurationError) Error() string {
 	return string(i)
 }
 
-var (
-	// ErrUnknownDatabase is generated when unknown database is requests.
-	ErrUnknownDatabase = InvalidConfigurationError("unknown database")
-	// ErrLoaderStopped is generated on request to closed loader.
-	ErrLoaderStopped = InvalidConfigurationError("loader stopped")
-	// ErrAppNotConfigured is returned when there is application is not configured yet.
-	ErrAppNotConfigured = errors.New("app not configured")
+// ErrLoaderStopped is generated on request to closed loader.
+var ErrAppNotConfigured = errors.New("not configured")
 
-	ErrAborted = errors.New("task aborted")
-)
+type InternalError string
+
+func (i InternalError) Error() string {
+	return string(i)
+}

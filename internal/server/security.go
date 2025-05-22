@@ -82,7 +82,7 @@ func listenAndServe(server *http.Server, tlsConfigPath string) error {
 
 		tlsconf, err := web.ConfigToTLSConfig(&config.TLSConfig)
 		if err != nil {
-			return nil, fmt.Errorf("config tls error: %w", err)
+			return nil, fmt.Errorf("tls configuration error: %w", err)
 		}
 
 		tlsconf.NextProtos = server.TLSConfig.NextProtos
@@ -204,7 +204,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 		}
 	}
 
-	metrics.IncProcessErrorsCnt("unauthorized")
+	metrics.IncProcessErrorsCnt(metrics.ProcessAuthError)
 	writer.Header().Set("WWW-Authenticate", "Basic")
 	http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }

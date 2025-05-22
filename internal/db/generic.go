@@ -7,14 +7,16 @@ package db
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
-	"prom-dbquery_exporter.app/internal/support"
+	"prom-dbquery_exporter.app/internal/debug"
 )
 
 const (
@@ -23,7 +25,7 @@ const (
 
 type genericDatabase struct {
 	conn       *sqlx.DB
-	dbConf     *conf.Database
+	dbCfg      *conf.Database
 	connStr    string
 	driver     string
 	initialSQL []string
@@ -38,7 +40,7 @@ type genericDatabase struct {
 func (g *genericDatabase) Stats() *DatabaseStats {
 	if g.conn != nil {
 		return &DatabaseStats{
-			Name:                   g.dbConf.Name,
+			Name:                   g.dbCfg.Name,
 			DBStats:                g.conn.Stats(),
 			TotalOpenedConnections: g.totalOpenedConnections.Load(),
 			TotalFailedConnections: g.totalFailedConnections.Load(),
@@ -51,11 +53,11 @@ func (g *genericDatabase) Stats() *DatabaseStats {
 // Query get data from database.
 func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
 ) (*QueryResult, error) {
-	llog := support.GetLoggerFromCtx(ctx).With().Str("db", g.dbConf.Name).Str("query", query.Name).Logger()
+	llog := loggerFromCtx(ctx).With().Str("db", g.dbCfg.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
 	result := &QueryResult{Start: time.Now()}
 
-	support.TracePrintf(ctx, "db: opening connection")
+	debug.TracePrintf(ctx, "db: opening connection")
 
 	conn, err := g.getConnection(ctx)
 	if err != nil {
@@ -66,14 +68,14 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	defer conn.Close()
 
 	// prepare query parameters; combine parameters from query and params
-	queryParams := support.CloneMap(query.Params, params)
+	queryParams := cloneMap(query.Params, params)
 	timeout := g.queryTimeout(query)
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	llog.Debug().Dur("timeout", timeout).Str("sql", query.SQL).Interface("params", queryParams).
-		Msg("db: genericQuery start execute")
+	llog.Debug().Str("sql", query.SQL).Interface("params", queryParams).
+		Msgf("db: generic: start execute query with timeout=%s", timeout)
 
 	tx, err := conn.BeginTxx(ctx, nil)
 	if err != nil {
@@ -81,7 +83,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	}
 	defer tx.Rollback() //nolint:errcheck
 
-	support.TracePrintf(ctx, "db: begin query %q", query.Name)
+	debug.TracePrintf(ctx, "db: begin query %q", query.Name)
 
 	rows, err := tx.NamedQuery(query.SQL, queryParams)
 	if err != nil {
@@ -90,7 +92,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 
 	if e := llog.Debug(); e.Enabled() {
 		if cols, err := rows.Columns(); err == nil {
-			e.Interface("cols", cols).Msg("db: genericQuery columns")
+			e.Interface("cols", cols).Msg("db: generic: columns from query")
 		} else {
 			return nil, fmt.Errorf("get columns error: %w", err)
 		}
@@ -102,7 +104,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	default:
 	}
 
-	result.Records, err = createRecords(rows)
+	result.Records, err = recordsFromRows(rows)
 	if err != nil {
 		return nil, fmt.Errorf("create record error: %w", err)
 	}
@@ -119,7 +121,7 @@ func (g *genericDatabase) Close(ctx context.Context) error {
 	g.lock.Lock()
 	defer g.lock.Unlock()
 
-	log.Ctx(ctx).Debug().Interface("conn", g.conn).Str("db", g.dbConf.Name).Msg("db: genericQuery close conn")
+	log.Ctx(ctx).Debug().Interface("conn", g.conn).Str("db", g.dbCfg.Name).Msg("db: generic: close conn")
 
 	if g.conn == nil {
 		return nil
@@ -136,33 +138,32 @@ func (g *genericDatabase) Close(ctx context.Context) error {
 }
 
 func (g *genericDatabase) String() string {
-	return fmt.Sprintf("genericLoader name='%s' driver='%s' connstr='%v' connected=%v",
-		g.dbConf.Name, g.driver, g.connStr, g.conn != nil)
+	return fmt.Sprintf("genericDatabase: name='%s' driver='%s' connstr='%v' connected=%v",
+		g.dbCfg.Name, g.driver, g.connStr, g.conn != nil)
 }
 
-func (g *genericDatabase) configureConnection(ctx context.Context) {
+func (g *genericDatabase) configure(ctx context.Context) {
 	llog := log.Ctx(ctx)
 
-	pool := g.dbConf.Pool
+	pool := g.dbCfg.Pool
 	if pool == nil {
-		llog.Warn().Msg("no pool configuration")
+		llog.Warn().Msg("no pool configuration; using defaults")
 
 		return
 	}
 
 	if pool.MaxConnections > 0 {
-		llog.Debug().Int("max-conn", pool.MaxConnections).Msg("db: max connection set")
+		llog.Debug().Msgf("db: max connection set to %d", pool.MaxConnections)
 		g.conn.SetMaxOpenConns(pool.MaxConnections)
 	}
 
 	if pool.MaxIdleConnections > 0 {
-		llog.Debug().Int("max-idle", pool.MaxIdleConnections).Msg("db: max idle connection set")
+		llog.Debug().Msgf("db: max idle connection set to %d", pool.MaxIdleConnections)
 		g.conn.SetMaxIdleConns(pool.MaxIdleConnections)
 	}
 
 	if pool.ConnMaxLifeTime > 0 {
-		llog.Debug().Dur("conn-max-life-time", pool.ConnMaxLifeTime).
-			Msg("db: connection max life time set")
+		llog.Debug().Msgf("db: connection max life time set to %s", pool.ConnMaxLifeTime)
 		g.conn.SetConnMaxLifetime(pool.ConnMaxLifeTime)
 	}
 }
@@ -177,31 +178,30 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 	}
 
 	llog := log.Ctx(ctx)
-	llog.Debug().Str("connstr", g.connStr).Str("driver", g.driver).
-		Msg("db: genericQuery connecting")
+	llog.Debug().Str("connstr", g.connStr).Str("driver", g.driver).Msg("db: generic: connecting")
 
 	var err error
 	if g.conn, err = sqlx.Open(g.driver, g.connStr); err != nil {
 		return fmt.Errorf("open error: %w", err)
 	}
 
-	g.configureConnection(ctx)
+	g.configure(ctx)
 
 	// check is database is working
-	if err := g.pingDatabase(ctx); err != nil {
+	if err := g.ping(ctx); err != nil {
 		_ = g.conn.Close()
 		g.conn = nil
 
 		return err
 	}
 
-	llog.Debug().Msg("db: genericQuery connected")
+	llog.Debug().Msg("db: generic: connected")
 
 	return nil
 }
 
-func (g *genericDatabase) pingDatabase(ctx context.Context) error {
-	lctx, cancel := context.WithTimeout(ctx, g.dbConf.ConnectTimeout)
+func (g *genericDatabase) ping(ctx context.Context) error {
+	lctx, cancel := context.WithTimeout(ctx, g.dbCfg.ConnectTimeout)
 	defer cancel()
 
 	if err := g.conn.PingContext(lctx); err != nil {
@@ -232,8 +232,8 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 
 	// launch initial sqls if defined
 	for idx, sql := range g.initialSQL {
-		llog.Debug().Str("sql", sql).Msg("db: genericQuery execute initial sql")
-		support.TracePrintf(ctx, "db: execute initial sql")
+		llog.Debug().Str("sql", sql).Msg("db: generic: execute initial sql")
+		debug.TracePrintf(ctx, "db: execute initial sql")
 
 		if err := g.executeInitialQuery(ctx, sql, conn); err != nil {
 			conn.Close()
@@ -246,7 +246,7 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 }
 
 func (g *genericDatabase) executeInitialQuery(ctx context.Context, sql string, conn *sqlx.Conn) error {
-	lctx, cancel := context.WithTimeout(ctx, g.dbConf.ConnectTimeout)
+	lctx, cancel := context.WithTimeout(ctx, g.dbCfg.ConnectTimeout)
 	defer cancel()
 
 	rows, err := conn.QueryxContext(lctx, sql)
@@ -267,9 +267,30 @@ func (g *genericDatabase) queryTimeout(q *conf.Query) time.Duration {
 	switch {
 	case q.Timeout > 0:
 		timeout = q.Timeout
-	case g.dbConf.Timeout > 0:
-		timeout = g.dbConf.Timeout
+	case g.dbCfg.Timeout > 0:
+		timeout = g.dbCfg.Timeout
 	}
 
 	return timeout
+}
+
+func loggerFromCtx(ctx context.Context) zerolog.Logger {
+	if llog := log.Ctx(ctx); llog != nil {
+		return *llog
+	}
+
+	return log.Logger
+}
+
+// cloneMap create clone of `inp` map and optionally update it with values
+// from extra maps.
+func cloneMap[K comparable, V any](inp map[K]V, extra ...map[K]V) map[K]V {
+	res := make(map[K]V, len(inp)+1)
+	maps.Copy(res, inp)
+
+	for _, e := range extra {
+		maps.Copy(res, e)
+	}
+
+	return res
 }

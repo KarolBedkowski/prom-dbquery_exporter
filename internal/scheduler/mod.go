@@ -18,11 +18,42 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/trace"
 	"golang.org/x/sync/errgroup"
+	"prom-dbquery_exporter.app/internal/cache"
 	"prom-dbquery_exporter.app/internal/collectors"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/debug"
 	"prom-dbquery_exporter.app/internal/metrics"
-	"prom-dbquery_exporter.app/internal/support"
 )
+
+var (
+	scheduledTasksCnt = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "task_scheduled_total",
+			Help:      "Total number of scheduled tasks",
+		},
+	)
+	scheduledTasksSuccess = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "task_success_total",
+			Help:      "Total number of tasks finished with success",
+		},
+	)
+	scheduledTasksFailed = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: metrics.MetricsNamespace,
+			Name:      "task_failed_total",
+			Help:      "Total number of tasks finished with error",
+		},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(scheduledTasksCnt)
+	prometheus.MustRegister(scheduledTasksSuccess)
+	prometheus.MustRegister(scheduledTasksFailed)
+}
 
 type scheduledTask struct {
 	// nextRun is time when task should be run when scheduler run in serial mode
@@ -32,27 +63,26 @@ type scheduledTask struct {
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (s *scheduledTask) MarshalZerologObject(event *zerolog.Event) {
-	event.Object("job", &s.job).
-		Time("next_run", s.nextRun)
+	event.Object("job", &s.job).Time("next_run", s.nextRun)
+}
+
+type TaskQueue interface {
+	AddTask(ctx context.Context, task *collectors.Task)
 }
 
 // Scheduler is background process that load configured data into cache in some intervals.
 type Scheduler struct {
 	log        zerolog.Logger
 	cfg        *conf.Configuration
-	cache      *support.Cache[[]byte]
+	cache      *cache.Cache[[]byte]
 	tasks      []*scheduledTask
 	newCfgCh   chan *conf.Configuration
-	tasksQueue chan<- *collectors.Task
-
-	scheduledTasksCnt     prometheus.Counter
-	scheduledTasksSuccess prometheus.Counter
-	scheduledTasksFailed  prometheus.Counter
+	tasksQueue TaskQueue
 }
 
-// NewScheduler create new scheduler that use `cache` and initial `cfg` configuration.
-func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
-	tasksQueue chan<- *collectors.Task,
+// New create new scheduler that use `cache` and initial `cfg` configuration.
+func New(cache *cache.Cache[[]byte], cfg *conf.Configuration,
+	tasksQueue TaskQueue,
 ) *Scheduler {
 	scheduler := &Scheduler{
 		cfg:        cfg,
@@ -60,33 +90,7 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
 		log:        log.Logger.With().Str("module", "scheduler").Logger(),
 		newCfgCh:   make(chan *conf.Configuration, 1),
 		tasksQueue: tasksQueue,
-
-		scheduledTasksCnt: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "task_scheduled_total",
-				Help:      "Total number of scheduled tasks",
-			},
-		),
-		scheduledTasksSuccess: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "task_success_total",
-				Help:      "Total number of tasks finished with success",
-			},
-		),
-		scheduledTasksFailed: prometheus.NewCounter(
-			prometheus.CounterOpts{
-				Namespace: metrics.MetricsNamespace,
-				Name:      "task_failed_total",
-				Help:      "Total number of tasks finished with error",
-			},
-		),
 	}
-
-	prometheus.MustRegister(scheduler.scheduledTasksCnt)
-	prometheus.MustRegister(scheduler.scheduledTasksSuccess)
-	prometheus.MustRegister(scheduler.scheduledTasksFailed)
 
 	scheduler.UpdateConf(cfg)
 
@@ -94,9 +98,30 @@ func NewScheduler(cache *support.Cache[[]byte], cfg *conf.Configuration,
 }
 
 // Run scheduler process that get data for all defined jobs sequential.
-func (s *Scheduler) Run(ctx context.Context) error {
-	s.log.Debug().Msgf("scheduler: starting serial scheduler")
+func (s *Scheduler) Run(ctx context.Context, parallel bool) error {
+	if parallel {
+		return s.runParallel(ctx)
+	}
 
+	return s.runSerial(ctx)
+}
+
+// Close scheduler.
+func (s *Scheduler) Close(err error) {
+	_ = err
+
+	s.log.Debug().Msg("scheduler: stopping")
+	close(s.newCfgCh)
+}
+
+// UpdateConf load new configuration.
+func (s *Scheduler) UpdateConf(cfg *conf.Configuration) {
+	s.newCfgCh <- cfg
+}
+
+// RunSerial scheduler process that get data for all defined jobs sequential.
+func (s *Scheduler) runSerial(ctx context.Context) error {
+	s.log.Debug().Msgf("scheduler: starting serial scheduler")
 	s.rescheduleTask()
 
 	timer := time.NewTimer(time.Second)
@@ -131,7 +156,7 @@ func (s *Scheduler) Run(ctx context.Context) error {
 }
 
 // RunParallel run scheduler in parallel mode that spawn goroutine for each defined job.
-func (s *Scheduler) RunParallel(ctx context.Context) error {
+func (s *Scheduler) runParallel(ctx context.Context) error {
 	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
 
 	for {
@@ -171,7 +196,7 @@ func (s *Scheduler) RunParallel(ctx context.Context) error {
 			cancel()
 
 			if err := group.Wait(); err != nil {
-				s.log.Error().Err(err).Msg("scheduler: wait for errors finished error")
+				s.log.Error().Err(err).Msg("scheduler: wait for finish error")
 			}
 
 			s.log.Debug().Msg("scheduler: all workers stopped")
@@ -182,45 +207,32 @@ func (s *Scheduler) RunParallel(ctx context.Context) error {
 	}
 }
 
-// Close scheduler.
-func (s *Scheduler) Close(err error) {
-	_ = err
-
-	s.log.Debug().Msg("scheduler: stopping")
-	close(s.newCfgCh)
-}
-
-// UpdateConf load new configuration.
-func (s *Scheduler) UpdateConf(cfg *conf.Configuration) {
-	s.newCfgCh <- cfg
-}
-
 // handleJobWithMetrics wrap handleJob to gather some metrics and log errors.
 func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	startTS := time.Now()
 
-	s.scheduledTasksCnt.Inc()
+	scheduledTasksCnt.Inc()
 
 	llog := s.log.With().Str("dbname", job.Database).Str("query", job.Query).Int("job_idx", job.Idx).Logger()
 	llog.Debug().Msg("scheduler: job processing start")
 
 	ctx = llog.WithContext(ctx)
 
-	if support.TraceMaxEvents > 0 {
+	if debug.TraceMaxEvents > 0 {
 		tr := trace.New("dbquery_exporter.scheduler", "scheduler: "+job.Database+"/"+job.Query)
-		tr.SetMaxEvents(support.TraceMaxEvents)
+		tr.SetMaxEvents(debug.TraceMaxEvents)
 		defer tr.Finish()
 
 		ctx = trace.NewContext(ctx, tr)
 	}
 
 	if err := s.handleJob(ctx, job); err != nil {
-		s.scheduledTasksFailed.Inc()
+		scheduledTasksFailed.Inc()
 
-		support.TraceErrorf(ctx, "scheduled %q to %q error: %v", job.Query, job.Database, err)
+		debug.TraceErrorf(ctx, "scheduled %q to %q error: %v", job.Query, job.Database, err)
 		llog.Error().Err(err).Msg("scheduler: error execute job")
 	} else {
-		s.scheduledTasksSuccess.Inc()
+		scheduledTasksSuccess.Inc()
 		llog.Debug().Msg("scheduler: execute job finished")
 	}
 
@@ -259,9 +271,8 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	task, cancel := task.WithCancel()
 	defer cancel()
 
-	s.tasksQueue <- task
-
-	support.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
+	s.tasksQueue.AddTask(ctx, task)
+	debug.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
 
 	select {
 	case <-ctx.Done():
@@ -336,7 +347,7 @@ func (s *Scheduler) updateConfig(cfg *conf.Configuration) {
 	s.tasks = tasks
 	s.cfg = cfg
 
-	s.log.Info().Msgf("scheduler: configuration updated; tasks: %d", len(s.tasks))
+	s.log.Debug().Msgf("scheduler: configuration updated; tasks: %d", len(s.tasks))
 }
 
 // rescheduleTask set next run time for all tasks.

@@ -9,56 +9,21 @@ package db
 
 import (
 	"fmt"
-	"maps"
 	"net/url"
-	"slices"
-	"sort"
-
-	"prom-dbquery_exporter.app/internal/conf"
 )
 
-type dbCreator (func(cfg *conf.Database) (Database, error))
-
-var supportedDatabases map[string]dbCreator
-
-func registerDatabase(creator dbCreator, names ...string) {
-	if supportedDatabases == nil {
-		supportedDatabases = make(map[string]dbCreator)
-	}
-
-	for _, n := range names {
-		supportedDatabases[n] = creator
-	}
-}
-
-func SupportedDatabases() []string {
-	if len(supportedDatabases) == 0 {
-		return nil
-	}
-
-	s := slices.Collect(maps.Keys(supportedDatabases))
-	sort.Strings(s)
-
-	return s
-}
-
 type standardParams struct {
-	params url.Values
-	dbname string
-	user   string
-	pass   string
-	host   string
-	port   string
+	params   url.Values
+	database string
+	user     string
+	pass     string
+	host     string
+	port     string
 }
 
-func newStandardParams(cfg map[string]any) *standardParams {
-	s := &standardParams{}
-	s.load(cfg)
+func newStandardParams(cfg map[string]any) standardParams {
+	params := standardParams{}
 
-	return s
-}
-
-func (s *standardParams) load(cfg map[string]any) {
 	for key, val := range cfg {
 		vstr := ""
 		if val != nil {
@@ -67,17 +32,32 @@ func (s *standardParams) load(cfg map[string]any) {
 
 		switch key {
 		case "database": //nolint: goconst
-			s.dbname = url.PathEscape(vstr)
+			params.database = url.PathEscape(vstr)
 		case "host":
-			s.host = url.PathEscape(vstr)
+			params.host = url.PathEscape(vstr)
 		case "port":
-			s.port = url.PathEscape(vstr)
+			params.port = url.PathEscape(vstr)
 		case "user":
-			s.user = url.PathEscape(vstr)
+			params.user = url.PathEscape(vstr)
 		case "password":
-			s.pass = url.PathEscape(vstr)
+			params.pass = url.PathEscape(vstr)
 		default:
-			s.params.Add(key, vstr)
+			params.params.Add(key, vstr)
 		}
 	}
+
+	return params
+}
+
+func valuesFromParams(cfg map[string]any) url.Values {
+	params := url.Values{}
+
+	for k, v := range cfg {
+		if v != nil {
+			vstr := fmt.Sprintf("%v", v)
+			params.Add(k, vstr)
+		}
+	}
+
+	return params
 }

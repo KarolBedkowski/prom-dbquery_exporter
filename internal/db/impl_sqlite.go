@@ -17,10 +17,17 @@ import (
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-func newSqliteLoader(cfg *conf.Database) (Database, error) {
-	params := url.Values{}
+func init() {
+	registerDatabase(sqliteDef{}, "sqlite3", "sqlite")
+}
 
-	var dbname string
+type sqliteDef struct{}
+
+func (sqliteDef) instanate(cfg *conf.Database) (Database, error) {
+	var (
+		params url.Values
+		dbname string
+	)
 
 	for k, v := range cfg.Connection {
 		vstr := ""
@@ -33,10 +40,6 @@ func newSqliteLoader(cfg *conf.Database) (Database, error) {
 		} else {
 			params.Add(k, vstr)
 		}
-	}
-
-	if dbname == "" {
-		return nil, ErrNoDatabaseName
 	}
 
 	var connstr strings.Builder
@@ -52,7 +55,7 @@ func newSqliteLoader(cfg *conf.Database) (Database, error) {
 	// glebarez/go-sqlite uses 'sqlite', mattn/go-sqlite3 - 'sqlite3'
 	l := &genericDatabase{
 		connStr: connstr.String(), driver: "sqlite", initialSQL: cfg.InitialQuery,
-		dbConf: cfg,
+		dbCfg: cfg,
 	}
 
 	if len(params) > 0 {
@@ -62,6 +65,6 @@ func newSqliteLoader(cfg *conf.Database) (Database, error) {
 	return l, nil
 }
 
-func init() {
-	registerDatabase(newSqliteLoader, "sqlite3", "sqlite")
+func (sqliteDef) validateConf(cfg *conf.Database) error {
+	return checkConnectionParam(cfg, "database")
 }

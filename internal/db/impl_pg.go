@@ -12,11 +12,19 @@ import (
 	"strings"
 
 	// import pg package only when pg tag is enabled.
-	_ "github.com/lib/pq"
+	"github.com/hashicorp/go-multierror"
+	_ "github.com/lib/pq" //noqa:revive
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
-func newPostgresLoader(cfg *conf.Database) (Database, error) {
+func init() {
+	registerDatabase(postgresqlDef{},
+		"postgresql", "postgres", "cockroach", "cockroachdb")
+}
+
+type postgresqlDef struct{}
+
+func (postgresqlDef) instanate(cfg *conf.Database) (Database, error) {
 	var connStr string
 	if val, ok := cfg.Connection["connstr"]; ok && val != "" {
 		connStr, ok = val.(string)
@@ -44,12 +52,29 @@ func newPostgresLoader(cfg *conf.Database) (Database, error) {
 		connStr:    connStr,
 		driver:     "postgres",
 		initialSQL: cfg.InitialQuery,
-		dbConf:     cfg,
+		dbCfg:      cfg,
 	}
 
 	return l, nil
 }
 
-func init() {
-	registerDatabase(newPostgresLoader, "postgresql", "postgres", "cockroach", "cockroachdb")
+func (postgresqlDef) validateConf(cfg *conf.Database) error {
+	// if connstr is confiured to not check other parameters
+	if checkConnectionParam(cfg, "connstr") == nil {
+		return nil
+	}
+
+	var errs *multierror.Error
+
+	if err := checkConnectionParam(cfg, "database"); err != nil {
+		if err := checkConnectionParam(cfg, "dbname"); err != nil {
+			errs = multierror.Append(errs, conf.MissingFieldError("'database' or 'dbname'"))
+		}
+	}
+
+	if err := checkConnectionParam(cfg, "user"); err != nil {
+		errs = multierror.Append(errs, err)
+	}
+
+	return errs.ErrorOrNil()
 }

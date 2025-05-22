@@ -37,12 +37,10 @@ func (c ConfigurationError) Unwrap() error {
 }
 
 // MissingFieldError is error generated when `field` is missing in configuration.
-type MissingFieldError struct {
-	Field string
-}
+type MissingFieldError string
 
 func (e MissingFieldError) Error() string {
-	return "missing field " + e.Field
+	return "missing field " + string(e)
 }
 
 // InvalidFieldError is error generated when validation of `field` with `value` failed.
@@ -53,13 +51,8 @@ type InvalidFieldError struct {
 }
 
 // NewInvalidFieldError create InvalidFieldError.
-func NewInvalidFieldError(field string, value any) InvalidFieldError {
-	return InvalidFieldError{field, value, ""}
-}
-
-// WithMsg add message to InvalidFieldError.
-func (e InvalidFieldError) WithMsg(msg string) InvalidFieldError {
-	return InvalidFieldError{e.Field, e.Value, msg}
+func NewInvalidFieldError(field string, value any, message string) InvalidFieldError {
+	return InvalidFieldError{field, value, message}
 }
 
 func (e InvalidFieldError) Error() string {
