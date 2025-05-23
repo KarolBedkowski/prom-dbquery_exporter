@@ -294,100 +294,29 @@ func (c *collector) handleQueryError(ctx context.Context, task *Task, err error)
 	return task.newResult(fmt.Errorf("query error: %w", err), nil)
 }
 
-func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) { //nolint:funlen
+func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) {
 	resCh <- prometheus.MustNewConstMetric(
 		collectorActiveDesc,
 		prometheus.GaugeValue,
 		1.0,
 		c.name,
 	)
-
-	stat := c.database.Stats()
-	if stat == nil {
-		return
-	}
-
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolOpenConnsDesc,
-		prometheus.GaugeValue,
-		float64(stat.DBStats.OpenConnections),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolActConnsDesc,
-		prometheus.GaugeValue,
-		float64(stat.DBStats.InUse),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolIdleConnsDesc,
-		prometheus.GaugeValue,
-		float64(stat.DBStats.Idle),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolconfMaxConnsDesc,
-		prometheus.GaugeValue,
-		float64(stat.DBStats.MaxOpenConnections),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnWaitCntDesc,
-		prometheus.CounterValue,
-		float64(stat.DBStats.WaitCount),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnIdleClosedDesc,
-		prometheus.CounterValue,
-		float64(stat.DBStats.MaxIdleClosed),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnIdleTimeClosedDesc,
-		prometheus.CounterValue,
-		float64(stat.DBStats.MaxIdleTimeClosed),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnLifeTimeClosedDesc,
-		prometheus.CounterValue,
-		float64(stat.DBStats.MaxLifetimeClosed),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnWaitTimeDesc,
-		prometheus.CounterValue,
-		stat.DBStats.WaitDuration.Seconds(),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnTotalConnectedDesc,
-		prometheus.CounterValue,
-		float64(stat.TotalOpenedConnections),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnTotalFailedDesc,
-		prometheus.CounterValue,
-		float64(stat.TotalFailedConnections),
-		stat.Name,
-	)
-
 	resCh <- prometheus.MustNewConstMetric(
 		collectorQueueLengthDesc,
 		prometheus.GaugeValue,
 		float64(len(c.stdWorkerQueue)),
-		stat.Name,
+		c.name,
 		"main",
 	)
 	resCh <- prometheus.MustNewConstMetric(
 		collectorQueueLengthDesc,
 		prometheus.GaugeValue,
 		float64(len(c.bgWorkQueue)),
-		stat.Name,
+		c.name,
 		"bg",
 	)
+
+	c.database.CollectMetrics(resCh)
 }
 
 func workerKind(isBg bool) string {

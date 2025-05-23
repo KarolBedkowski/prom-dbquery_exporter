@@ -16,6 +16,7 @@ import (
 	"sort"
 
 	"github.com/hashicorp/go-multierror"
+	"github.com/prometheus/client_golang/prometheus"
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
@@ -31,7 +32,7 @@ type Database interface {
 	// Human-friendly info
 	String() string
 	// Stats return database stats if available
-	Stats() *DatabaseStats
+	CollectMetrics(resCh chan<- prometheus.Metric)
 }
 
 // DatabaseStats transfer stats from database driver.

@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"maps"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
@@ -31,23 +31,70 @@ type genericDatabase struct {
 	initialSQL []string
 
 	lock sync.RWMutex
-
-	// metrics
-	totalOpenedConnections atomic.Uint32
-	totalFailedConnections atomic.Uint32
 }
 
-func (g *genericDatabase) Stats() *DatabaseStats {
-	if g.conn != nil {
-		return &DatabaseStats{
-			Name:                   g.dbCfg.Name,
-			DBStats:                g.conn.Stats(),
-			TotalOpenedConnections: g.totalOpenedConnections.Load(),
-			TotalFailedConnections: g.totalFailedConnections.Load(),
-		}
+func (g *genericDatabase) CollectMetrics(resCh chan<- prometheus.Metric) {
+	if g.conn == nil {
+		return
 	}
 
-	return nil
+	name := g.dbCfg.Name
+	stat := g.conn.Stats()
+
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolOpenConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.OpenConnections),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolActConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.InUse),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolIdleConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.Idle),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolconfMaxConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.MaxOpenConnections),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnWaitCntDesc,
+		prometheus.CounterValue,
+		float64(stat.WaitCount),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnIdleClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.MaxIdleClosed),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnIdleTimeClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.MaxIdleTimeClosed),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnLifeTimeClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.MaxLifetimeClosed),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnWaitTimeDesc,
+		prometheus.CounterValue,
+		stat.WaitDuration.Seconds(),
+		name,
+	)
 }
 
 // Query get data from database.
@@ -61,7 +108,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 
 	conn, err := g.getConnection(ctx)
 	if err != nil {
-		g.totalFailedConnections.Add(1)
+		dbpoolConnFailedTotal.WithLabelValues(g.dbCfg.Name).Inc()
 
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
@@ -216,19 +263,19 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 
 	// connect to database if not connected
 	if err := g.openConnection(ctx); err != nil {
-		g.totalFailedConnections.Add(1)
+		dbpoolConnFailedTotal.WithLabelValues(g.dbCfg.Name).Inc()
 
 		return nil, fmt.Errorf("open connection error: %w", err)
 	}
 
 	conn, err := g.conn.Connx(ctx)
 	if err != nil {
-		g.totalFailedConnections.Add(1)
+		dbpoolConnFailedTotal.WithLabelValues(g.dbCfg.Name).Inc()
 
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
 
-	g.totalOpenedConnections.Add(1)
+	dbpoolConnOpenedTotal.WithLabelValues(g.dbCfg.Name).Inc()
 
 	// launch initial sqls if defined
 	for idx, sql := range g.initialSQL {
