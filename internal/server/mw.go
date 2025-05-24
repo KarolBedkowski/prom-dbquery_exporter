@@ -104,3 +104,22 @@ func newLogMiddleware(next http.Handler, name string, asDebug bool) http.Handler
 
 	return http.HandlerFunc(logFn)
 }
+
+// newLimitRequestInFlightMW create new http middleware that limit concurrent connection to `limit`.
+func newLimitRequestInFlightMW(next http.Handler, limit uint) http.Handler {
+	inFlightSem := make(chan struct{}, limit)
+
+	logFn := func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case inFlightSem <- struct{}{}:
+			defer func() { <-inFlightSem }()
+			next.ServeHTTP(w, r)
+		default:
+			http.Error(w, "Limit of concurrent requests reached, try again later.", http.StatusTooManyRequests)
+
+			return
+		}
+	}
+
+	return http.HandlerFunc(logFn)
+}
