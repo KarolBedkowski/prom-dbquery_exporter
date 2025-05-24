@@ -10,12 +10,15 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/prometheus/common/version"
+	"github.com/prometheus/exporter-toolkit/web"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/cache"
 	"prom-dbquery_exporter.app/internal/collectors"
@@ -75,6 +78,12 @@ func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	if lp, err := newLandingPage(); err != nil {
+		slog.Error("create landing pager error", "err", err)
+	} else {
+		http.Handle("/", lp)
+	}
+
 	return webHandler
 }
 
@@ -117,4 +126,20 @@ func (w *WebHandler) Stop(err error) {
 func (w *WebHandler) UpdateConf(newConf *conf.Configuration) {
 	w.handler.UpdateConf(newConf)
 	w.infoHandler.cfg = newConf
+}
+
+func newLandingPage() (*web.LandingPageHandler, error) {
+	landingConfig := web.LandingConfig{
+		Name:        "dbquery_exporter",
+		Description: "Prometheus dbquery Exporter",
+		Version:     version.Info(),
+		Links: []web.LandingLinks{
+			{
+				Address: "/metrics",
+				Text:    "Metrics",
+			},
+		},
+	}
+
+	return web.NewLandingPage(landingConfig) //nolint:wrapcheck
 }
