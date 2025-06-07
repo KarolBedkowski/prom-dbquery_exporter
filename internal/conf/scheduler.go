@@ -61,7 +61,9 @@ func (j *Job) validate(ctx context.Context, cfg *Configuration) error {
 	}
 
 	if j.Interval.Seconds() < 1 {
-		log.Ctx(ctx).Warn().Msgf("configuration: job %d (%v, %v): interval < 1s: %v", j.Idx, j.Database, j.Query, j.Interval)
+		log.Ctx(ctx).Warn().Msgf("configuration: job: %d db: %q query: %q): interval < 1s: %v",
+			j.Idx, j.Database, j.Query, j.Interval)
+
 		j.IsValid = false
 	}
 

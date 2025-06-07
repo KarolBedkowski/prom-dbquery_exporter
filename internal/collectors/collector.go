@@ -29,10 +29,10 @@ var workerID atomic.Uint64
 
 // collector handle task for one loader.
 type collector struct {
+	name     string
 	log      zerolog.Logger
 	database db.Database
 	dbcfg    *conf.Database
-	name     string
 
 	// tasksQueue is queue of incoming task to schedule.
 	tasksQueue chan *Task
@@ -53,20 +53,22 @@ const (
 	workerShutdownDelay = 10 * time.Second
 )
 
-func newCollector(name string, dbcfg *conf.Database) (*collector, error) {
+func newCollector(dbcfg *conf.Database) (*collector, error) {
 	database, err := db.GlobalRegistry.GetInstance(dbcfg)
 	if err != nil {
-		return nil, fmt.Errorf("get loader error: %w", err)
+		return nil, fmt.Errorf("create error: %w", err)
 	}
 
 	col := &collector{
-		name:            name,
-		database:        database,
-		tasksQueue:      nil,
-		stdWorkQueue:    make(chan *Task, tasksQueueSize),
-		bgWorkQueue:     make(chan *Task, tasksQueueSize),
-		dbcfg:           dbcfg,
-		log:             log.Logger.With().Str("database", name).Logger(),
+		name:     dbcfg.Name,
+		database: database,
+		dbcfg:    dbcfg,
+		log:      log.Logger.With().Str("database", dbcfg.Name).Logger(),
+
+		tasksQueue:   nil,
+		stdWorkQueue: make(chan *Task, tasksQueueSize),
+		bgWorkQueue:  make(chan *Task, tasksQueueSize),
+
 		stdWorkersGroup: errgroup.Group{},
 		bgWorkersGroup:  errgroup.Group{},
 	}
@@ -78,7 +80,7 @@ func newCollector(name string, dbcfg *conf.Database) (*collector, error) {
 }
 
 func (c *collector) addTask(ctx context.Context, task *Task) {
-	c.log.Debug().Msgf("collector: add new task; queue size: %d", len(c.tasksQueue))
+	c.log.Debug().Msgf("collector: add new task")
 
 	if c.tasksQueue == nil {
 		c.log.Warn().Msg("collector: try add new task to closed queue")
@@ -144,9 +146,7 @@ func (c *collector) spawnWorker(ctx context.Context) {
 	}
 
 	c.stdWorkersGroup.TryGo(func() error {
-		c.worker(ctx, c.stdWorkQueue, false)
-
-		return nil
+		return c.worker(ctx, c.stdWorkQueue, false)
 	})
 }
 
@@ -157,20 +157,18 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 	}
 
 	c.bgWorkersGroup.TryGo(func() error {
-		c.worker(ctx, c.bgWorkQueue, true)
-
-		return nil
+		return c.worker(ctx, c.bgWorkQueue, true)
 	})
 }
 
 // worker get process task from `workQueue` in loop. Exit when there is no new task for `workerShutdownDelay`.
-func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
+func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) error {
 	idx := generateWorkerID()
 	llog := c.log.With().Bool("bg", isBg).Str("worker_id", idx).Logger()
 	ctx = llog.WithContext(ctx)
 
 	workersCreatedCnt.WithLabelValues(c.name, workTypeString(isBg)).Inc()
-	llog.Debug().Msgf("collector: start worker %s  bg=%v", idx, isBg)
+	llog.Debug().Msgf("collector: start worker id=%q bg=%v", idx, isBg)
 
 	// stop worker after some time of inactivity
 	shutdownTimer := time.NewTimer(workerShutdownDelay)
@@ -196,7 +194,7 @@ loop:
 
 		case task, ok := <-workQueue:
 			if ok {
-				llog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
+				llog.Debug().Object("task", task).Msg("collector: handle task")
 				debug.SetGoroutineLabels(ctx, "query", task.Query.Name, "worker", idx, "db", c.name, "req_id", task.ReqID)
 
 				c.handleTask(ctx, task)
@@ -208,6 +206,8 @@ loop:
 	}
 
 	llog.Debug().Msg("collector: worker stopped")
+
+	return nil
 }
 
 func (c *collector) handleTask(ctx context.Context, task *Task) {
@@ -231,8 +231,10 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 	defer cancel()
 
 	// get result
-	res := make(chan *TaskResult, 1)
-	go c.queryDatabase(ctx, task, res)
+	resCh := make(chan *TaskResult, 1)
+	defer close(resCh)
+
+	go c.queryDatabase(ctx, task, resCh)
 
 	// check is task cancelled in meantime
 	select {
@@ -242,14 +244,14 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 	case <-task.Cancelled():
 		llog.Warn().Msg("collector: task cancelled when processing")
 
-	case r := <-res:
+	case r := <-resCh:
 		// send result
 		task.Output <- r
 	}
 }
 
 // queryDatabase get result from loader.
-func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *TaskResult) {
+func (c *collector) queryDatabase(ctx context.Context, task *Task, resCh chan *TaskResult) {
 	llog := log.Ctx(ctx)
 
 	debug.TracePrintf(ctx, "start query %q in %q", task.Query.Name, task.DBName)
@@ -258,7 +260,7 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *Tas
 	result, err := c.database.Query(ctx, task.Query, task.Params)
 	if err != nil {
 		metrics.IncProcessErrorsCnt(metrics.ProcessQueryError)
-		res <- c.handleQueryError(ctx, task, err)
+		resCh <- c.handleQueryError(ctx, task, err)
 
 		return
 	}
@@ -269,14 +271,14 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *Tas
 	output, err := formatResult(ctx, result, task.Query, c.dbcfg)
 	if err != nil {
 		metrics.IncProcessErrorsCnt(metrics.ProcessFormatError)
-		res <- task.newResult(fmt.Errorf("format error: %w", err), nil)
+		resCh <- task.newResult(fmt.Errorf("format error: %w", err), nil)
 
 		return
 	}
 
 	llog.Debug().Msg("collector: result formatted")
 	debug.TracePrintf(ctx, "finished  query and formatting %q in %q", task.Query.Name, task.DBName)
-	res <- task.newResult(nil, output)
+	resCh <- task.newResult(nil, output)
 }
 
 func (c *collector) handleQueryError(ctx context.Context, task *Task, err error) *TaskResult {
@@ -288,7 +290,7 @@ func (c *collector) handleQueryError(ctx context.Context, task *Task, err error)
 		if output, err := formatError(ctx, err, task.Query, c.dbcfg); err != nil {
 			llog.Error().Err(err).Msg("collector: format error result error")
 		} else {
-			llog.Debug().Bytes("output", output).Msg("result")
+			llog.Debug().Bytes("output", output).Msg("collector: result")
 
 			return task.newResult(nil, output)
 		}
@@ -321,6 +323,8 @@ func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) {
 
 	c.database.CollectMetrics(resCh)
 }
+
+// --------------------------------------------
 
 func workTypeString(isBg bool) string {
 	if isBg {

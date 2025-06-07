@@ -67,7 +67,7 @@ func Load(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
 	conf := &Configuration{} //nolint:exhaustruct
 
-	logger.Info().Msgf("Loading config file %s", filename)
+	logger.Info().Msgf("Loading config file %q", filename)
 
 	b, err := os.ReadFile(filename) // #nosec
 	if err != nil {
@@ -112,6 +112,16 @@ func (c *Configuration) Reload(filename string, dbp DatabaseProvider) (*Configur
 	return newCfg, nil
 }
 
+func (c *Configuration) ValidDatabases(yield func(*Database) bool) {
+	for _, d := range c.Database {
+		if d.Valid {
+			if !yield(d) {
+				return
+			}
+		}
+	}
+}
+
 func (c *Configuration) validateJobs(ctx context.Context) error {
 	var errs *multierror.Error
 
@@ -129,8 +139,7 @@ func (c *Configuration) validateJobs(ctx context.Context) error {
 	}
 
 	if len(c.Jobs) > 0 && validJobs == 0 {
-		logger := log.Ctx(ctx)
-		logger.Warn().Msgf("configuration: all jobs are invalid!")
+		log.Ctx(ctx).Warn().Msg("configuration: all jobs are invalid!")
 	}
 
 	return errs.ErrorOrNil()
@@ -185,7 +194,7 @@ func (c *Configuration) validateDatabases(ctx context.Context, dbp DatabaseProvi
 				anyDbConfigured = true
 			}
 		} else {
-			log.Ctx(ctx).Error().Str("database", name).Msgf("database %s is not supported", db.Driver)
+			log.Ctx(ctx).Error().Str("database", name).Msgf("database %q is not supported", db.Driver)
 		}
 	}
 

@@ -42,18 +42,22 @@ var (
 	)
 )
 
+//---------------------------------------------------
+
 func init() {
 	prometheus.MustRegister(queryCacheHits)
 	prometheus.MustRegister(queryCacheMiss)
 }
 
+// ---------------------------------------------------
+
 type (
 	// Cache with per item expire time.
 	Cache[T any] struct {
-		cache  map[string]cacheItem[T]
-		name   string
-		lock   sync.Mutex
-		logger zerolog.Logger
+		cache map[string]cacheItem[T]
+		name  string
+		mu    sync.Mutex
+		log   zerolog.Logger
 	}
 
 	cacheItem[T any] struct {
@@ -65,19 +69,19 @@ type (
 // New create  new cache object.
 func New[T any](name string) *Cache[T] {
 	return &Cache[T]{
-		name:   name,
-		cache:  make(map[string]cacheItem[T]),
-		logger: log.Logger.With().Str("subsystem", "cache").Str("cache_name", name).Logger(),
-		lock:   sync.Mutex{},
+		name:  name,
+		cache: make(map[string]cacheItem[T]),
+		log:   log.Logger.With().Str("subsystem", "cache").Str("cache_name", name).Logger(),
+		mu:    sync.Mutex{},
 	}
 }
 
 // Get key from cache if exists and not expired.
 func (r *Cache[T]) Get(key string) (T, bool) {
-	r.logger.Debug().Msgf("get from cache: key=%s", key)
+	r.log.Debug().Msgf("cache: get %q", key)
 
-	r.lock.Lock()
-	defer r.lock.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	item, ok := r.cache[key]
 	if !ok {
@@ -100,10 +104,11 @@ func (r *Cache[T]) Get(key string) (T, bool) {
 
 // Put data into cache.
 func (r *Cache[T]) Put(key string, ttl time.Duration, data T) {
-	r.lock.Lock()
-	defer r.lock.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	r.logger.Debug().Msgf("put into cache: key=%s; ttl=%s", key, ttl)
+	r.log.Debug().Msgf("cache: put key=%q; ttl=%s", key, ttl)
+
 	r.cache[key] = cacheItem[T]{
 		expireTS: time.Now().Add(ttl),
 		content:  data,
@@ -112,20 +117,20 @@ func (r *Cache[T]) Put(key string, ttl time.Duration, data T) {
 
 // Clear whole cache.
 func (r *Cache[T]) Clear() {
-	r.lock.Lock()
-	defer r.lock.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
-	r.logger.Debug().Msg("clear cache")
+	r.log.Debug().Msg("cache: clear")
 	clear(r.cache)
 }
 
 func (r *Cache[T]) Content() []string {
-	r.lock.Lock()
-	defer r.lock.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	res := make([]string, 0, len(r.cache))
 	for k, v := range r.cache {
-		res = append(res, fmt.Sprintf("%s: expires: %s", k, v.expireTS))
+		res = append(res, fmt.Sprintf("%q: expires: %s", k, v.expireTS))
 	}
 
 	return res

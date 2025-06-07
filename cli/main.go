@@ -70,7 +70,7 @@ func main() {
 
 	initializeLogger(conf.Args.LogLevel, conf.Args.LogFormat)
 	printWelcome()
-	log.Logger.Debug().Interface("args", conf.Args).Msg("cli arguments")
+	log.Logger.Debug().Msgf("cli arguments: %+v", conf.Args)
 
 	sdw, err := newSdWatchdog()
 	if err != nil {
@@ -79,7 +79,7 @@ func main() {
 
 	cfg, err := conf.Load(conf.Args.ConfigFilename, db.GlobalRegistry)
 	if err != nil || cfg == nil {
-		log.Logger.Fatal().Err(err).Str("file", conf.Args.ConfigFilename).Msg("failed load config file")
+		log.Logger.Fatal().Err(err).Msgf("failed load config file %q", conf.Args.ConfigFilename)
 	}
 
 	log.Logger.Debug().Interface("conf", cfg).Msg("configuration loaded")
@@ -116,8 +116,8 @@ func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 		func() error {
 			<-ctx.Done()
 			log.Logger.Warn().Msg("received SIGTERM, exiting...")
-			cancel()
 			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
+			cancel()
 
 			return nil
 		},
@@ -184,7 +184,7 @@ func initializeLogger(level string, format string) {
 
 	switch format {
 	default:
-		log.Error().Msg("logger: unknown log format; using logfmt")
+		log.Error().Msgf("logger: unknown log format %q; using logfmt", format)
 
 		fallthrough
 	case "logfmt":
@@ -200,7 +200,7 @@ func initializeLogger(level string, format string) {
 	if l, err := zerolog.ParseLevel(level); err == nil {
 		zerolog.SetGlobalLevel(l)
 	} else {
-		log.Error().Msgf("logger: unknown log level '%s'; using debug", level)
+		log.Error().Msgf("logger: unknown log level %q; using debug", level)
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 
@@ -256,7 +256,8 @@ func (h *confHandler) start() error {
 
 			h.cfg = newConf
 
-			log.Info().Interface("conf", newConf).Msg("configuration reloaded")
+			log.Debug().Interface("conf", newConf).Msg("new configuration")
+			log.Info().Msg("configuration reloaded")
 			daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
 		} else {
 			log.Error().Err(err).Msg("reloading configuration failed; using old one")

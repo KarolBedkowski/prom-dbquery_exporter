@@ -29,13 +29,13 @@ type Task struct {
 	CancelCh chan struct{}
 }
 
-func NewTask(dbName string, query *conf.Query, output chan *TaskResult) *Task {
+func NewTask(dbname string, query *conf.Query, output chan *TaskResult) *Task {
 	return &Task{
 		RequestStart: time.Now(),
 		Query:        query,
 		Params:       nil,
 		Output:       output,
-		DBName:       dbName,
+		DBName:       dbname,
 
 		IsScheduledJob: false,
 		ReqID:          "",

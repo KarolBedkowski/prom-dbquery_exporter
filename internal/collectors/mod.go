@@ -43,19 +43,18 @@ func (cs *Collectors) Run(ctx context.Context) error {
 	for {
 		cs.log.Debug().Msg("collectors: starting...")
 
-		ctx, cancel := context.WithCancel(ctx)
+		lctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 
-		group, err := cs.startCollectors(ctx)
+		group, err := cs.startCollectors(lctx)
 		if err != nil {
-			cancel()
-
 			return err
 		}
 
 	loop:
 		for {
 			select {
-			case <-ctx.Done():
+			case <-lctx.Done():
 				cs.log.Debug().Msg("collectors: stopping...")
 				cs.collectors = nil
 				cancel()
@@ -92,14 +91,16 @@ func (cs *Collectors) AddTask(ctx context.Context, task *Task) {
 
 	if dbloader, ok := cs.collectors[task.DBName]; ok {
 		dbloader.addTask(ctx, task)
-	} else {
-		select {
-		case task.Output <- task.newResult(ErrUnknownDatabase, nil):
-		case <-ctx.Done():
-			cs.log.Warn().Err(ctx.Err()).Msg("context cancelled")
-		case <-task.Cancelled():
-			cs.log.Warn().Msg("task cancelled")
-		}
+
+		return
+	}
+
+	select {
+	case task.Output <- task.newResult(ErrUnknownDatabase, nil):
+	case <-ctx.Done():
+		cs.log.Warn().Err(ctx.Err()).Msg("context cancelled")
+	case <-task.Cancelled():
+		cs.log.Warn().Msg("task cancelled")
 	}
 }
 
@@ -122,19 +123,13 @@ func (cs *Collectors) Collect(resCh chan<- prometheus.Metric) {
 func (cs *Collectors) createCollectors() error {
 	collectors := make(map[string]*collector)
 
-	for dbName, dbCfg := range cs.cfg.Database {
-		if !dbCfg.Valid {
-			continue
-		}
-
-		dbloader, err := newCollector(dbName, dbCfg)
+	for dbcfg := range cs.cfg.ValidDatabases {
+		dbloader, err := newCollector(dbcfg)
 		if err != nil {
-			cs.log.Error().Err(err).Str("dbname", dbName).Msg("create collector error")
-
-			continue
+			cs.log.Error().Err(err).Str("database", dbcfg.Name).Msg("create collector error")
+		} else {
+			collectors[dbcfg.Name] = dbloader
 		}
-
-		collectors[dbName] = dbloader
 	}
 
 	if len(collectors) == 0 {

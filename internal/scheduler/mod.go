@@ -211,7 +211,7 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 
 	scheduledTasksCnt.Inc()
 
-	llog := s.log.With().Str("dbname", job.Database).Str("query", job.Query).Int("job_idx", job.Idx).Logger()
+	llog := s.log.With().Str("database", job.Database).Str("query", job.Query).Int("job_idx", job.Idx).Logger()
 	llog.Debug().Msg("scheduler: job processing start")
 
 	ctx = llog.WithContext(ctx)
@@ -235,15 +235,14 @@ func (s *Scheduler) handleJobWithMetrics(ctx context.Context, job conf.Job) {
 	}
 
 	if duration := time.Since(startTS); job.Interval < duration {
-		llog.Warn().Dur("duration", duration).
-			Msgf("scheduler: task run longer than defined interval (%s)", job.Interval)
+		llog.Warn().Msgf("scheduler: task run longer than defined interval (%s): %s", job.Interval, duration)
 	}
 }
 
 // handleJob request data and wait for response. On success put result into cache.
 func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	queryName := j.Query
-	dbName := j.Database
+	dbname := j.Database
 	query := (s.cfg.Query)[queryName]
 
 	if query == nil {
@@ -253,14 +252,14 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	output := make(chan *collectors.TaskResult, 1)
 	defer close(output)
 
-	task := collectors.NewTask(dbName, query, output).WithReqID().MarkScheduled()
+	task := collectors.NewTask(dbname, query, output).WithReqID().MarkScheduled()
 
 	// cancel task on end
 	task, cancel := task.WithCancel()
 	defer cancel()
 
 	s.tasksQueue.AddTask(ctx, task)
-	debug.TracePrintf(ctx, "scheduled %q to %q", queryName, dbName)
+	debug.TracePrintf(ctx, "scheduled %q to %q", queryName, dbname)
 
 	select {
 	case <-ctx.Done():
@@ -272,7 +271,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 				return fmt.Errorf("processing error: %w", res.Error)
 			}
 
-			s.cache.Put(query.Name+"@"+dbName, query.CachingTime, res.Result)
+			s.cache.Put(query.Name+"@"+dbname, query.CachingTime, res.Result)
 		}
 	}
 

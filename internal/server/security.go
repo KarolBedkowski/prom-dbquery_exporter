@@ -142,12 +142,12 @@ type secWebHandler struct {
 	headers map[string]string
 	users   map[string]config_util.Secret
 
-	lock sync.Mutex
+	mu sync.Mutex
 }
 
 func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 	if cu := len(conf.Users); cu > 0 {
-		log.Logger.Info().Int("users", cu).Msg("sechandler: authorization enabled")
+		log.Logger.Info().Msgf("sechandler: authorization enabled; users: %d", cu)
 	} else {
 		log.Logger.Info().Msg("sechandler: authorization disabled")
 	}
@@ -186,7 +186,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 		cacheKey := hex.EncodeToString(append(append([]byte(user), []byte(hashedPassword)...),
 			[]byte(pass)...))
 
-		wh.lock.Lock()
+		wh.mu.Lock()
 
 		authOk, ok := wh.cache[cacheKey]
 		if !ok {
@@ -196,7 +196,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 			wh.cache[cacheKey] = authOk
 		}
 
-		wh.lock.Unlock()
+		wh.mu.Unlock()
 
 		if authOk && validUser {
 			wh.handler.ServeHTTP(writer, req)

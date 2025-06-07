@@ -120,6 +120,7 @@ func (d *Database) MarshalZerologObject(event *zerolog.Event) {
 func (d *Database) setup(name string) {
 	d.Name = name
 
+	// create default pool configuration when not defined in conf file
 	if d.Pool == nil {
 		d.Pool = &PoolConfiguration{
 			MaxConnections:     defaultMaxConnections,
@@ -136,7 +137,9 @@ func (d *Database) setup(name string) {
 
 	if d.BackgroundWorkers >= d.MaxWorkers {
 		log.Logger.Warn().
-			Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
+			Msgf("configuration: number of background workers must be lower than max_connections (%d);"+
+				" disabling background jobs",
+				d.MaxWorkers)
 
 		d.BackgroundWorkers = 0
 	} else {

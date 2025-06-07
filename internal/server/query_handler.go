@@ -41,7 +41,7 @@ func (l lockInfo) String() string {
 type locker struct {
 	runningQuery map[string]lockInfo
 
-	lock sync.Mutex
+	mu sync.Mutex
 }
 
 func newLocker() locker {
@@ -49,15 +49,15 @@ func newLocker() locker {
 }
 
 func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
-	l.lock.Lock()
-	defer l.lock.Unlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	if li, ok := l.runningQuery[queryKey]; ok {
 		if time.Since(li.ts) < maxLockTime {
 			return li.String(), false
 		}
 
-		log.Logger.Warn().Str("reqID", li.key).Msgf("queryhandler: lock after maxLockTime, since %s", li.ts)
+		log.Logger.Warn().Str("req_id", li.key).Msgf("queryhandler: lock after maxLockTime, since %s", li.ts)
 	}
 
 	l.runningQuery[queryKey] = lockInfo{key: reqID, ts: time.Now()}
@@ -66,8 +66,8 @@ func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
 }
 
 func (l *locker) unlock(queryKey string) {
-	l.lock.Lock()
-	defer l.lock.Unlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	delete(l.runningQuery, queryKey)
 }
@@ -178,12 +178,12 @@ func (q *queryHandler) updateConf(c *conf.Configuration) {
 	q.resultCache.Clear()
 }
 
-func (q *queryHandler) getFromCache(query *conf.Query, dbName string, params map[string]any) ([]byte, bool) {
+func (q *queryHandler) getFromCache(query *conf.Query, dbname string, params map[string]any) ([]byte, bool) {
 	if conf.Args.DisableCache || len(params) > 0 || query.CachingTime == 0 {
 		return nil, false
 	}
 
-	queryKey := query.Name + "@" + dbName
+	queryKey := query.Name + "@" + dbname
 
 	return q.resultCache.Get(queryKey)
 }
@@ -221,25 +221,25 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 	output := make(chan *collectors.TaskResult, len(parameters.dbNames)*len(parameters.queryNames))
 	reqID, _ := hlog.IDFromCtx(ctx)
 
-	for dbName, query := range parameters.iter() {
-		queryTotalCnt.WithLabelValues(query.Name, dbName).Inc()
+	for dbname, query := range parameters.iter() {
+		queryTotalCnt.WithLabelValues(query.Name, dbname).Inc()
 
-		if data, ok := q.getFromCache(query, dbName, parameters.extraParameters); ok {
-			logger.Debug().Str("dbname", dbName).Str("query", query.Name).Msg("queryhandler: query result from cache")
-			debug.TracePrintf(ctx, "data from cache for %q from %q", query.Name, dbName)
+		if data, ok := q.getFromCache(query, dbname, parameters.extraParameters); ok {
+			logger.Debug().Str("database", dbname).Str("query", query.Name).Msg("queryhandler: query result from cache")
+			debug.TracePrintf(ctx, "data from cache for %q from %q", query.Name, dbname)
 			respWriter.write(ctx, data)
 
 			continue
 		}
 
-		task := collectors.NewTask(dbName, query, output).
+		task := collectors.NewTask(dbname, query, output).
 			WithParams(parameters.extraParameters).
 			WithReqID(reqID.String()).
 			UseCancel(cancelCh)
 
 		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
 		q.taskQueue.AddTask(ctx, task)
-		debug.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
+		debug.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbname)
 		respWriter.incScheduled()
 	}
 
