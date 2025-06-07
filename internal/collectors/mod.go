@@ -26,12 +26,12 @@ type Collectors struct {
 }
 
 // New create new Collectors object.
-func New(cfg *conf.Configuration) *Collectors {
+func New(cfg *conf.Configuration, cfgCh chan *conf.Configuration) *Collectors {
 	colls := &Collectors{
 		collectors: make(map[string]*collector),
 		cfg:        cfg,
 		log:        log.Logger.With().Str("module", "databases").Logger(),
-		newConfCh:  make(chan *conf.Configuration, 1),
+		newConfCh:  cfgCh,
 	}
 
 	prometheus.MustRegister(colls)
@@ -90,15 +90,6 @@ func (cs *Collectors) AddTask(ctx context.Context, task *Task) {
 		dbloader.addTask(ctx, task)
 	} else {
 		task.Output <- task.newResult(ErrAppNotConfigured, nil)
-	}
-}
-
-// UpdateConf update configuration for existing loaders:
-// close not existing any more loaders and close loaders with changed
-// configuration so they can be create with new conf on next use.
-func (cs *Collectors) UpdateConf(cfg *conf.Configuration) {
-	if cfg != nil {
-		cs.newConfCh <- cfg
 	}
 }
 

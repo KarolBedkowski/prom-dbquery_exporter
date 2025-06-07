@@ -45,7 +45,7 @@ type WebHandler struct {
 
 // New create new WebHandler.
 func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
-	taskQueue TaskQueue,
+	taskQueue TaskQueue, cfgCh chan *conf.Configuration,
 ) *WebHandler {
 	qh := newQueryHandler(cfg, cache, taskQueue)
 	http.Handle("/query", qh.Handler())
@@ -83,6 +83,8 @@ func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 	} else {
 		http.Handle("/", lp)
 	}
+
+	webHandler.updateConfHandler(cfgCh)
 
 	return webHandler
 }
@@ -123,9 +125,13 @@ func (w *WebHandler) Stop(err error) {
 }
 
 // UpdateConf reload configuration in all handlers.
-func (w *WebHandler) UpdateConf(newConf *conf.Configuration) {
-	w.handler.UpdateConf(newConf)
-	w.infoHandler.cfg = newConf
+func (w *WebHandler) updateConfHandler(cfgCh chan *conf.Configuration) {
+	go func() {
+		for newCfg := range cfgCh {
+			w.handler.updateConf(newCfg)
+			w.infoHandler.cfg = newCfg
+		}
+	}()
 }
 
 func newLandingPage() (*web.LandingPageHandler, error) {

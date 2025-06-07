@@ -90,10 +90,11 @@ func main() {
 }
 
 func start(cfg *conf.Configuration) error {
-	collectors := collectors.New(cfg)
+	confHandler := newConfHandler(cfg)
+	collectors := collectors.New(cfg, confHandler.newReloadCh())
 	cache := cache.New[[]byte]("query_cache")
-	webHandler := server.New(cfg, cache, collectors)
-	sched := scheduler.New(cache, cfg, collectors)
+	webHandler := server.New(cfg, cache, collectors, confHandler.newReloadCh())
+	sched := scheduler.New(cache, cfg, collectors, confHandler.newReloadCh())
 	runGroup := run.Group{}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
@@ -102,6 +103,7 @@ func start(cfg *conf.Configuration) error {
 	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
 	runGroup.Add(webHandler.Run, webHandler.Stop)
 	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, sched.Close)
+	runGroup.Add(confHandler.start, confHandler.stop)
 
 	// Termination handler.
 	runGroup.Add(
@@ -114,32 +116,6 @@ func start(cfg *conf.Configuration) error {
 			return nil
 		},
 		func(_ error) {},
-	)
-
-	// Reload handler.
-	hup := make(chan os.Signal, 1)
-	signal.Notify(hup, syscall.SIGHUP)
-	runGroup.Add(
-		func() error {
-			for range hup {
-				log.Debug().Msg("reload configuration started")
-				daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
-
-				if newConf, err := cfg.Reload(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
-					webHandler.UpdateConf(newConf)
-					sched.UpdateConf(newConf)
-					collectors.UpdateConf(newConf)
-					log.Info().Interface("conf", newConf).Msg("configuration reloaded")
-				} else {
-					log.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
-				}
-
-				daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
-			}
-
-			return nil
-		},
-		func(_ error) { close(hup) },
 	)
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
@@ -219,4 +195,61 @@ func outputIsConsole() bool {
 	fileInfo, _ := os.Stdout.Stat()
 
 	return fileInfo != nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
+}
+
+//--------------------------------------------------------
+
+type confHandler struct {
+	hupCh    chan os.Signal
+	reloadCh []chan *conf.Configuration
+	cfg      *conf.Configuration
+}
+
+func newConfHandler(cfg *conf.Configuration) confHandler {
+	return confHandler{
+		hupCh: make(chan os.Signal, 1),
+		cfg:   cfg,
+	}
+}
+
+// newReloadCh create new channel for service that want receive configuration changes.
+func (h *confHandler) newReloadCh() chan *conf.Configuration {
+	ch := make(chan *conf.Configuration)
+	h.reloadCh = append(h.reloadCh, ch)
+
+	return ch
+}
+
+func (h *confHandler) start() error {
+	signal.Notify(h.hupCh, syscall.SIGHUP)
+
+	for range h.hupCh {
+		log.Debug().Msg("reload configuration started")
+		daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
+
+		if newConf, err := h.cfg.Reload(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
+			log.Debug().Msg("new configuration loaded")
+
+			for _, rh := range h.reloadCh {
+				rh <- newConf
+			}
+
+			h.cfg = newConf
+
+			log.Info().Interface("conf", newConf).Msg("configuration reloaded")
+			daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
+		} else {
+			log.Error().Err(err).Msg("reloading configuration failed; using old one")
+		}
+	}
+
+	return nil
+}
+
+func (h *confHandler) stop(_ error) {
+	close(h.hupCh)
+
+	for _, rh := range h.reloadCh {
+		close(rh)
+	}
 }

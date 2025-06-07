@@ -82,17 +82,15 @@ type Scheduler struct {
 
 // New create new scheduler that use `cache` and initial `cfg` configuration.
 func New(cache *cache.Cache[[]byte], cfg *conf.Configuration,
-	tasksQueue TaskQueue,
+	tasksQueue TaskQueue, newCfgCh chan *conf.Configuration,
 ) *Scheduler {
 	scheduler := &Scheduler{
 		cfg:        cfg,
 		cache:      cache,
 		log:        log.Logger.With().Str("module", "scheduler").Logger(),
-		newCfgCh:   make(chan *conf.Configuration, 1),
+		newCfgCh:   newCfgCh,
 		tasksQueue: tasksQueue,
 	}
-
-	scheduler.UpdateConf(cfg)
 
 	return scheduler
 }
@@ -111,12 +109,6 @@ func (s *Scheduler) Close(err error) {
 	_ = err
 
 	s.log.Debug().Msg("scheduler: stopping")
-	close(s.newCfgCh)
-}
-
-// UpdateConf load new configuration.
-func (s *Scheduler) UpdateConf(cfg *conf.Configuration) {
-	s.newCfgCh <- cfg
 }
 
 // RunSerial scheduler process that get data for all defined jobs sequential.

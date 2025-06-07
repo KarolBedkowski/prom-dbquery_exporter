@@ -110,8 +110,7 @@ func (q *queryHandler) Handler() http.Handler {
 	return handler
 }
 
-// SetConfiguration update handler configuration.
-func (q *queryHandler) UpdateConf(c *conf.Configuration) {
+func (q *queryHandler) updateConf(c *conf.Configuration) {
 	q.cfg = c
 
 	q.resultCache.Clear()
