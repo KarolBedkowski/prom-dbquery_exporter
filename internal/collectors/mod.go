@@ -22,7 +22,7 @@ type Collectors struct {
 	log        zerolog.Logger
 	cfg        *conf.Configuration
 	collectors map[string]*collector
-	newConfCh  chan *conf.Configuration
+	newCfgCh   chan *conf.Configuration
 }
 
 // New create new Collectors object.
@@ -31,7 +31,7 @@ func New(cfg *conf.Configuration, cfgCh chan *conf.Configuration) *Collectors {
 		collectors: make(map[string]*collector),
 		cfg:        cfg,
 		log:        log.Logger.With().Str("module", "databases").Logger(),
-		newConfCh:  cfgCh,
+		newCfgCh:   cfgCh,
 	}
 
 	prometheus.MustRegister(colls)
@@ -64,7 +64,7 @@ func (cs *Collectors) Run(ctx context.Context) error {
 
 				return nil
 
-			case cfg := <-cs.newConfCh:
+			case cfg := <-cs.newCfgCh:
 				cs.log.Debug().Msg("collectors: stopping collectors for update configuration")
 				cancel()
 
@@ -89,7 +89,13 @@ func (cs *Collectors) AddTask(ctx context.Context, task *Task) {
 	if dbloader, ok := cs.collectors[task.DBName]; ok {
 		dbloader.addTask(ctx, task)
 	} else {
-		task.Output <- task.newResult(ErrAppNotConfigured, nil)
+		select {
+		case task.Output <- task.newResult(ErrUnknownDatabase, nil):
+		case <-ctx.Done():
+			cs.log.Warn().Err(ctx.Err()).Msg("context cancelled")
+		case <-task.Cancelled():
+			cs.log.Warn().Msg("task cancelled")
+		}
 	}
 }
 
@@ -128,7 +134,7 @@ func (cs *Collectors) createCollectors() error {
 	}
 
 	if len(collectors) == 0 {
-		return InvalidConfigurationError("no databases available")
+		return ErrNoDatabases
 	}
 
 	cs.collectors = collectors

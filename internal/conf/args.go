@@ -26,7 +26,6 @@ type CliArguments struct {
 
 	ListenAddress string
 	WebConfig     string
-	EnableInfo    bool
 
 	// logging
 
@@ -51,7 +50,6 @@ func ParseCliArgs() {
 		"Address to listen on for web interface and telemetry.")
 	flag.StringVar(&Args.WebConfig, "web.config", "",
 		"Path to config yaml file that can enable TLS or authentication.")
-	flag.BoolVar(&Args.EnableInfo, "enable-info", false, "Enable /info endpoint")
 
 	flag.StringVar(&Args.LogLevel, "log.level", "info",
 		"Logging level (debug, info, warn, error, fatal)")

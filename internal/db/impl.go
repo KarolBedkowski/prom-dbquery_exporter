@@ -31,7 +31,7 @@ func newStandardParams(cfg map[string]any) standardParams {
 		}
 
 		switch key {
-		case "database": //nolint: goconst
+		case "database":
 			params.database = url.PathEscape(vstr)
 		case "host":
 			params.host = url.PathEscape(vstr)

@@ -22,17 +22,17 @@ import (
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-type dataWriter struct {
+type responseWriter struct {
 	written   int
 	scheduled int
 	writer    http.ResponseWriter
 }
 
-func (d *dataWriter) writeHeaders() {
+func (d *responseWriter) writeHeaders() {
 	d.writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 }
 
-func (d *dataWriter) write(ctx context.Context, data []byte) {
+func (d *responseWriter) write(ctx context.Context, data []byte) {
 	if _, err := d.writer.Write(data); err != nil {
 		log.Ctx(ctx).Error().Err(err).Msg("queryhandler: write error")
 		debug.TraceErrorf(ctx, "write error: %s", err)
@@ -42,7 +42,7 @@ func (d *dataWriter) write(ctx context.Context, data []byte) {
 	}
 }
 
-func (d *dataWriter) incScheduled() {
+func (d *responseWriter) incScheduled() {
 	d.scheduled++
 }
 

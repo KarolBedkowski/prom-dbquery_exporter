@@ -40,7 +40,7 @@ func printVersion() {
 		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
 	}
 
-	fmt.Printf("Available template functions: %s\n", templates.AvailableTmplFunctions()) //nolint:forbidigo
+	fmt.Printf("Available template functions: %s\n", templates.TemplateFunctions()) //nolint:forbidigo
 }
 
 func printWelcome() {
@@ -55,7 +55,7 @@ func printWelcome() {
 		log.Logger.Log().Msgf("supported databases: %s", sdb)
 	}
 
-	log.Logger.Log().Msgf("available template functions: %s", templates.AvailableTmplFunctions())
+	log.Logger.Log().Msgf("available template functions: %s", templates.TemplateFunctions())
 }
 
 // Main is main function for cli.

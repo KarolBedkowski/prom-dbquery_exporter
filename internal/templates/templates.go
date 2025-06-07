@@ -15,8 +15,8 @@ import (
 	"unicode"
 )
 
-// TemplateCompile try to compile template.
-func TemplateCompile(name, tmpl string) (*template.Template, error) {
+// CompileTemplate try to compile template.
+func CompileTemplate(name, tmpl string) (*template.Template, error) {
 	var buf strings.Builder
 
 	// trim white characters in each line
@@ -63,7 +63,7 @@ var FuncMap = template.FuncMap{
 	"removeQuotes":               removeQuotes,
 }
 
-func AvailableTmplFunctions() []string {
+func TemplateFunctions() []string {
 	return slices.Sorted(maps.Keys(FuncMap))
 }
 

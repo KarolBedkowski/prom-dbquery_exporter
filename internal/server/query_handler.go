@@ -94,7 +94,7 @@ func (q *queryHandler) Handler() http.Handler {
 	// 5. log request traces
 	handler = debug.NewTraceMiddleware("dbquery_exporter")(handler)
 	// 4. update logger, log req, response
-	handler = newLogMiddleware(handler, "query", false)
+	handler = newLogMiddleware(handler, "query")
 	// 3. add logger to ctx
 	handler = hlog.NewHandler(log.Logger)(handler)
 	// 2. set request_handler
@@ -113,12 +113,6 @@ func (q *queryHandler) Handler() http.Handler {
 	}
 
 	return handler
-}
-
-func (q *queryHandler) updateConf(c *conf.Configuration) {
-	q.cfg = c
-
-	q.resultCache.Clear()
 }
 
 func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) {
@@ -152,7 +146,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 	logger.Debug().Object("parameters", parameters).Msg("parsed parameters")
 
-	dWriter := dataWriter{writer: writer}
+	dWriter := responseWriter{writer: writer}
 	dWriter.writeHeaders()
 
 	// cancelCh is used to cancel background / running queries
@@ -165,7 +159,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 	defer close(output)
 
 	debug.TracePrintf(ctx, "start reading data, scheduled: %d", dWriter.scheduled)
-	q.writeResult(ctx, &dWriter, output)
+	q.gatherResults(ctx, &dWriter, output)
 
 	logger.Debug().Int("written", dWriter.written).
 		Err(ctx.Err()).
@@ -175,6 +169,12 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		metrics.IncProcessErrorsCnt(metrics.ProcessBadRequestError)
 		http.Error(writer, "error", http.StatusBadRequest)
 	}
+}
+
+func (q *queryHandler) updateConf(c *conf.Configuration) {
+	q.cfg = c
+
+	q.resultCache.Clear()
 }
 
 func (q *queryHandler) getFromCache(query *conf.Query, dbName string, params map[string]any) ([]byte, bool) {
@@ -212,7 +212,7 @@ func (q *queryHandler) validateOutput(output []byte) error {
 }
 
 func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestParameters,
-	dWriter *dataWriter, cancelCh chan struct{},
+	respWriter *responseWriter, cancelCh chan struct{},
 ) chan *collectors.TaskResult {
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("queryhandler: database processing start")
@@ -227,7 +227,7 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 		if data, ok := q.getFromCache(query, dbName, parameters.extraParameters); ok {
 			logger.Debug().Str("dbname", dbName).Str("query", query.Name).Msg("queryhandler: query result from cache")
 			debug.TracePrintf(ctx, "data from cache for %q from %q", query.Name, dbName)
-			dWriter.write(ctx, data)
+			respWriter.write(ctx, data)
 
 			continue
 		}
@@ -246,31 +246,33 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
 		q.taskQueue.AddTask(ctx, task)
 		debug.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbName)
-		dWriter.incScheduled()
+		respWriter.incScheduled()
 	}
 
 	return output
 }
 
-func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp <-chan *collectors.TaskResult) {
+func (q *queryHandler) gatherResults(ctx context.Context, respWriter *responseWriter,
+	inp <-chan *collectors.TaskResult,
+) {
 	logger := log.Ctx(ctx)
-	logger.Debug().Msgf("queryhandler: write result start; waiting for %d results", dWriter.scheduled)
+	logger.Debug().Msgf("queryhandler: write result start; waiting for %d results", respWriter.scheduled)
 
-	for dWriter.scheduled > 0 {
+	for respWriter.scheduled > 0 {
 		select {
 		case res, ok := <-inp:
 			if !ok {
 				return
 			}
 
-			dWriter.scheduled--
+			respWriter.scheduled--
 
 			task := res.Task
 
 			if res.Error != nil {
 				logger.Warn().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
 				debug.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
-				dWriter.write(ctx, []byte("# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error\n"))
+				respWriter.write(ctx, []byte("# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error\n"))
 
 				continue
 			}
@@ -285,7 +287,7 @@ func (q *queryHandler) writeResult(ctx context.Context, dWriter *dataWriter, inp
 				continue
 			}
 
-			dWriter.write(ctx, res.Result)
+			respWriter.write(ctx, res.Result)
 			q.putIntoCache(task, res.Result)
 
 		case <-ctx.Done():

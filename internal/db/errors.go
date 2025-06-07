@@ -1,5 +1,7 @@
 package db
 
+import "fmt"
+
 // errors.go
 // Copyright (C) 2023 Karol Będkowski <Karol Będkowski@kkomp>
 //
@@ -7,6 +9,10 @@ package db
 
 // InvalidConfigurationError is error generated when database configuration is invalid.
 type InvalidConfigurationError string
+
+func newInvalidConfigurationError(format string, a ...any) InvalidConfigurationError {
+	return InvalidConfigurationError(fmt.Sprintf(format, a...))
+}
 
 func (i InvalidConfigurationError) Error() string {
 	return string(i)

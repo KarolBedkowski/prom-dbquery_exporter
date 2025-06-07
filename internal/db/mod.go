@@ -10,7 +10,6 @@ package db
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"maps"
 	"slices"
 	"sort"
@@ -94,7 +93,7 @@ func (d Registry) GetInstance(cfg *conf.Database) (Database, error) {
 		return db.instanate(cfg)
 	}
 
-	return nil, InvalidConfigurationError(fmt.Sprintf("unsupported database type '%s'", cfg.Driver))
+	return nil, newInvalidConfigurationError("unsupported database type '%s'", cfg.Driver)
 }
 
 func registerDatabase(def dbDefinition, names ...string) {

@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -28,7 +27,7 @@ import (
 const (
 	defaultRwTimeout       = 300 * time.Second
 	defaultMaxHeaderBytes  = 1 << 20
-	defaultShutdownTimeout = time.Duration(2) * time.Second
+	defaultShutdownTimeout = time.Duration(5) * time.Second
 )
 
 type TaskQueue interface {
@@ -37,7 +36,8 @@ type TaskQueue interface {
 
 // WebHandler handle incoming requests.
 type WebHandler struct {
-	handler     *queryHandler
+	queryHandler *queryHandler
+	// info is available only on localhost
 	infoHandler *infoHandler
 	server      *http.Server
 	cfg         *conf.Configuration
@@ -47,36 +47,24 @@ type WebHandler struct {
 func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 	taskQueue TaskQueue, cfgCh chan *conf.Configuration,
 ) *WebHandler {
-	qh := newQueryHandler(cfg, cache, taskQueue)
-	http.Handle("/query", qh.Handler())
-
-	ih := newInfoHandler(cfg)
-	if conf.Args.EnableInfo {
-		http.Handle("/info", ih.Handler())
-	}
-
 	webHandler := &WebHandler{
-		handler:     qh,
-		infoHandler: ih,
-		cfg:         cfg,
+		queryHandler: newQueryHandler(cfg, cache, taskQueue),
+		infoHandler:  newInfoHandler(cfg),
+		cfg:          cfg,
 	}
 
-	local := strings.HasPrefix(conf.Args.ListenAddress, "127.0.0.1:") ||
-		strings.HasPrefix(conf.Args.ListenAddress, "localhost:")
+	http.Handle("/query", webHandler.queryHandler.Handler())
+	http.Handle("/info", webHandler.infoHandler.Handler())
+	http.HandleFunc("/health", healthHandler)
 
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
 		promhttp.HandlerOpts{
-			// Opt into OpenMetrics to support exemplars.
 			EnableOpenMetrics: true,
 			// disable compression when listen on lo; reduce memory allocations & usage
-			DisableCompression: local,
+			DisableCompression: conf.Args.ListenOnLocalAddress(),
 		},
 	))
-
-	http.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte("ok"))
-	})
 
 	if lp, err := newLandingPage(); err != nil {
 		slog.Error("create landing pager error", "err", err)
@@ -84,7 +72,7 @@ func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 		http.Handle("/", lp)
 	}
 
-	webHandler.updateConfHandler(cfgCh)
+	webHandler.startConfHandler(cfgCh)
 
 	return webHandler
 }
@@ -124,12 +112,14 @@ func (w *WebHandler) Stop(err error) {
 	_ = w.server.Shutdown(ctx)
 }
 
-// UpdateConf reload configuration in all handlers.
-func (w *WebHandler) updateConfHandler(cfgCh chan *conf.Configuration) {
+// startConfHandler wait for configuration changes and update handlers.
+func (w *WebHandler) startConfHandler(cfgCh chan *conf.Configuration) {
 	go func() {
 		for newCfg := range cfgCh {
-			w.handler.updateConf(newCfg)
+			w.cfg = newCfg
 			w.infoHandler.cfg = newCfg
+
+			w.queryHandler.updateConf(newCfg)
 		}
 	}()
 }
@@ -148,4 +138,8 @@ func newLandingPage() (*web.LandingPageHandler, error) {
 	}
 
 	return web.NewLandingPage(landingConfig) //nolint:wrapcheck
+}
+
+func healthHandler(w http.ResponseWriter, _ *http.Request) {
+	_, _ = w.Write([]byte("ok"))
 }
