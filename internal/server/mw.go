@@ -9,8 +9,10 @@ package server
 // Inspired by: https://arunvelsriram.dev/simple-golang-http-logging-middleware
 
 import (
+	"compress/gzip"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -122,4 +124,63 @@ func newLimitRequestInFlightMW(next http.Handler, limit uint) http.Handler {
 	}
 
 	return http.HandlerFunc(logFn)
+}
+
+// -------------------------------------------------
+
+type gzipResponseWriter struct {
+	http.ResponseWriter
+
+	statusCode    int
+	headerWritten bool
+
+	w *gzip.Writer
+}
+
+func (gzr *gzipResponseWriter) WriteHeader(statusCode int) {
+	gzr.statusCode = statusCode
+	gzr.headerWritten = true
+
+	if gzr.statusCode != http.StatusNotModified && gzr.statusCode != http.StatusNoContent {
+		gzr.ResponseWriter.Header().Set("Content-Encoding", "gzip")
+		gzr.ResponseWriter.Header().Del("Content-Length")
+	}
+
+	gzr.ResponseWriter.WriteHeader(statusCode)
+}
+
+func (gzr *gzipResponseWriter) Write(b []byte) (int, error) {
+	if _, ok := gzr.Header()["Content-Type"]; !ok {
+		gzr.ResponseWriter.Header().Set("Content-Type", http.DetectContentType(b))
+	}
+
+	if !gzr.headerWritten {
+		gzr.WriteHeader(http.StatusOK)
+	}
+
+	cnt, err := gzr.w.Write(b)
+	if err != nil {
+		return cnt, fmt.Errorf("write via gzip error: %w", err)
+	}
+
+	return cnt, nil
+}
+
+func newGzipHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
+			next.ServeHTTP(w, req)
+
+			return
+		}
+
+		w.Header().Set("Content-Encoding", "gzip")
+
+		gz := gzip.NewWriter(w)
+		defer gz.Close()
+
+		gzr := &gzipResponseWriter{ResponseWriter: w, w: gz}
+
+		next.ServeHTTP(gzr, req)
+	})
 }

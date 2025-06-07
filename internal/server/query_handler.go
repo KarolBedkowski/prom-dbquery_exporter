@@ -103,6 +103,11 @@ func (q *queryHandler) Handler() http.Handler {
 	handler = promhttp.InstrumentHandlerInFlight(newReqInflightWrapper("query"), handler)
 	handler = promhttp.InstrumentHandlerDuration(newReqDurationWrapper("query"), handler)
 
+	// 0. compression
+	if !conf.Args.ListenOnLocalAddress() {
+		handler = newGzipHandler(handler)
+	}
+
 	if q.cfg.Global.MaxRequestInFlight > 0 {
 		handler = newLimitRequestInFlightMW(handler, q.cfg.Global.MaxRequestInFlight)
 	}

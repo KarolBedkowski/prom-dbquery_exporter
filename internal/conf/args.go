@@ -1,6 +1,9 @@
 package conf
 
-import "flag"
+import (
+	"flag"
+	"strings"
+)
 
 //
 // cli.go
@@ -29,6 +32,11 @@ type CliArguments struct {
 
 	LogLevel  string
 	LogFormat string
+}
+
+func (c *CliArguments) ListenOnLocalAddress() bool {
+	return strings.HasPrefix(c.ListenAddress, "127.0.0.1:") ||
+		strings.HasPrefix(c.ListenAddress, "localhost:")
 }
 
 var Args CliArguments
