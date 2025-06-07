@@ -43,8 +43,12 @@ func (cs *Collectors) Run(ctx context.Context) error {
 	for {
 		cs.log.Debug().Msg("collectors: starting...")
 
-		group, cancel, err := cs.startCollectors()
+		ctx, cancel := context.WithCancel(ctx)
+
+		group, err := cs.startCollectors(ctx)
 		if err != nil {
+			cancel()
+
 			return err
 		}
 
@@ -142,17 +146,16 @@ func (cs *Collectors) createCollectors() error {
 	return nil
 }
 
-func (cs *Collectors) startCollectors() (*errgroup.Group, context.CancelFunc, error) {
+func (cs *Collectors) startCollectors(ctx context.Context) (*errgroup.Group, error) {
 	if err := cs.createCollectors(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	cctx, cancel := context.WithCancel(context.Background())
-	group, cctx := errgroup.WithContext(cctx)
+	group, cctx := errgroup.WithContext(ctx)
 
 	for _, dbloader := range cs.collectors {
 		group.Go(func() error { return dbloader.run(cctx) })
 	}
 
-	return group, cancel, nil
+	return group, nil
 }

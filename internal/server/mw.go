@@ -40,10 +40,10 @@ func (r *logResponseWriter) Write(b []byte) (int, error) {
 	return size, nil
 }
 
-func (r *logResponseWriter) WriteHeader(statusCode int) {
-	r.ResponseWriter.WriteHeader(statusCode)
+func (r *logResponseWriter) WriteHeader(status int) {
+	r.ResponseWriter.WriteHeader(status)
 
-	r.status = statusCode
+	r.status = status
 }
 
 // newLogMiddleware create new logging middleware.
@@ -66,7 +66,7 @@ func newLogMiddleware(next http.Handler, name string) http.Handler {
 			Strs("agent", request.Header["User-Agent"]).
 			Msg("webhandler: request start")
 
-		lrw := logResponseWriter{ResponseWriter: writer}
+		lrw := logResponseWriter{ResponseWriter: writer, status: 0, size: 0}
 
 		next.ServeHTTP(&lrw, request)
 
@@ -112,22 +112,22 @@ func newLimitRequestInFlightMW(next http.Handler, limit uint) http.Handler {
 type gzipResponseWriter struct {
 	http.ResponseWriter
 
-	statusCode    int
+	status        int
 	headerWritten bool
 
 	w *gzip.Writer
 }
 
-func (gzr *gzipResponseWriter) WriteHeader(statusCode int) {
-	gzr.statusCode = statusCode
+func (gzr *gzipResponseWriter) WriteHeader(status int) {
+	gzr.status = status
 	gzr.headerWritten = true
 
-	if gzr.statusCode != http.StatusNotModified && gzr.statusCode != http.StatusNoContent {
+	if gzr.status != http.StatusNotModified && gzr.status != http.StatusNoContent {
 		gzr.ResponseWriter.Header().Set("Content-Encoding", "gzip")
 		gzr.ResponseWriter.Header().Del("Content-Length")
 	}
 
-	gzr.ResponseWriter.WriteHeader(statusCode)
+	gzr.ResponseWriter.WriteHeader(status)
 }
 
 func (gzr *gzipResponseWriter) Write(b []byte) (int, error) {
@@ -160,7 +160,7 @@ func newGzipHandler(next http.Handler) http.Handler {
 		gz := gzip.NewWriter(w)
 		defer gz.Close()
 
-		gzr := &gzipResponseWriter{ResponseWriter: w, w: gz}
+		gzr := &gzipResponseWriter{ResponseWriter: w, w: gz, status: 0, headerWritten: false}
 
 		next.ServeHTTP(gzr, req)
 	})

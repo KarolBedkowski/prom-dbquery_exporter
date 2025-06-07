@@ -169,7 +169,7 @@ func initializeLogger(level string, format string) {
 
 		fallthrough
 	case "logfmt":
-		llog = log.Output(zerolog.ConsoleWriter{
+		llog = log.Output(zerolog.ConsoleWriter{ //nolint:exhaustruct
 			Out:        os.Stderr,
 			NoColor:    !outputIsConsole(),
 			TimeFormat: time.RFC3339,
@@ -207,8 +207,9 @@ type confHandler struct {
 
 func newConfHandler(cfg *conf.Configuration) confHandler {
 	return confHandler{
-		hupCh: make(chan os.Signal, 1),
-		cfg:   cfg,
+		hupCh:    make(chan os.Signal, 1),
+		cfg:      cfg,
+		reloadCh: nil,
 	}
 }
 

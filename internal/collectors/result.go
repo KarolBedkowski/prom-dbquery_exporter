@@ -47,6 +47,7 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 		QueryStartTime: qRes.Start.Unix(),
 		QueryDuration:  qRes.Duration,
 		Count:          len(qRes.Records),
+		Error:          "",
 	}
 
 	log.Ctx(ctx).Debug().Interface("res", res).Msg("result: executing template")
@@ -63,7 +64,7 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 func formatError(ctx context.Context, err error, query *conf.Query,
 	db *conf.Database,
 ) ([]byte, error) {
-	res := resultTmplData{
+	res := resultTmplData{ //nolint:exhaustruct
 		Query:    query.Name,
 		Database: db.Name,
 		L:        db.Labels,

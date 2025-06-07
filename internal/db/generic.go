@@ -24,16 +24,23 @@ const (
 )
 
 type genericDatabase struct {
-	conn       *sqlx.DB
-	dbCfg      *conf.Database
-	connStr    string
-	driver     string
-	initialSQL []string
+	conn    *sqlx.DB
+	dbCfg   *conf.Database
+	connStr string
+	driver  string
 
 	lock sync.RWMutex
 }
 
-func (g *genericDatabase) CollectMetrics(resCh chan<- prometheus.Metric) {
+func newGenericDatabase(connstr, driver string, dbcfg *conf.Database) Database {
+	return &genericDatabase{ //nolint:exhaustruct
+		connStr: connstr,
+		driver:  driver,
+		dbCfg:   dbcfg,
+	}
+}
+
+func (g *genericDatabase) CollectMetrics(resCh chan<- prometheus.Metric) { //nolint:funlen
 	if g.conn == nil {
 		return
 	}
@@ -102,7 +109,7 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 ) (*QueryResult, error) {
 	llog := loggerFromCtx(ctx).With().Str("db", g.dbCfg.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
-	result := &QueryResult{Start: time.Now()}
+	result := &QueryResult{Start: time.Now()} //nolint:exhaustruct
 
 	debug.TracePrintf(ctx, "db: opening connection")
 
@@ -278,7 +285,7 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 	dbpoolConnOpenedTotal.WithLabelValues(g.dbCfg.Name).Inc()
 
 	// launch initial sqls if defined
-	for idx, sql := range g.initialSQL {
+	for idx, sql := range g.dbCfg.InitialQuery {
 		llog.Debug().Str("sql", sql).Msg("db: generic: execute initial sql")
 		debug.TracePrintf(ctx, "db: execute initial sql")
 

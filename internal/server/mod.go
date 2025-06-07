@@ -51,6 +51,7 @@ func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 		queryHandler: newQueryHandler(cfg, cache, taskQueue),
 		infoHandler:  newInfoHandler(cfg),
 		cfg:          cfg,
+		server:       nil,
 	}
 
 	http.Handle("/query", webHandler.queryHandler.Handler())
@@ -59,7 +60,7 @@ func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 
 	http.Handle("/metrics", promhttp.HandlerFor(
 		prometheus.DefaultGatherer,
-		promhttp.HandlerOpts{
+		promhttp.HandlerOpts{ //nolint:exhaustruct
 			EnableOpenMetrics: true,
 			// disable compression when listen on lo; reduce memory allocations & usage
 			DisableCompression: conf.Args.ListenOnLocalAddress(),
@@ -86,7 +87,7 @@ func (w *WebHandler) Run() error {
 		rwTimeout = w.cfg.Global.RequestTimeout
 	}
 
-	w.server = &http.Server{
+	w.server = &http.Server{ //nolint:exhaustruct
 		Addr:           conf.Args.ListenAddress,
 		ReadTimeout:    rwTimeout,
 		WriteTimeout:   rwTimeout,
@@ -125,14 +126,15 @@ func (w *WebHandler) startConfHandler(cfgCh chan *conf.Configuration) {
 }
 
 func newLandingPage() (*web.LandingPageHandler, error) {
-	landingConfig := web.LandingConfig{
+	landingConfig := web.LandingConfig{ //nolint:exhaustruct
 		Name:        "dbquery_exporter",
 		Description: "Prometheus dbquery Exporter",
 		Version:     version.Info(),
 		Links: []web.LandingLinks{
 			{
-				Address: "/metrics",
-				Text:    "Metrics",
+				Address:     "/metrics",
+				Text:        "Metrics",
+				Description: "Endpoint with exporter metrics",
 			},
 		},
 	}

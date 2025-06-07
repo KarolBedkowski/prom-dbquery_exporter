@@ -117,12 +117,13 @@ func getConfig(configPath string) (*web.Config, error) {
 	}
 
 	cfg := &web.Config{
-		TLSConfig: web.TLSConfig{
+		TLSConfig: web.TLSConfig{ //nolint:exhaustruct
 			MinVersion:               tls.VersionTLS12,
 			MaxVersion:               tls.VersionTLS13,
 			PreferServerCipherSuites: true,
 		},
-		HTTPConfig: web.HTTPConfig{HTTP2: true},
+		HTTPConfig: web.HTTPConfig{HTTP2: true, Header: nil},
+		Users:      nil,
 	}
 
 	err = yaml.UnmarshalStrict(content, cfg)
@@ -141,7 +142,7 @@ type secWebHandler struct {
 	headers map[string]string
 	users   map[string]config_util.Secret
 
-	mtx sync.Mutex
+	lock sync.Mutex
 }
 
 func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
@@ -151,7 +152,7 @@ func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 		log.Logger.Info().Msg("sechandler: authorization disabled")
 	}
 
-	return &secWebHandler{
+	return &secWebHandler{ //nolint:exhaustruct
 		handler: handler,
 		cache:   make(map[string]bool),
 		headers: conf.HTTPConfig.Header,
@@ -185,7 +186,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 		cacheKey := hex.EncodeToString(append(append([]byte(user), []byte(hashedPassword)...),
 			[]byte(pass)...))
 
-		wh.mtx.Lock()
+		wh.lock.Lock()
 
 		authOk, ok := wh.cache[cacheKey]
 		if !ok {
@@ -195,7 +196,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 			wh.cache[cacheKey] = authOk
 		}
 
-		wh.mtx.Unlock()
+		wh.lock.Unlock()
 
 		if authOk && validUser {
 			wh.handler.ServeHTTP(writer, req)

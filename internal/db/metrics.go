@@ -63,17 +63,21 @@ var (
 var (
 	dbpoolConnOpenedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "dbpool_connections_connected_total",
-			Help:      "Total number of connections created per database",
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "dbpool",
+			Name:        "connections_connected_total",
+			Help:        "Total number of connections created per database",
+			ConstLabels: nil,
 		},
 		[]string{"database"})
 
 	dbpoolConnFailedTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "dbpool_connections_failed_total",
-			Help:      "Total number of failed connections per database",
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "dbpool",
+			Name:        "connections_failed_total",
+			Help:        "Total number of failed connections per database",
+			ConstLabels: nil,
 		},
 		[]string{"database"})
 )

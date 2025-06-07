@@ -36,8 +36,8 @@ type collector struct {
 
 	// tasksQueue is queue of incoming task to schedule.
 	tasksQueue chan *Task
-	// stdWorkerQueue is chan that distribute task to workers.
-	stdWorkerQueue chan *Task
+	// stdWorkQueue is chan that distribute task to workers.
+	stdWorkQueue chan *Task
 	// bgWorkQueue is chan that distribute task created by scheduler to dedicated pool of workers.
 	bgWorkQueue chan *Task
 
@@ -60,12 +60,15 @@ func newCollector(name string, dbcfg *conf.Database) (*collector, error) {
 	}
 
 	col := &collector{
-		name:           name,
-		database:       database,
-		stdWorkerQueue: make(chan *Task, tasksQueueSize),
-		bgWorkQueue:    make(chan *Task, tasksQueueSize),
-		dbcfg:          dbcfg,
-		log:            log.Logger.With().Str("database", name).Logger(),
+		name:            name,
+		database:        database,
+		tasksQueue:      nil,
+		stdWorkQueue:    make(chan *Task, tasksQueueSize),
+		bgWorkQueue:     make(chan *Task, tasksQueueSize),
+		dbcfg:           dbcfg,
+		log:             log.Logger.With().Str("database", name).Logger(),
+		stdWorkersGroup: errgroup.Group{},
+		bgWorkersGroup:  errgroup.Group{},
 	}
 
 	col.stdWorkersGroup.SetLimit(dbcfg.MaxWorkers)
@@ -100,7 +103,7 @@ func (c *collector) run(ctx context.Context) error {
 	c.tasksQueue = make(chan *Task, 1)
 	defer close(c.tasksQueue)
 
-	debug.SetGoroutineLabels(context.Background(), "main_worker", c.name)
+	debug.SetGoroutineLabels(ctx, "main_worker", c.name)
 
 loop:
 	for {
@@ -115,7 +118,7 @@ loop:
 				c.bgWorkQueue <- task
 				c.spawnBgWorker(ctx)
 			} else {
-				c.stdWorkerQueue <- task
+				c.stdWorkQueue <- task
 				c.spawnWorker(ctx)
 			}
 		}
@@ -136,12 +139,12 @@ loop:
 
 // spawnWorker start worker for normal queue.
 func (c *collector) spawnWorker(ctx context.Context) {
-	if len(c.stdWorkerQueue) == 0 {
+	if len(c.stdWorkQueue) == 0 {
 		return
 	}
 
 	c.stdWorkersGroup.TryGo(func() error {
-		c.worker(ctx, c.stdWorkerQueue, false)
+		c.worker(ctx, c.stdWorkQueue, false)
 
 		return nil
 	})
@@ -175,7 +178,7 @@ func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool)
 
 loop:
 	for {
-		debug.SetGoroutineLabels(context.Background(), "worker", idx, "db", c.name, "king", workTypeString(isBg))
+		debug.SetGoroutineLabels(ctx, "worker", idx, "db", c.name, "king", workTypeString(isBg))
 
 		// reset worker shutdown timer after each iteration.
 		if !shutdownTimer.Stop() {
@@ -194,7 +197,7 @@ loop:
 		case task, ok := <-workQueue:
 			if ok {
 				llog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
-				debug.SetGoroutineLabels(ctx, "query", task.QueryName, "worker", idx, "db", c.name, "req_id", task.ReqID)
+				debug.SetGoroutineLabels(ctx, "query", task.Query.Name, "worker", idx, "db", c.name, "req_id", task.ReqID)
 
 				c.handleTask(ctx, task)
 			}
@@ -249,7 +252,7 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *TaskResult) {
 	llog := log.Ctx(ctx)
 
-	debug.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
+	debug.TracePrintf(ctx, "start query %q in %q", task.Query.Name, task.DBName)
 	llog.Debug().Msg("collector: start query")
 
 	result, err := c.database.Query(ctx, task.Query, task.Params)
@@ -260,7 +263,7 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *Tas
 		return
 	}
 
-	queryDuration.WithLabelValues(task.QueryName, task.DBName).Observe(result.Duration)
+	queryDuration.WithLabelValues(task.Query.Name, task.DBName).Observe(result.Duration)
 	llog.Debug().Msgf("collector: result received in %0.5f", result.Duration)
 
 	output, err := formatResult(ctx, result, task.Query, c.dbcfg)
@@ -272,7 +275,7 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, res chan *Tas
 	}
 
 	llog.Debug().Msg("collector: result formatted")
-	debug.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
+	debug.TracePrintf(ctx, "finished  query and formatting %q in %q", task.Query.Name, task.DBName)
 	res <- task.newResult(nil, output)
 }
 
@@ -304,7 +307,7 @@ func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) {
 	resCh <- prometheus.MustNewConstMetric(
 		collectorQueueLengthDesc,
 		prometheus.GaugeValue,
-		float64(len(c.stdWorkerQueue)),
+		float64(len(c.stdWorkQueue)),
 		c.name,
 		"main",
 	)

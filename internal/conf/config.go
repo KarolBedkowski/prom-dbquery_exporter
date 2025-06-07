@@ -65,7 +65,7 @@ func (c *Configuration) GroupQueries(group string) []string {
 // LoadConfiguration from filename.
 func Load(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
-	conf := &Configuration{}
+	conf := &Configuration{} //nolint:exhaustruct
 
 	logger.Info().Msgf("Loading config file %s", filename)
 
@@ -159,7 +159,9 @@ func (c *Configuration) validate(ctx context.Context, dbp DatabaseProvider) erro
 		}
 	}
 
-	errs = multierror.Append(errs, c.validateDatabases(ctx, dbp), c.validateJobs(ctx))
+	errs = multierror.Append(errs,
+		c.validateDatabases(ctx, dbp),
+		c.validateJobs(ctx))
 
 	return errs.ErrorOrNil()
 }
@@ -178,7 +180,7 @@ func (c *Configuration) validateDatabases(ctx context.Context, dbp DatabaseProvi
 		if dbp.IsSupported(db) {
 			if err := db.validate(dbp); err != nil {
 				errs = multierror.Append(errs, newConfigurationError(
-					fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
+					fmt.Sprintf("validate database %q error", name)).Wrap(err))
 			} else {
 				anyDbConfigured = true
 			}

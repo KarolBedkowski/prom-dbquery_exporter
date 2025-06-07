@@ -10,6 +10,7 @@ package collectors
 import (
 	"time"
 
+	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"prom-dbquery_exporter.app/internal/conf"
 )
@@ -21,7 +22,6 @@ type Task struct {
 	Params       map[string]any
 	Output       chan *TaskResult
 	DBName       string
-	QueryName    string
 
 	IsScheduledJob bool
 	ReqID          string
@@ -29,9 +29,56 @@ type Task struct {
 	CancelCh chan struct{}
 }
 
+func NewTask(dbName string, query *conf.Query, output chan *TaskResult) *Task {
+	return &Task{
+		RequestStart: time.Now(),
+		Query:        query,
+		Params:       nil,
+		Output:       output,
+		DBName:       dbName,
+
+		IsScheduledJob: false,
+		ReqID:          "",
+
+		CancelCh: nil,
+	}
+}
+
+func (d *Task) WithReqID(reqID ...string) *Task {
+	if len(reqID) > 1 {
+		panic("to many parameters")
+	}
+
+	if len(reqID) > 0 && reqID[0] != "" {
+		d.ReqID = reqID[0]
+	} else {
+		d.ReqID = xid.New().String()
+	}
+
+	return d
+}
+
+func (d *Task) WithParams(params map[string]any) *Task {
+	d.Params = params
+
+	return d
+}
+
+func (d *Task) MarkScheduled() *Task {
+	d.IsScheduledJob = true
+
+	return d
+}
+
 // Cancelled check is task cancelled.
 func (d *Task) Cancelled() <-chan struct{} {
 	return d.CancelCh
+}
+
+func (d *Task) UseCancel(ch chan struct{}) *Task {
+	d.CancelCh = ch
+
+	return d
 }
 
 // WithCancel create CancelCh and return cancel function.
@@ -46,7 +93,7 @@ func (d *Task) WithCancel() (*Task, func()) {
 // MarshalZerologObject implements LogObjectMarshaler.
 func (d *Task) MarshalZerologObject(e *zerolog.Event) {
 	e.Str("db", d.DBName).
-		Str("query", d.QueryName).
+		Str("query", d.Query.Name).
 		Bool("is_job", d.IsScheduledJob).
 		Interface("params", d.Params).
 		Str("req_id", d.ReqID)
@@ -71,17 +118,6 @@ type TaskResult struct {
 	Error  error
 	Task   *Task
 	Result []byte
-}
-
-// NewSimpleTaskResult create new TaskResult with basic data.
-func NewSimpleTaskResult(res []byte, dbName, queryName string) *TaskResult {
-	return &TaskResult{
-		Result: res,
-		Task: &Task{
-			DBName:    dbName,
-			QueryName: queryName,
-		},
-	}
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.

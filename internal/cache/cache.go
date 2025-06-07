@@ -21,18 +21,22 @@ import (
 var (
 	queryCacheHits = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "cache_hit_total",
-			Help:      "Number of data loaded from cache",
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "cache",
+			Name:        "hit_total",
+			Help:        "Number of data loaded from cache",
+			ConstLabels: nil,
 		},
 		[]string{"name"},
 	)
 
 	queryCacheMiss = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "cache_miss_total",
-			Help:      "Number of data not found in cache",
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "cache",
+			Name:        "miss_total",
+			Help:        "Number of data not found in cache",
+			ConstLabels: nil,
 		},
 		[]string{"name"},
 	)
@@ -64,6 +68,7 @@ func New[T any](name string) *Cache[T] {
 		name:   name,
 		cache:  make(map[string]cacheItem[T]),
 		logger: log.Logger.With().Str("subsystem", "cache").Str("cache_name", name).Logger(),
+		lock:   sync.Mutex{},
 	}
 }
 

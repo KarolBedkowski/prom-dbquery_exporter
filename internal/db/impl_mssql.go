@@ -23,14 +23,7 @@ func (mssqlDef) instanate(cfg *conf.Database) (Database, error) {
 	params := valuesFromParams(cfg.Connection)
 	connstr := params.Encode()
 
-	l := &genericDatabase{
-		connStr:    connstr,
-		driver:     "mssql",
-		initialSQL: cfg.InitialQuery,
-		dbCfg:      cfg,
-	}
-
-	return l, nil
+	return newGenericDatabase(connstr, "mssql", cfg), nil
 }
 
 func (mssqlDef) validateConf(cfg *conf.Database) error {

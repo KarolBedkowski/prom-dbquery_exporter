@@ -16,28 +16,34 @@ var (
 	// workersCreatedCnt is total number of created workers.
 	workersCreatedCnt = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "workers_created_total",
-			Help:      "Total number of created workers",
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "",
+			Name:        "workers_created_total",
+			Help:        "Total number of created workers",
+			ConstLabels: nil,
 		},
 		[]string{"database", "kind"})
 
 	tasksQueueWaitTime = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "tasks_queue_wait_time_seconds",
-			Help:      "A histogram of time what log task waiting for handle.",
-			Buckets:   []float64{0.05, 0.1, 0.2, 0.5, 1, 5, 10, 30, 60, 120, 300},
+		prometheus.HistogramOpts{ //nolint:exhaustruct
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "",
+			Name:        "tasks_queue_wait_time_seconds",
+			Help:        "A histogram of time what log task waiting for handle.",
+			Buckets:     []float64{0.05, 0.1, 0.2, 0.5, 1, 5, 10, 30, 60, 120, 300},
+			ConstLabels: nil,
 		},
 		[]string{"database", "kind"})
 
 	// queryDuration is duration of query.
 	queryDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "query_duration_seconds",
-			Help:      "Duration of query by the DBQuery exporter",
-			Buckets:   []float64{0.05, 0.1, 0.2, 0.5, 1, 5, 10, 30, 60, 120, 300},
+		prometheus.HistogramOpts{ //nolint:exhaustruct
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "",
+			Name:        "query_duration_seconds",
+			Help:        "Duration of query by the DBQuery exporter",
+			Buckets:     []float64{0.05, 0.1, 0.2, 0.5, 1, 5, 10, 30, 60, 120, 300},
+			ConstLabels: nil,
 		},
 		[]string{"query", "database"},
 	)

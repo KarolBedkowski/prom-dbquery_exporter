@@ -48,14 +48,7 @@ func (postgresqlDef) instanate(cfg *conf.Database) (Database, error) {
 		connStr = strings.Join(p, " ")
 	}
 
-	l := &genericDatabase{
-		connStr:    connStr,
-		driver:     "postgres",
-		initialSQL: cfg.InitialQuery,
-		dbCfg:      cfg,
-	}
-
-	return l, nil
+	return newGenericDatabase(connStr, "postgres", cfg), nil
 }
 
 func (postgresqlDef) validateConf(cfg *conf.Database) error {

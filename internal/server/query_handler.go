@@ -40,16 +40,17 @@ func (l lockInfo) String() string {
 
 type locker struct {
 	runningQuery map[string]lockInfo
-	sync.Mutex
+
+	lock sync.Mutex
 }
 
 func newLocker() locker {
-	return locker{runningQuery: make(map[string]lockInfo)}
+	return locker{runningQuery: make(map[string]lockInfo)} //nolint:exhaustruct
 }
 
 func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
-	l.Lock()
-	defer l.Unlock()
+	l.lock.Lock()
+	defer l.lock.Unlock()
 
 	if li, ok := l.runningQuery[queryKey]; ok {
 		if time.Since(li.ts) < maxLockTime {
@@ -65,8 +66,8 @@ func (l *locker) tryLock(queryKey, reqID string) (string, bool) {
 }
 
 func (l *locker) unlock(queryKey string) {
-	l.Lock()
-	defer l.Unlock()
+	l.lock.Lock()
+	defer l.lock.Unlock()
 
 	delete(l.runningQuery, queryKey)
 }
@@ -146,7 +147,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 
 	logger.Debug().Object("parameters", parameters).Msg("parsed parameters")
 
-	dWriter := responseWriter{writer: writer}
+	dWriter := responseWriter{writer: writer, written: 0, scheduled: 0}
 	dWriter.writeHeaders()
 
 	// cancelCh is used to cancel background / running queries
@@ -218,7 +219,6 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 	logger.Debug().Msg("queryhandler: database processing start")
 
 	output := make(chan *collectors.TaskResult, len(parameters.dbNames)*len(parameters.queryNames))
-	now := time.Now()
 	reqID, _ := hlog.IDFromCtx(ctx)
 
 	for dbName, query := range parameters.iter() {
@@ -232,16 +232,10 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 			continue
 		}
 
-		task := &collectors.Task{
-			DBName:       dbName,
-			QueryName:    query.Name,
-			Params:       parameters.extraParameters,
-			Output:       output,
-			Query:        query,
-			RequestStart: now,
-			ReqID:        reqID.String(),
-			CancelCh:     cancelCh,
-		}
+		task := collectors.NewTask(dbName, query, output).
+			WithParams(parameters.extraParameters).
+			WithReqID(reqID.String()).
+			UseCancel(cancelCh)
 
 		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
 		q.taskQueue.AddTask(ctx, task)
@@ -271,18 +265,18 @@ func (q *queryHandler) gatherResults(ctx context.Context, respWriter *responseWr
 
 			if res.Error != nil {
 				logger.Warn().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
-				debug.TracePrintf(ctx, "process query %q from %q: %v", task.QueryName, task.DBName, res.Error)
-				respWriter.write(ctx, []byte("# query "+res.Task.QueryName+" in "+res.Task.DBName+" processing error\n"))
+				debug.TracePrintf(ctx, "process query %q from %q: %v", task.Query.Name, task.DBName, res.Error)
+				respWriter.write(ctx, []byte("# query "+res.Task.Query.Name+" in "+res.Task.DBName+" processing error\n"))
 
 				continue
 			}
 
 			logger.Debug().Object("res", res).Msg("queryhandler: write result")
-			debug.TracePrintf(ctx, "write result %q from %q", task.QueryName, task.DBName)
+			debug.TracePrintf(ctx, "write result %q from %q", task.Query.Name, task.DBName)
 
 			if err := q.validateOutput(res.Result); err != nil {
 				logger.Warn().Err(err).Object("task", task).Msg("queryhandler: validate output error")
-				debug.TracePrintf(ctx, "validate result of query %q from %q: %v", task.QueryName, task.DBName, err)
+				debug.TracePrintf(ctx, "validate result of query %q from %q: %v", task.Query.Name, task.DBName, err)
 
 				continue
 			}

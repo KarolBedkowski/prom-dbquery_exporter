@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/net/trace"
@@ -28,23 +27,29 @@ import (
 var (
 	scheduledTasksCnt = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "task_scheduled_total",
-			Help:      "Total number of scheduled tasks",
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "",
+			Name:        "task_scheduled_total",
+			Help:        "Total number of scheduled tasks",
+			ConstLabels: nil,
 		},
 	)
 	scheduledTasksSuccess = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "task_success_total",
-			Help:      "Total number of tasks finished with success",
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "",
+			Name:        "task_success_total",
+			Help:        "Total number of tasks finished with success",
+			ConstLabels: nil,
 		},
 	)
 	scheduledTasksFailed = prometheus.NewCounter(
 		prometheus.CounterOpts{
-			Namespace: metrics.MetricsNamespace,
-			Name:      "task_failed_total",
-			Help:      "Total number of tasks finished with error",
+			Namespace:   metrics.MetricsNamespace,
+			Subsystem:   "",
+			Name:        "task_failed_total",
+			Help:        "Total number of tasks finished with error",
+			ConstLabels: nil,
 		},
 	)
 )
@@ -90,6 +95,7 @@ func New(cache *cache.Cache[[]byte], cfg *conf.Configuration,
 		log:        log.Logger.With().Str("module", "scheduler").Logger(),
 		newCfgCh:   newCfgCh,
 		tasksQueue: tasksQueue,
+		tasks:      nil,
 	}
 
 	return scheduler
@@ -247,17 +253,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	output := make(chan *collectors.TaskResult, 1)
 	defer close(output)
 
-	task := &collectors.Task{
-		DBName:       dbName,
-		QueryName:    queryName,
-		Params:       nil,
-		Output:       output,
-		Query:        query,
-		RequestStart: time.Now(),
-		ReqID:        xid.New().String(),
-
-		IsScheduledJob: true,
-	}
+	task := collectors.NewTask(dbName, query, output).WithReqID().MarkScheduled()
 
 	// cancel task on end
 	task, cancel := task.WithCancel()
@@ -332,7 +328,7 @@ func (s *Scheduler) updateConfig(cfg *conf.Configuration) {
 
 	for _, job := range cfg.Jobs {
 		if job.IsValid {
-			tasks = append(tasks, &scheduledTask{job: *job})
+			tasks = append(tasks, &scheduledTask{job: *job, nextRun: time.Time{}})
 		}
 	}
 

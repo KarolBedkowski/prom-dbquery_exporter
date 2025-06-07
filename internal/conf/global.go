@@ -25,6 +25,7 @@ type GlobalConf struct {
 // MarshalZerologObject implements LogObjectMarshaler.
 func (g *GlobalConf) MarshalZerologObject(e *zerolog.Event) {
 	e.Dur("request_timeout", g.RequestTimeout)
+	e.Uint("max_request_in_flight", g.MaxRequestInFlight)
 }
 
 func (g *GlobalConf) setup() {
