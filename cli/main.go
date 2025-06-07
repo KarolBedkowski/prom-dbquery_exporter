@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdlog "log"
 	"os"
@@ -71,8 +72,9 @@ func main() {
 	printWelcome()
 	log.Logger.Debug().Interface("args", conf.Args).Msg("cli arguments")
 
-	if err := startSDWatchdog(); err != nil {
-		log.Logger.Warn().Err(err).Msg("initialize systemd error")
+	sdw, err := newSdWatchdog()
+	if err != nil {
+		log.Logger.Warn().Err(err).Msg("systemd: init watchdog error")
 	}
 
 	cfg, err := conf.Load(conf.Args.ConfigFilename, db.GlobalRegistry)
@@ -82,14 +84,14 @@ func main() {
 
 	log.Logger.Debug().Interface("conf", cfg).Msg("configuration loaded")
 
-	if err := start(cfg); err != nil {
+	if err := start(cfg, sdw); err != nil {
 		log.Logger.Fatal().Err(err).Msg("start failed")
 	}
 
 	log.Logger.Log().Msg("finished.")
 }
 
-func start(cfg *conf.Configuration) error {
+func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 	confHandler := newConfHandler(cfg)
 	collectors := collectors.New(cfg, confHandler.newReloadCh())
 	cache := cache.New[[]byte]("query_cache")
@@ -104,6 +106,10 @@ func start(cfg *conf.Configuration) error {
 	runGroup.Add(webHandler.Run, webHandler.Stop)
 	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, sched.Close)
 	runGroup.Add(confHandler.start, confHandler.stop)
+
+	if sdw != nil {
+		runGroup.Add(func() error { return sdw.start(ctx) }, func(_ error) {})
+	}
 
 	// Termination handler.
 	runGroup.Add(
@@ -124,40 +130,53 @@ func start(cfg *conf.Configuration) error {
 	return runGroup.Run() //nolint:wrapcheck
 }
 
-func startSDWatchdog() error {
+// ------------------------------------------------------------
+
+var ErrSystemdNotAvailable = errors.New("systemd not available")
+
+type sdWatchdog struct{ interval time.Duration }
+
+func newSdWatchdog() (*sdWatchdog, error) {
 	ok, err := daemon.SdNotify(false, "STATUS=starting")
 	if err != nil {
-		return fmt.Errorf("send sd status error: %w", err)
+		return nil, fmt.Errorf("send status to systemd error: %w", err)
 	}
 
-	// not running under systemd?
 	if !ok {
-		return nil
+		return nil, ErrSystemdNotAvailable
 	}
 
 	interval, err := daemon.SdWatchdogEnabled(false)
 	if err != nil {
-		return fmt.Errorf("enable sdwatchdog error: %w", err)
+		return nil, fmt.Errorf("enable sdwatchdog error: %w", err)
 	}
 
-	// watchdog disabled?
 	if interval == 0 {
-		return nil
+		return nil, ErrSystemdNotAvailable
 	}
 
-	interval /= 2
-
-	go func() {
-		tick := time.Tick(interval)
-		for range tick {
-			daemon.SdNotify(false, daemon.SdNotifyWatchdog) //nolint:errcheck
-		}
-	}()
-
-	log.Logger.Info().Err(err).Msg("systemd watchdog enabled")
-
-	return nil
+	return &sdWatchdog{interval}, nil
 }
+
+func (s sdWatchdog) start(ctx context.Context) error {
+	// watchdog disabled?
+	interval := s.interval / 2 //nolint:mnd
+
+	log.Logger.Info().Msg("systemd: watchdog started")
+
+	tick := time.Tick(interval)
+
+	for {
+		select {
+		case <-tick:
+			daemon.SdNotify(false, daemon.SdNotifyWatchdog) //nolint:errcheck
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+// ------------------------------------------------------------
 
 // InitializeLogger set log level and optional log filename.
 func initializeLogger(level string, format string) {
