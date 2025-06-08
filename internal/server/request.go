@@ -13,6 +13,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog"
@@ -135,6 +136,8 @@ func (r *requestParameters) iter() iter.Seq2[string, *conf.Query] {
 	}
 }
 
+//---------------------------------------------------------------
+
 func paramsFromQuery(req *http.Request) map[string]any {
 	params := make(map[string]any)
 
@@ -148,15 +151,32 @@ func paramsFromQuery(req *http.Request) map[string]any {
 	return params
 }
 
+// deduplicateStringList trim and remove empty and duplicated values from `inp`.
 func deduplicateStringList(inp []string) []string {
-	if len(inp) <= 1 {
-		return inp
-	}
+	switch len(inp) {
+	case 0:
+		return nil
 
-	tmpMap := make(map[string]bool, len(inp))
-	for _, s := range inp {
-		tmpMap[s] = true
-	}
+	case 1:
+		if s := strings.TrimSpace(inp[0]); s != "" {
+			return []string{s}
+		}
 
-	return slices.Collect(maps.Keys(tmpMap))
+		return nil
+
+	default:
+		tmpMap := make(map[string]struct{}, len(inp))
+
+		for _, s := range inp {
+			if s := strings.TrimSpace(s); s != "" {
+				tmpMap[s] = struct{}{}
+			}
+		}
+
+		if len(tmpMap) == 0 {
+			return nil
+		}
+
+		return slices.Collect(maps.Keys(tmpMap))
+	}
 }
