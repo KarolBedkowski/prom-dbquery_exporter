@@ -96,7 +96,10 @@ func (q *infoHandler) Handler() http.Handler {
 }
 
 func (q *infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !strings.HasPrefix(r.RemoteAddr, "127.") && !strings.HasPrefix(r.RemoteAddr, "localhost:") {
+	logger := log.Ctx(r.Context())
+
+	if !isRemoteLocal(r, conf.Args.ListenAddress) {
+		logger.Info().Msg("infohandler: remote not accepted")
 		http.Error(w, "forbidden", http.StatusForbidden)
 
 		return
@@ -105,6 +108,19 @@ func (q *infoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 
 	if err := q.tmpl.Execute(w, q.cfg); err != nil {
-		log.Logger.Error().Err(err).Msg("infohandler: executing template error")
+		logger.Error().Err(err).Msg("infohandler: executing template error")
 	}
+}
+
+func isRemoteLocal(r *http.Request, listenAddress string) bool {
+	if strings.HasPrefix(r.RemoteAddr, "127.") || strings.HasPrefix(r.RemoteAddr, "localhost:") {
+		return true
+	}
+
+	// accept connection if remote address is the same as listen address
+	if listenhost, _, ok := strings.Cut(listenAddress, ":"); ok && listenhost != "" {
+		return strings.HasPrefix(r.RemoteAddr, listenhost+":")
+	}
+
+	return false
 }
