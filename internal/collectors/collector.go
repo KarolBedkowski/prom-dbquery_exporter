@@ -167,7 +167,7 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 // worker get process task from `workQueue` in loop. Exit when there is no new task for `workerShutdownDelay`.
 func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) error {
 	idx := generateWorkerID()
-	llog := c.log.With().Bool("bg", isBg).Str("worker_id", idx).Logger()
+	llog := c.log.With().Str("worker_id", idx).Logger()
 	ctx = llog.WithContext(ctx)
 
 	workersCreatedCnt.WithLabelValues(c.name, workTypeString(isBg)).Inc()

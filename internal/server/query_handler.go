@@ -95,7 +95,7 @@ func (q *queryHandler) Handler() http.Handler {
 	// 5. log request traces
 	handler = debug.NewTraceMiddleware("dbquery_exporter")(handler)
 	// 4. update logger, log req, response
-	handler = newLogMiddleware(handler, "query")
+	handler = newLogMiddleware(handler)
 	// 3. add logger to ctx
 	handler = hlog.NewHandler(log.Logger)(handler)
 	// 2. set request_handler

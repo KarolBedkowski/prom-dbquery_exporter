@@ -15,13 +15,19 @@ LDFLAGS=" -w -s \
 	-X github.com/prometheus/common/version.Branch=$(BRANCH)"
 
 .PHONY: build
+build: build_amd64_debug
 
-build:
+.PHONY: build_release
+build_release: build_amd64
+
+.PHONY: build_amd64_debug
+build_amd64_debug:
 	go build -v -o dbquery_exporter \
-		--tags pg,mssql,oracle,mysql,sqlite,tmpl_extra_func \
+		--tags pg,mssql,oracle,mysql,sqlite,tmpl_extra_func,debug \
 		cli/main.go
 
-build_release:
+.PHONY: build_amd64
+build_amd64:
 	CGO_ENABLED=0 \
 		go build -v -o dbquery_exporter  \
 			--tags pg,mssql,oracle,mysql,sqlite,tmpl_extra_func \
@@ -29,8 +35,7 @@ build_release:
 			cli/main.go
 
 
-.PHONY: build_arm64
-
+.PHONY: build_arm64_debug
 build_arm64_debug:
 	CGO_ENABLED=0 GOARCH=arm64 GOOS=linux \
 		go build -v -o dbquery_exporter_arm64  \
@@ -38,6 +43,7 @@ build_arm64_debug:
 			--tags debug,pg,tmpl_extra_func \
 			cli/main.go
 
+.PHONY: build_arm64
 build_arm64:
 	CGO_ENABLED=0 \
 		GOARCH=arm64 \
@@ -48,7 +54,6 @@ build_arm64:
 			cli/main.go
 
 .PHONY: run
-
 run:
 	go run --tags debug,pg,sqlite,tmpl_extra_func \
 		-v cli/main.go -log.level debug \
@@ -56,6 +61,9 @@ run:
 		-validate-output
 
 .PHONY: check
+check: lint
+
+.PHONY: lint
 lint:
 	golangci-lint run || true
 	#--fix
@@ -67,7 +75,8 @@ lint:
 .PHONY: format
 format:
 	# find internal cli -type d -exec wsl -fix prom-dbquery_exporter.app/{} ';'
-	find . -name '*.go' -type f -exec gofumpt -w {} ';'
+	# find . -name '*.go' -type f -exec gofumpt -w {} ';'
+	golangci-lint fmt
 
 .PHONY: test
 test:

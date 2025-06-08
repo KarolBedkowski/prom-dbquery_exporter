@@ -29,7 +29,7 @@ type genericDatabase struct {
 	connstr string
 	driver  string
 
-	mu sync.RWMutex
+	mu sync.Mutex
 }
 
 func newGenericDatabase(connstr, driver string, dbcfg *conf.Database) Database {
@@ -293,7 +293,12 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 }
 
 func (g *genericDatabase) executeInitialQuery(ctx context.Context, sql string, conn *sqlx.Conn) error {
-	lctx, cancel := context.WithTimeout(ctx, g.dbcfg.ConnectTimeout)
+	timeout := defaultTimeout
+	if g.dbcfg.Timeout > 0 {
+		timeout = g.dbcfg.Timeout
+	}
+
+	lctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	rows, err := conn.QueryxContext(lctx, sql)
@@ -332,6 +337,8 @@ func (g *genericDatabase) logColumns(rows *sqlx.Rows, llog zerolog.Logger) error
 
 	return nil
 }
+
+//---------------------------------------------------------------
 
 func loggerFromCtx(ctx context.Context) zerolog.Logger {
 	if llog := log.Ctx(ctx); llog != nil {

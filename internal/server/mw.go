@@ -48,16 +48,13 @@ func (r *logResponseWriter) WriteHeader(status int) {
 
 // newLogMiddleware create new logging middleware.
 // `name` is handler name added to log.
-func newLogMiddleware(next http.Handler, name string) http.Handler {
+func newLogMiddleware(next http.Handler) http.Handler {
 	logFn := func(writer http.ResponseWriter, request *http.Request) {
 		start := time.Now()
-
 		ctx := request.Context()
 		requestID, _ := hlog.IDFromCtx(ctx)
 		llog := log.With().Logger().With().Str("req_id", requestID.String()).Logger()
 		request = request.WithContext(llog.WithContext(ctx))
-
-		llog = llog.With().Str("handler", name).Logger()
 
 		llog.Info().
 			Str("uri", request.RequestURI).
@@ -70,23 +67,23 @@ func newLogMiddleware(next http.Handler, name string) http.Handler {
 
 		next.ServeHTTP(&lrw, request)
 
-		// log request result
-		duration := time.Since(start)
-
 		level := zerolog.InfoLevel
 		if lrw.status >= 400 && lrw.status != 404 {
 			level = zerolog.WarnLevel
 		}
 
 		llog.WithLevel(level).
+			Str("uri", request.RequestURI).
 			Int("status", lrw.status).
 			Int("size", lrw.size).
-			Dur("duration", duration).
+			Dur("duration", time.Since(start)).
 			Msg("webhandler: request finished")
 	}
 
 	return http.HandlerFunc(logFn)
 }
+
+// -------------------------------------------------
 
 // newLimitRequestInFlightMW create new http middleware that limit concurrent connection to `limit`.
 func newLimitRequestInFlightMW(next http.Handler, limit uint) http.Handler {

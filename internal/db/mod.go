@@ -36,10 +36,8 @@ type Database interface {
 
 // DatabaseStats transfer stats from database driver.
 type DatabaseStats struct {
-	Name                   string
-	DBStats                sql.DBStats
-	TotalOpenedConnections uint32
-	TotalFailedConnections uint32
+	Name    string
+	DBStats sql.DBStats
 }
 
 type dbDefinition interface {
@@ -80,9 +78,7 @@ func (d Registry) Validate(cfg *conf.Database) error {
 		return NotSupportedError(cfg.Driver)
 	}
 
-	var errs *multierror.Error
-	errs = multierror.Append(errs, def.validateConf(cfg))
-	errs = multierror.Append(errs, validateCommon(cfg))
+	errs := multierror.Append(nil, def.validateConf(cfg), validateCommon(cfg))
 
 	return errs.ErrorOrNil()
 }
@@ -95,6 +91,8 @@ func (d Registry) GetInstance(cfg *conf.Database) (Database, error) {
 
 	return nil, newInvalidConfigurationError("unsupported database type '%s'", cfg.Driver)
 }
+
+// ----------------------------------------------------------------
 
 func registerDatabase(def dbDefinition, names ...string) {
 	for _, n := range names {

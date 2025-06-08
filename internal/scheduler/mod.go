@@ -60,6 +60,8 @@ func init() {
 	prometheus.MustRegister(scheduledTasksFailed)
 }
 
+// -----------------------------------------------------------------------------
+
 type scheduledTask struct {
 	// nextRun is time when task should be run when scheduler run in serial mode
 	nextRun time.Time
@@ -71,10 +73,13 @@ func (s *scheduledTask) MarshalZerologObject(event *zerolog.Event) {
 	event.Object("job", &s.job).Time("next_run", s.nextRun)
 }
 
+// -----------------------------------------------------------------------------
+
 type TaskQueue interface {
 	AddTask(ctx context.Context, task *collectors.Task)
 }
 
+// -----------------------------------------------------------------------------
 // Scheduler is background process that load configured data into cache in some intervals.
 type Scheduler struct {
 	log        zerolog.Logger

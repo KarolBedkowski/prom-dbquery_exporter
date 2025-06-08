@@ -37,7 +37,7 @@ type TaskQueue interface {
 // WebHandler handle incoming requests.
 type WebHandler struct {
 	queryHandler *queryHandler
-	// info is available only on localhost
+	// info is available only local
 	infoHandler *infoHandler
 	server      *http.Server
 	cfg         *conf.Configuration
@@ -68,7 +68,7 @@ func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 	))
 
 	if lp, err := newLandingPage(); err != nil {
-		slog.Error("create landing pager error", "err", err)
+		slog.Error("webhandler: create landing pager error", "err", err)
 	} else {
 		http.Handle("/", lp)
 	}
@@ -80,7 +80,7 @@ func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 
 // Run webhandler.
 func (w *WebHandler) Run() error {
-	log.Logger.Info().Msgf("webhandler: listening on %s", conf.Args.ListenAddress)
+	log.Logger.Info().Msgf("webhandler: listening on %q", conf.Args.ListenAddress)
 
 	rwTimeout := defaultRwTimeout
 	if w.cfg.Global.RequestTimeout > 0 {

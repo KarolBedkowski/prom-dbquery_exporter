@@ -136,6 +136,8 @@ func getConfig(configPath string) (*web.Config, error) {
 	return cfg, nil
 }
 
+// -------------------------------------------------
+
 type secWebHandler struct {
 	handler http.Handler
 	cache   map[string]bool

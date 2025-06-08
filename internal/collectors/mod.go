@@ -120,7 +120,7 @@ func (cs *Collectors) Collect(resCh chan<- prometheus.Metric) {
 	}
 }
 
-func (cs *Collectors) createCollectors() error {
+func (cs *Collectors) createCollectors() (map[string]*collector, error) {
 	collectors := make(map[string]*collector)
 
 	for dbcfg := range cs.cfg.ValidDatabases {
@@ -133,18 +133,19 @@ func (cs *Collectors) createCollectors() error {
 	}
 
 	if len(collectors) == 0 {
-		return ErrNoDatabases
+		return nil, ErrNoDatabases
 	}
 
-	cs.collectors = collectors
-
-	return nil
+	return collectors, nil
 }
 
 func (cs *Collectors) startCollectors(ctx context.Context) (*errgroup.Group, error) {
-	if err := cs.createCollectors(); err != nil {
+	collectors, err := cs.createCollectors()
+	if err != nil {
 		return nil, err
 	}
+
+	cs.collectors = collectors
 
 	group, cctx := errgroup.WithContext(ctx)
 

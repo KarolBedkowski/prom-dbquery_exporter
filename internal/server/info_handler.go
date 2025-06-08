@@ -87,7 +87,7 @@ func newInfoHandler(cfg *conf.Configuration) *infoHandler {
 func (q *infoHandler) Handler() http.Handler {
 	var handler http.Handler = q
 
-	handler = newLogMiddleware(handler, "info")
+	handler = newLogMiddleware(handler)
 	handler = hlog.RequestIDHandler("req_id", "X-Request-Id")(handler)
 	handler = hlog.NewHandler(log.Logger)(handler)
 	handler = promhttp.InstrumentHandlerDuration(newReqDurationWrapper("info"), handler)

@@ -1,14 +1,15 @@
 package server
 
+// metrics.go
+// Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
+//
+// Distributed under terms of the GPLv3 license.
+
 import (
 	"github.com/prometheus/client_golang/prometheus"
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-// metrics.go
-// Copyright (C) 2025 Karol Będkowski <Karol Będkowski@kkomp>
-//
-// Distributed under terms of the GPLv3 license.
 var (
 	// queryTotalCnt is total number of query executions.
 	queryTotalCnt = prometheus.NewCounterVec(
