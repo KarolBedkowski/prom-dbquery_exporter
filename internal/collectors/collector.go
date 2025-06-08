@@ -95,6 +95,9 @@ func (c *collector) addTask(ctx context.Context, task *Task) {
 		c.log.Warn().Err(ctx.Err()).Msg("context cancelled")
 	case <-task.Cancelled():
 		c.log.Warn().Msg("task cancelled")
+	default:
+		c.log.Warn().Msg("tasks queue full")
+		task.Output <- task.newResult(InternalError("full queue"), nil)
 	}
 }
 
