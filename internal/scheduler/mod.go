@@ -103,6 +103,8 @@ func New(cache *cache.Cache[[]byte], cfg *conf.Configuration,
 		tasks:      nil,
 	}
 
+	scheduler.updateConfig(cfg)
+
 	return scheduler
 }
 
