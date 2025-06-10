@@ -84,7 +84,7 @@ func (c *collector) addTask(ctx context.Context, task *Task) {
 
 	if c.tasksQueue == nil {
 		c.log.Warn().Msg("collector: try add new task to closed queue")
-		task.Output <- task.newResult(InternalError("collector inactive"), nil)
+		task.Output <- task.newErrorResult(InternalError("collector inactive"), metrics.ErrCategoryInternalError)
 
 		return
 	}
@@ -259,7 +259,6 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, resCh chan *T
 
 	result, err := c.database.Query(ctx, task.Query, task.Params)
 	if err != nil {
-		metrics.IncProcessErrorsCnt(metrics.ProcessQueryError)
 		resCh <- c.handleQueryError(ctx, task, err)
 
 		return
@@ -270,15 +269,14 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, resCh chan *T
 
 	output, err := formatResult(ctx, result, task.Query, c.dbcfg)
 	if err != nil {
-		metrics.IncProcessErrorsCnt(metrics.ProcessFormatError)
-		resCh <- task.newResult(fmt.Errorf("format error: %w", err), nil)
+		resCh <- task.newErrorResult(fmt.Errorf("format error: %w", err), metrics.ErrCategoryInternalError)
 
 		return
 	}
 
 	llog.Debug().Msg("collector: result formatted")
 	debug.TracePrintf(ctx, "finished  query and formatting %q in %q", task.Query.Name, task.DBName)
-	resCh <- task.newResult(nil, output)
+	resCh <- task.newSuccessResult(output)
 }
 
 func (c *collector) handleQueryError(ctx context.Context, task *Task, err error) *TaskResult {
@@ -292,11 +290,11 @@ func (c *collector) handleQueryError(ctx context.Context, task *Task, err error)
 		} else {
 			llog.Debug().Bytes("output", output).Msg("collector: result")
 
-			return task.newResult(nil, output)
+			return task.newSuccessResult(output)
 		}
 	}
 
-	return task.newResult(fmt.Errorf("query error: %w", err), nil)
+	return task.newErrorResult(fmt.Errorf("query error: %w", err), metrics.ErrCategorySourceError)
 }
 
 func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) {

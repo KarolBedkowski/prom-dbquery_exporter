@@ -15,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 // Collectors is collection of all configured databases.
@@ -96,7 +97,7 @@ func (cs *Collectors) AddTask(ctx context.Context, task *Task) {
 	}
 
 	select {
-	case task.Output <- task.newResult(ErrUnknownDatabase, nil):
+	case task.Output <- task.newErrorResult(ErrUnknownDatabase, metrics.ErrCategoryInternalError):
 	case <-ctx.Done():
 		cs.log.Warn().Err(ctx.Err()).Msg("context cancelled")
 	case <-task.Cancelled():

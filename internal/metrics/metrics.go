@@ -45,15 +45,18 @@ func init() {
 	uptime.SetToCurrentTime()
 }
 
+// -----------------------------------------------------------------
+
 type ErrorCategory string
 
 const (
-	ProcessFormatError     ErrorCategory = "format"
-	ProcessQueryError      ErrorCategory = "query"
-	ProcessWriteError      ErrorCategory = "write"
-	ProcessAuthError       ErrorCategory = "unauthorized"
-	ProcessCancelError     ErrorCategory = "cancel"
-	ProcessBadRequestError ErrorCategory = "bad_request"
+	ErrCategoryInternalError   ErrorCategory = "internal"
+	ErrCategorySourceError     ErrorCategory = "source"
+	ErrCategoryAuthError       ErrorCategory = "unauthorized"
+	ErrCategoryCanceledError   ErrorCategory = "canceled"
+	ErrCategoryBadRequestError ErrorCategory = "bad_request"
+	ErrCategoryFormatError     ErrorCategory = "format"
+	ErrCategoryClientError     ErrorCategory = "client"
 )
 
 // IncProcessErrorsCnt increment process errors count in category.

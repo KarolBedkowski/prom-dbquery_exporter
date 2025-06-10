@@ -167,7 +167,7 @@ func (q *queryHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request) 
 		Msg("queryhandler: all database queries finished")
 
 	if dWriter.written == 0 {
-		metrics.IncProcessErrorsCnt(metrics.ProcessBadRequestError)
+		metrics.IncProcessErrorsCnt(metrics.ErrCategoryBadRequestError)
 		http.Error(writer, "error", http.StatusBadRequest)
 	}
 }
@@ -267,6 +267,7 @@ func (q *queryHandler) gatherResults(ctx context.Context, respWriter *responseWr
 				logger.Warn().Err(res.Error).Object("task", task).Msg("queryhandler: processing query error")
 				debug.TracePrintf(ctx, "process query %q from %q: %v", task.Query.Name, task.DBName, res.Error)
 				respWriter.write(ctx, []byte("# query "+res.Task.Query.Name+" in "+res.Task.DBName+" processing error\n"))
+				metrics.IncProcessErrorsCnt(res.ErrCategory)
 
 				continue
 			}
@@ -277,6 +278,7 @@ func (q *queryHandler) gatherResults(ctx context.Context, respWriter *responseWr
 			if err := q.validateOutput(res.Result); err != nil {
 				logger.Warn().Err(err).Object("task", task).Msg("queryhandler: validate output error")
 				debug.TracePrintf(ctx, "validate result of query %q from %q: %v", task.Query.Name, task.DBName, err)
+				metrics.IncProcessErrorsCnt(metrics.ErrCategoryInternalError)
 
 				continue
 			}
@@ -287,8 +289,8 @@ func (q *queryHandler) gatherResults(ctx context.Context, respWriter *responseWr
 		case <-ctx.Done():
 			err := ctx.Err()
 			logger.Warn().Err(err).Msg("queryhandler: context cancelled")
-			metrics.IncProcessErrorsCnt(metrics.ProcessCancelError)
 			debug.TraceErrorf(ctx, "result error: %s", err)
+			metrics.IncProcessErrorsCnt(metrics.ErrCategoryCanceledError)
 
 			return
 		}

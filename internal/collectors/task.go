@@ -13,7 +13,10 @@ import (
 	"github.com/rs/xid"
 	"github.com/rs/zerolog"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
 )
+
+type ErrorCategory = metrics.ErrorCategory
 
 // Task is query to perform.
 type Task struct {
@@ -99,11 +102,21 @@ func (d *Task) MarshalZerologObject(e *zerolog.Event) {
 		Str("req_id", d.ReqID)
 }
 
-func (d *Task) newResult(err error, result []byte) *TaskResult {
+func (d *Task) newSuccessResult(result []byte) *TaskResult {
 	return &TaskResult{
-		Error:  err,
-		Result: result,
-		Task:   d,
+		Error:       nil,
+		Result:      result,
+		Task:        d,
+		ErrCategory: "",
+	}
+}
+
+func (d *Task) newErrorResult(err error, cat ErrorCategory) *TaskResult {
+	return &TaskResult{
+		Error:       err,
+		Result:      nil,
+		Task:        d,
+		ErrCategory: cat,
 	}
 }
 
@@ -113,16 +126,31 @@ func (d *Task) cancel() {
 	}
 }
 
-// TaskResult is query result.
+// -----------------------------------------------------------------
+
 type TaskResult struct {
-	Error  error
-	Task   *Task
-	Result []byte
+	Error       error
+	ErrCategory ErrorCategory
+	Task        *Task
+	Result      []byte
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (t *TaskResult) MarshalZerologObject(e *zerolog.Event) {
 	e.Object("task", t.Task).
 		Err(t.Error).
+		Str("err_category", string(t.ErrCategory)).
 		Int("result_size", len(t.Result))
+}
+
+func (t *TaskResult) WithCategory(cat ErrorCategory) *TaskResult {
+	t.ErrCategory = cat
+
+	return t
+}
+
+func (t *TaskResult) WithResult(result []byte) *TaskResult {
+	t.Result = result
+
+	return t
 }
