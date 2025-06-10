@@ -57,7 +57,7 @@ func ParseCliArgs() {
 		"Logging log format (logfmt, json).")
 
 	flag.BoolVar(&Args.DisableCache, "no-cache", false, "Disable query result caching")
-	flag.BoolVar(&Args.ParallelScheduler, "parallel-scheduler", false, "Run scheduler ask parallel")
+	flag.BoolVar(&Args.ParallelScheduler, "parallel-scheduler", false, "Run scheduler as parallel")
 	flag.BoolVar(&Args.ValidateOutput, "validate-output", false, "Enable output validation")
 
 	flag.Parse()
