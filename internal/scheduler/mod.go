@@ -162,7 +162,7 @@ func (s *Scheduler) runSerial(ctx context.Context) error {
 
 // RunParallel run scheduler in parallel mode that spawn goroutine for each defined job.
 func (s *Scheduler) runParallel(ctx context.Context) error {
-	s.log.Debug().Msgf("scheduler: starting parallel scheduler")
+	s.log.Debug().Msg("scheduler: starting parallel scheduler")
 
 	for {
 		lctx, cancel := context.WithCancel(ctx)
@@ -171,11 +171,11 @@ func (s *Scheduler) runParallel(ctx context.Context) error {
 		// spawn background workers
 		for _, job := range s.tasks {
 			group.Go(func() error {
-				s.runJobInLoop(lctx, job.job)
-
-				return nil
+				return s.runJobInLoop(lctx, job.job)
 			})
 		}
+
+		s.log.Debug().Msgf("scheduler: all job started")
 
 		select {
 		case <-ctx.Done():
@@ -295,7 +295,7 @@ func (s *Scheduler) runOverdueJobs(ctx context.Context) {
 }
 
 // / runJobInLoop run in goroutine and get data from data for one job in defined intervals.
-func (s *Scheduler) runJobInLoop(ctx context.Context, job conf.Job) {
+func (s *Scheduler) runJobInLoop(ctx context.Context, job conf.Job) error {
 	llog := s.log.With().Int("job", job.Idx).Logger()
 	llog.Debug().Object("job", &job).Msg("scheduler: starting worker")
 
@@ -319,7 +319,7 @@ func (s *Scheduler) runJobInLoop(ctx context.Context, job conf.Job) {
 		case <-ctx.Done():
 			llog.Debug().Msg("scheduler: worker stopped")
 
-			return
+			return nil
 
 		case <-timer.C:
 			s.handleJobWithMetrics(ctx, job)
