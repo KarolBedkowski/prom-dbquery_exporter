@@ -23,9 +23,10 @@ import (
 type (
 	// our http.ResponseWriter implementation.
 	logResponseWriter struct {
-		http.ResponseWriter     // compose original http.ResponseWriter
-		status              int // http status
-		size                int // response size
+		http.ResponseWriter // compose original http.ResponseWriter
+
+		status int // http status
+		size   int // response size
 	}
 )
 
@@ -109,10 +110,10 @@ func newLimitRequestInFlightMW(next http.Handler, limit uint) http.Handler {
 type gzipResponseWriter struct {
 	http.ResponseWriter
 
+	w *gzip.Writer
+
 	status        int
 	headerWritten bool
-
-	w *gzip.Writer
 }
 
 func (gzr *gzipResponseWriter) WriteHeader(status int) {

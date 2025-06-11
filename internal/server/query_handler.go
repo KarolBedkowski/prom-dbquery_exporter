@@ -77,11 +77,13 @@ func (l *locker) unlock(queryKey string) {
 
 // queryHandler handle all request for metrics.
 type queryHandler struct {
+	taskQueue TaskQueue
+
 	cfg         *conf.Configuration
 	resultCache *cache.Cache[[]byte]
+
 	// locker protect from running the same request twice
-	locker    locker
-	taskQueue TaskQueue
+	locker locker
 }
 
 func newQueryHandler(c *conf.Configuration, cache *cache.Cache[[]byte], taskQueue TaskQueue) *queryHandler {

@@ -29,10 +29,15 @@ var workerID atomic.Uint64
 
 // collector handle task for one loader.
 type collector struct {
-	name     string
-	log      zerolog.Logger
-	database db.Database
-	dbcfg    *conf.Database
+	log zerolog.Logger
+
+	// stdWorkersGroup is pool of workers that handle normal tasks and scheduled task when
+	// background workers are disabled.
+	stdWorkersGroup errgroup.Group
+	// bgWorkersGroup is pool of workers that handle only tasks created by scheduler.
+	bgWorkersGroup errgroup.Group
+	database       db.Database
+	dbcfg          *conf.Database
 
 	// tasksQueue is queue of incoming task to schedule.
 	tasksQueue chan *Task
@@ -41,11 +46,7 @@ type collector struct {
 	// bgWorkQueue is chan that distribute task created by scheduler to dedicated pool of workers.
 	bgWorkQueue chan *Task
 
-	// stdWorkersGroup is pool of workers that handle normal tasks and scheduled task when
-	// background workers are disabled.
-	stdWorkersGroup errgroup.Group
-	// bgWorkersGroup is pool of workers that handle only tasks created by scheduler.
-	bgWorkersGroup errgroup.Group
+	name string
 }
 
 const (

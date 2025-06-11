@@ -54,10 +54,12 @@ func init() {
 type (
 	// Cache with per item expire time.
 	Cache[T any] struct {
+		log zerolog.Logger
+
 		cache map[string]cacheItem[T]
 		name  string
-		mu    sync.Mutex
-		log   zerolog.Logger
+
+		mu sync.Mutex
 	}
 
 	cacheItem[T any] struct {

@@ -220,8 +220,8 @@ func outputIsConsole() bool {
 
 type confHandler struct {
 	hupCh    chan os.Signal
-	reloadCh []chan *conf.Configuration
 	cfg      *conf.Configuration
+	reloadCh []chan *conf.Configuration
 }
 
 func newConfHandler(cfg *conf.Configuration) confHandler {

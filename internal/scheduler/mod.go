@@ -82,12 +82,14 @@ type TaskQueue interface {
 // -----------------------------------------------------------------------------
 // Scheduler is background process that load configured data into cache in some intervals.
 type Scheduler struct {
-	log        zerolog.Logger
-	cfg        *conf.Configuration
-	cache      *cache.Cache[[]byte]
-	tasks      []*scheduledTask
-	newCfgCh   chan *conf.Configuration
+	log zerolog.Logger
+
 	tasksQueue TaskQueue
+
+	cfg      *conf.Configuration
+	cache    *cache.Cache[[]byte]
+	newCfgCh chan *conf.Configuration
+	tasks    []*scheduledTask
 }
 
 // New create new scheduler that use `cache` and initial `cfg` configuration.

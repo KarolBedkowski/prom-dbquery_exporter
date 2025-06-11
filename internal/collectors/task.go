@@ -24,12 +24,13 @@ type Task struct {
 	Query        *conf.Query
 	Params       map[string]any
 	Output       chan *TaskResult
-	DBName       string
-
-	IsScheduledJob bool
-	ReqID          string
 
 	CancelCh chan struct{}
+
+	DBName string
+
+	ReqID          string
+	IsScheduledJob bool
 }
 
 func NewTask(dbname string, query *conf.Query, output chan *TaskResult) *Task {

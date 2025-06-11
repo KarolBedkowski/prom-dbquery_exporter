@@ -24,9 +24,10 @@ import (
 )
 
 type responseWriter struct {
+	writer http.ResponseWriter
+
 	written   int
 	scheduled int
-	writer    http.ResponseWriter
 }
 
 func (d *responseWriter) writeHeaders() {

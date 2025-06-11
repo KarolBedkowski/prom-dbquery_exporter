@@ -26,9 +26,12 @@ type resultTmplData struct {
 	Query string
 	// Database name
 	Database string
+
+	Error string
+
 	// Records (rows)
-	R              []db.Record
-	Error          string
+	R []db.Record
+
 	QueryStartTime int64
 	QueryDuration  float64
 	Count          int

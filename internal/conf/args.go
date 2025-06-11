@@ -15,22 +15,19 @@ import (
 type CliArguments struct {
 	ConfigFilename string
 
-	// Flags
-
-	DisableCache      bool
-	ParallelScheduler bool
-	ValidateOutput    bool
-	ShowVersion       bool
-
 	// webserver configuration
-
 	ListenAddress string
 	WebConfig     string
 
 	// logging
-
 	LogLevel  string
 	LogFormat string
+
+	// Flags
+	DisableCache      bool
+	ParallelScheduler bool
+	ValidateOutput    bool
+	ShowVersion       bool
 }
 
 func (c *CliArguments) ListenOnLocalAddress() bool {
