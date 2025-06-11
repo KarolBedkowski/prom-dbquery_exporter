@@ -269,7 +269,7 @@ func (c *collector) queryDatabase(ctx context.Context, task *Task, resCh chan *T
 
 	output, err := formatResult(ctx, result, task.Query, c.dbcfg)
 	if err != nil {
-		resCh <- task.newErrorResult(fmt.Errorf("format error: %w", err), metrics.ErrCategoryInternalError)
+		resCh <- task.newErrorResult(fmt.Errorf("format error: %w", err), metrics.ErrCategoryFormatError)
 
 		return
 	}

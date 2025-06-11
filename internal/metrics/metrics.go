@@ -22,7 +22,7 @@ var (
 			Namespace:   MetricsNamespace,
 			Subsystem:   "",
 			Name:        "process_errors_total",
-			Help:        "Number of internal processing errors",
+			Help:        "Number of processing errors",
 			ConstLabels: nil,
 		},
 		[]string{"error"},
@@ -59,7 +59,7 @@ const (
 	ErrCategoryClientError     ErrorCategory = "client"
 )
 
-// IncProcessErrorsCnt increment process errors count in category.
-func IncProcessErrorsCnt(category ErrorCategory) {
+// IncErrorsCnt increment process errors count in category.
+func IncErrorsCnt(category ErrorCategory) {
 	processErrorsCnt.WithLabelValues(string(category)).Inc()
 }

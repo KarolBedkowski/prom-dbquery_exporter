@@ -104,19 +104,17 @@ func (d *Task) MarshalZerologObject(e *zerolog.Event) {
 
 func (d *Task) newSuccessResult(result []byte) *TaskResult {
 	return &TaskResult{
-		Error:       nil,
-		Result:      result,
-		Task:        d,
-		ErrCategory: "",
+		Error:  nil,
+		Result: result,
+		Task:   d,
 	}
 }
 
 func (d *Task) newErrorResult(err error, cat ErrorCategory) *TaskResult {
 	return &TaskResult{
-		Error:       err,
-		Result:      nil,
-		Task:        d,
-		ErrCategory: cat,
+		Error:  TaskError{err, cat},
+		Result: nil,
+		Task:   d,
 	}
 }
 
@@ -129,28 +127,35 @@ func (d *Task) cancel() {
 // -----------------------------------------------------------------
 
 type TaskResult struct {
-	Error       error
-	ErrCategory ErrorCategory
-	Task        *Task
-	Result      []byte
+	Error  error
+	Task   *Task
+	Result []byte
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (t *TaskResult) MarshalZerologObject(e *zerolog.Event) {
 	e.Object("task", t.Task).
 		Err(t.Error).
-		Str("err_category", string(t.ErrCategory)).
 		Int("result_size", len(t.Result))
-}
-
-func (t *TaskResult) WithCategory(cat ErrorCategory) *TaskResult {
-	t.ErrCategory = cat
-
-	return t
 }
 
 func (t *TaskResult) WithResult(result []byte) *TaskResult {
 	t.Result = result
 
 	return t
+}
+
+// -----------------------------------------------------------------
+
+type TaskError struct {
+	err      error
+	Category ErrorCategory
+}
+
+func (t TaskError) Error() string {
+	return t.err.Error() + " (" + string(t.Category) + ")"
+}
+
+func (t TaskError) Unwrap() error {
+	return t.err
 }
