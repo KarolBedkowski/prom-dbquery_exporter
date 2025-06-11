@@ -259,10 +259,7 @@ func (s *Scheduler) handleJob(ctx context.Context, j conf.Job) error {
 	output := make(chan *collectors.TaskResult, 1)
 	defer close(output)
 
-	task := collectors.NewTask(dbname, query, output).WithReqID().MarkScheduled()
-
-	// cancel task on end
-	task, cancel := task.WithCancel()
+	task, cancel := collectors.NewTask(dbname, query, output).WithNewReqID().MarkScheduled().WithCancel()
 	defer cancel()
 
 	s.tasksQueue.AddTask(ctx, task)

@@ -47,16 +47,14 @@ func NewTask(dbname string, query *conf.Query, output chan *TaskResult) *Task {
 	}
 }
 
-func (d *Task) WithReqID(reqID ...string) *Task {
-	if len(reqID) > 1 {
-		panic("to many parameters")
-	}
+func (d *Task) WithNewReqID() *Task {
+	d.ReqID = xid.New().String()
 
-	if len(reqID) > 0 && reqID[0] != "" {
-		d.ReqID = reqID[0]
-	} else {
-		d.ReqID = xid.New().String()
-	}
+	return d
+}
+
+func (d *Task) WithReqID(reqID string) *Task {
+	d.ReqID = reqID
 
 	return d
 }
