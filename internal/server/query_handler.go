@@ -110,7 +110,7 @@ func (q *queryHandler) Handler() http.Handler {
 	handler = promhttp.InstrumentHandlerDuration(newReqDurationWrapper("query"), handler)
 
 	// 0. compression
-	if !conf.Args.ListenOnLocalAddress() {
+	if conf.Args.EnableCompression() {
 		handler = newGzipHandler(handler)
 	}
 

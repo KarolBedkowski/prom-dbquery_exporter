@@ -18,6 +18,7 @@ type CliArguments struct {
 	// webserver configuration
 	ListenAddress string
 	WebConfig     string
+	Compression   string
 
 	// logging
 	LogLevel  string
@@ -30,9 +31,16 @@ type CliArguments struct {
 	ShowVersion       bool
 }
 
-func (c *CliArguments) ListenOnLocalAddress() bool {
-	return strings.HasPrefix(c.ListenAddress, "127.0.0.1:") ||
-		strings.HasPrefix(c.ListenAddress, "localhost:")
+func (c *CliArguments) EnableCompression() bool {
+	switch c.Compression {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return strings.HasPrefix(c.ListenAddress, "127.0.0.1:") ||
+			strings.HasPrefix(c.ListenAddress, "localhost:")
+	}
 }
 
 var Args CliArguments
@@ -47,6 +55,8 @@ func ParseCliArgs() {
 		"Address to listen on for web interface and telemetry.")
 	flag.StringVar(&Args.WebConfig, "web.config", "",
 		"Path to config yaml file that can enable TLS or authentication.")
+	flag.StringVar(&Args.Compression, "web.compression", "auto",
+		"Enable/disable response compression (true/false/auto).")
 
 	flag.StringVar(&Args.LogLevel, "log.level", "info",
 		"Logging level (debug, info, warn, error, fatal)")
@@ -58,4 +68,8 @@ func ParseCliArgs() {
 	flag.BoolVar(&Args.ValidateOutput, "validate-output", false, "Enable output validation")
 
 	flag.Parse()
+
+	if Args.Compression != "true" && Args.Compression != "false" {
+		Args.Compression = "auto"
+	}
 }

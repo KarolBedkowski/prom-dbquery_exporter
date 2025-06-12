@@ -63,7 +63,7 @@ func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 		promhttp.HandlerOpts{ //nolint:exhaustruct
 			EnableOpenMetrics: true,
 			// disable compression when listen on lo; reduce memory allocations & usage
-			DisableCompression: conf.Args.ListenOnLocalAddress(),
+			DisableCompression: !conf.Args.EnableCompression(),
 		},
 	))
 
