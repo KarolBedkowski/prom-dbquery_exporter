@@ -281,9 +281,6 @@ func (q *queryHandler) gatherResults(ctx context.Context, respWriter *responseWr
 				continue
 			}
 
-			logger.Debug().Object("res", res).Msg("queryhandler: write result")
-			debug.TracePrintf(ctx, "write result %q from %q", task.Query.Name, task.DBName)
-
 			if err := q.validateOutput(res.Result); err != nil {
 				logger.Warn().Err(err).Object("task", task).Msg("queryhandler: validate output error")
 				debug.TracePrintf(ctx, "validate result of query %q from %q: %v", task.Query.Name, task.DBName, err)
@@ -292,6 +289,8 @@ func (q *queryHandler) gatherResults(ctx context.Context, respWriter *responseWr
 				continue
 			}
 
+			logger.Debug().Object("res", res).Msg("queryhandler: write result")
+			debug.TracePrintf(ctx, "write result %q from %q", task.Query.Name, task.DBName)
 			respWriter.write(ctx, res.Result)
 			q.putIntoCache(task, res.Result)
 

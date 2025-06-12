@@ -36,7 +36,7 @@ func (d *responseWriter) writeHeaders() {
 
 func (d *responseWriter) write(ctx context.Context, data []byte) {
 	if _, err := d.writer.Write(data); err != nil {
-		log.Ctx(ctx).Error().Err(err).Msg("queryhandler: write error")
+		log.Ctx(ctx).Error().Err(err).Msg("responseWriter: write error")
 		debug.TraceErrorf(ctx, "write error: %s", err)
 		metrics.IncErrorsCnt(metrics.ErrCategoryClientError)
 	} else {
