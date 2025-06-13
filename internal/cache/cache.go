@@ -69,8 +69,8 @@ type (
 )
 
 // New create  new cache object.
-func New[T any](name string) *Cache[T] {
-	return &Cache[T]{
+func New[T any](name string) Cache[T] {
+	return Cache[T]{
 		name:  name,
 		cache: make(map[string]cacheItem[T]),
 		log:   log.Logger.With().Str("subsystem", "cache").Str("cache_name", name).Logger(),

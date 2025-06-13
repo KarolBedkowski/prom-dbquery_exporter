@@ -95,20 +95,20 @@ func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 	confHandler := newConfHandler(cfg)
 	collectors := collectors.New(cfg, confHandler.newReloadCh())
 	cache := cache.New[[]byte]("query_cache")
-	webHandler := server.New(cfg, cache, collectors, confHandler.newReloadCh())
-	sched := scheduler.New(cache, cfg, collectors, confHandler.newReloadCh())
+	webHandler := server.New(cfg, &cache, collectors, confHandler.newReloadCh())
+	sched := scheduler.New(cfg, &cache, collectors, confHandler.newReloadCh())
 	runGroup := run.Group{}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
+	runGroup.Add(func() error { return collectors.Run(ctx) }, noop)
 	runGroup.Add(webHandler.Run, webHandler.Stop)
-	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, sched.Close)
+	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, noop)
 	runGroup.Add(confHandler.start, confHandler.stop)
 
 	if sdw != nil {
-		runGroup.Add(func() error { return sdw.start(ctx) }, func(_ error) {})
+		runGroup.Add(func() error { return sdw.start(ctx) }, noop)
 	}
 
 	// Termination handler.
@@ -121,7 +121,7 @@ func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 
 			return nil
 		},
-		func(_ error) {},
+		func(_ error) { cancel() }, // stop all goroutines on error
 	)
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
@@ -274,3 +274,7 @@ func (h *confHandler) stop(_ error) {
 		close(rh)
 	}
 }
+
+// ------------------
+
+func noop(_ error) {}

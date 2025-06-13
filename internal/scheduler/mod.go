@@ -93,7 +93,7 @@ type Scheduler struct {
 }
 
 // New create new scheduler that use `cache` and initial `cfg` configuration.
-func New(cache *cache.Cache[[]byte], cfg *conf.Configuration,
+func New(cfg *conf.Configuration, cache *cache.Cache[[]byte],
 	tasksQueue TaskQueue, newCfgCh chan *conf.Configuration,
 ) *Scheduler {
 	scheduler := &Scheduler{
