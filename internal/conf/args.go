@@ -38,8 +38,8 @@ func (c *CliArguments) EnableCompression() bool {
 	case "false":
 		return false
 	default:
-		return strings.HasPrefix(c.ListenAddress, "127.0.0.1:") ||
-			strings.HasPrefix(c.ListenAddress, "localhost:")
+		return !strings.HasPrefix(c.ListenAddress, "127.0.0.1:") &&
+			!strings.HasPrefix(c.ListenAddress, "localhost:")
 	}
 }
 

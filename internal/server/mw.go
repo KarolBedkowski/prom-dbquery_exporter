@@ -128,6 +128,24 @@ func (gzr *gzipResponseWriter) WriteHeader(status int) {
 	gzr.ResponseWriter.WriteHeader(status)
 }
 
+func (gzr *gzipResponseWriter) Flush() {
+	if gzr.w != nil {
+		gzr.w.Flush()
+	}
+
+	if fw, ok := gzr.ResponseWriter.(http.Flusher); ok {
+		fw.Flush()
+	}
+}
+
+func (gzr *gzipResponseWriter) Close() error {
+	if err := gzr.w.Close(); err != nil {
+		return fmt.Errorf("close gzip writer error: %w", err)
+	}
+
+	return nil
+}
+
 func (gzr *gzipResponseWriter) Write(b []byte) (int, error) {
 	if _, ok := gzr.Header()["Content-Type"]; !ok {
 		gzr.ResponseWriter.Header().Set("Content-Type", http.DetectContentType(b))
