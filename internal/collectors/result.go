@@ -16,6 +16,8 @@ import (
 	"prom-dbquery_exporter.app/internal/db"
 )
 
+const initialBufferSize = 512
+
 // resultTmplData keep query result and some metadata parsed to template.
 type resultTmplData struct {
 	// Parameters
@@ -56,6 +58,8 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 	log.Ctx(ctx).Debug().Interface("res", res).Msg("result: executing template")
 
 	var output bytes.Buffer
+
+	output.Grow(initialBufferSize)
 
 	if err := query.MetricTpl.Execute(&output, &res); err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
