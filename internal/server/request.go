@@ -61,7 +61,7 @@ func (g InvalidRequestParameterError) Error() string {
 type requestParameters struct {
 	dbNames         []string
 	queryNames      []string
-	extraParameters map[string]any
+	extraParameters []string
 
 	queries []*conf.Query
 }
@@ -70,7 +70,7 @@ type requestParameters struct {
 func (r *requestParameters) MarshalZerologObject(event *zerolog.Event) {
 	event.Strs("dbNames", r.dbNames).
 		Strs("queryNames", r.queryNames).
-		Interface("extraParameters", r.extraParameters)
+		Strs("extraParameters", r.extraParameters)
 
 	qa := zerolog.Arr()
 	for _, q := range r.queries {
@@ -139,13 +139,15 @@ func (r *requestParameters) iter() iter.Seq2[string, *conf.Query] {
 
 //---------------------------------------------------------------
 
-func paramsFromQuery(req *http.Request) map[string]any {
-	params := make(map[string]any)
+func paramsFromQuery(req *http.Request) []string {
+	query := req.URL.Query()
 
-	for k, v := range req.URL.Query() {
+	var params []string
+
+	for k, v := range query {
 		// standard parameters
 		if k != "query" && k != "group" && k != "database" && len(v) > 0 {
-			params[k] = v[0]
+			params = append(params, k, v[0])
 		}
 	}
 

@@ -183,7 +183,7 @@ func (q *queryHandler) updateConf(c *conf.Configuration) {
 	q.resultCache.Clear()
 }
 
-func (q *queryHandler) getFromCache(query *conf.Query, dbname string, params map[string]any) ([]byte, bool) {
+func (q *queryHandler) getFromCache(query *conf.Query, dbname string, params []string) ([]byte, bool) {
 	if conf.Args.DisableCache || len(params) > 0 || query.CachingTime == 0 {
 		return nil, false
 	}

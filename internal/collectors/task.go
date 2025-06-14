@@ -60,8 +60,13 @@ func (d *Task) WithReqID(reqID string) *Task {
 	return d
 }
 
-func (d *Task) WithParams(params map[string]any) *Task {
-	d.Params = params
+func (d *Task) WithParams(params []string) *Task {
+	if len(params) > 0 {
+		d.Params = make(map[string]any)
+		for i := 0; i < len(params); i += 2 {
+			d.Params[params[i]] = params[i+1]
+		}
+	}
 
 	return d
 }

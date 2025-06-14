@@ -348,9 +348,13 @@ func loggerFromCtx(ctx context.Context) zerolog.Logger {
 	return log.Logger
 }
 
-// cloneMap create clone of `inp` map and optionally update it with values
-// from extra maps.
+// cloneMap - if there are `extra` maps - create clone of `inp` map and update it with values
+// from extra maps. Otherwise return `inp`.
 func cloneMap[K comparable, V any](inp map[K]V, extra ...map[K]V) map[K]V {
+	if len(extra) == 0 {
+		return inp
+	}
+
 	res := make(map[K]V, len(inp)+1)
 	maps.Copy(res, inp)
 
