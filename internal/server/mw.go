@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -107,6 +108,14 @@ func newLimitRequestInFlightMW(next http.Handler, limit uint) http.Handler {
 
 // -------------------------------------------------
 
+var pool = sync.Pool{
+	New: func() any {
+		w, _ := gzip.NewWriterLevel(nil, gzip.DefaultCompression)
+
+		return &gzipResponseWriter{w: w} //nolint:exhaustruct
+	},
+}
+
 type gzipResponseWriter struct {
 	http.ResponseWriter
 
@@ -163,6 +172,13 @@ func (gzr *gzipResponseWriter) Write(b []byte) (int, error) {
 	return cnt, nil
 }
 
+func (gzr *gzipResponseWriter) reset(w http.ResponseWriter) {
+	gzr.status = 0
+	gzr.headerWritten = false
+	gzr.ResponseWriter = w
+	gzr.w.Reset(w)
+}
+
 func newGzipHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		if !strings.Contains(req.Header.Get("Accept-Encoding"), "gzip") {
@@ -173,10 +189,11 @@ func newGzipHandler(next http.Handler) http.Handler {
 
 		w.Header().Set("Content-Encoding", "gzip")
 
-		gz := gzip.NewWriter(w)
-		defer gz.Close()
+		gzr, _ := pool.Get().(*gzipResponseWriter)
+		gzr.reset(w)
 
-		gzr := &gzipResponseWriter{ResponseWriter: w, w: gz, status: 0, headerWritten: false}
+		defer gzr.Close()
+		defer pool.Put(gzr)
 
 		next.ServeHTTP(gzr, req)
 	})
