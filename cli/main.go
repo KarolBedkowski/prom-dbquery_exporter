@@ -102,13 +102,17 @@ func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	runGroup.Add(func() error { return collectors.Run(ctx) }, noop)
-	runGroup.Add(webHandler.Run, webHandler.Stop)
-	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, noop)
+	stop := func(_ error) {
+		cancel()
+	}
+
+	runGroup.Add(func() error { return collectors.Run(ctx) }, stop)
+	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, stop)
 	runGroup.Add(confHandler.start, confHandler.stop)
+	runGroup.Add(webHandler.Run, webHandler.Stop)
 
 	if sdw != nil {
-		runGroup.Add(func() error { return sdw.start(ctx) }, noop)
+		runGroup.Add(func() error { return sdw.start(ctx) }, stop)
 	}
 
 	// Termination handler.
@@ -121,7 +125,7 @@ func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 
 			return nil
 		},
-		func(_ error) { cancel() }, // stop all goroutines on error
+		stop, // stop all goroutines on error
 	)
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
@@ -274,7 +278,3 @@ func (h *confHandler) stop(_ error) {
 		close(rh)
 	}
 }
-
-// ------------------
-
-func noop(_ error) {}
