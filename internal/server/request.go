@@ -91,8 +91,7 @@ func newRequestParams(req *http.Request, cfg *conf.Configuration) (*requestParam
 	queryNames := req.URL.Query()["query"]
 
 	for _, g := range req.URL.Query()["group"] {
-		q := cfg.GroupQueries(g)
-		if len(q) > 0 {
+		if q, ok := cfg.Groups[g]; ok && len(q) > 0 {
 			queryNames = append(queryNames, q...)
 		} else {
 			errs = multierror.Append(errs, InvalidRequestParameterError("unknown group "+g))

@@ -6,6 +6,7 @@ package conf
 import (
 	"context"
 	"fmt"
+	"iter"
 	"os"
 	"slices"
 
@@ -25,12 +26,15 @@ type Configuration struct {
 	Jobs []*Job
 	// Global application settings
 	Global GlobalConf
+
+	Groups map[string][]string `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	event.Object("global", &c.Global).
-		Interface("jobs", c.Jobs)
+		Interface("jobs", c.Jobs).
+		Interface("groups", c.Groups)
 
 	d := zerolog.Dict()
 
@@ -50,16 +54,14 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 }
 
 // GroupQueries return queries that belong to given group.
-func (c *Configuration) GroupQueries(group string) []string {
-	var queries []string
-
-	for name, q := range c.Query {
-		if slices.Contains(q.Groups, group) {
-			queries = append(queries, name)
+func (c *Configuration) GroupQueries(group string) iter.Seq[string] {
+	return func(yield func(string) bool) {
+		for name, q := range c.Query {
+			if slices.Contains(q.Groups, group) && !yield(name) {
+				return
+			}
 		}
 	}
-
-	return queries
 }
 
 // LoadConfiguration from filename.
@@ -96,6 +98,8 @@ func Load(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	if err = conf.validate(ctx, dbp); err != nil {
 		return nil, newConfigurationError("validate error").Wrap(err)
 	}
+
+	conf.buildGroups()
 
 	configReloadTime.SetToCurrentTime()
 
@@ -203,4 +207,23 @@ func (c *Configuration) validateDatabases(ctx context.Context, dbp DatabaseProvi
 	}
 
 	return errs.ErrorOrNil()
+}
+
+func (c *Configuration) buildGroups() {
+	groups := make(map[string][]string)
+
+	for queryName, q := range c.Query {
+		for _, group := range q.Groups {
+			if groupQueries, ok := groups[group]; ok {
+				// do no duplicate queries
+				if !slices.Contains(groupQueries, queryName) {
+					groups[group] = append(groupQueries, queryName)
+				}
+			} else {
+				groups[group] = []string{queryName}
+			}
+		}
+	}
+
+	c.Groups = groups
 }
