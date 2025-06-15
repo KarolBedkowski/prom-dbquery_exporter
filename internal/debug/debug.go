@@ -14,10 +14,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"runtime/pprof"
-
 	// setup pprof endpoint
 	_ "net/http/pprof"
+	"runtime/pprof"
 
 	"github.com/rs/zerolog/hlog"
 	"golang.org/x/net/trace"

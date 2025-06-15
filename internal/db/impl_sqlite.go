@@ -53,16 +53,7 @@ func (sqliteDef) instanate(cfg *conf.Database) (Database, error) {
 	}
 
 	// glebarez/go-sqlite uses 'sqlite', mattn/go-sqlite3 - 'sqlite3'
-	l := &genericDatabase{
-		connStr: connstr.String(), driver: "sqlite", initialSQL: cfg.InitialQuery,
-		dbCfg: cfg,
-	}
-
-	if len(params) > 0 {
-		l.connStr += "?" + params.Encode()
-	}
-
-	return l, nil
+	return newGenericDatabase(connstr.String(), "sqlite", cfg), nil
 }
 
 func (sqliteDef) validateConf(cfg *conf.Database) error {

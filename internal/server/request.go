@@ -13,6 +13,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/rs/zerolog"
@@ -22,27 +23,28 @@ import (
 	"prom-dbquery_exporter.app/internal/metrics"
 )
 
-type dataWriter struct {
+type responseWriter struct {
+	writer http.ResponseWriter
+
 	written   int
 	scheduled int
-	writer    http.ResponseWriter
 }
 
-func (d *dataWriter) writeHeaders() {
+func (d *responseWriter) writeHeaders() {
 	d.writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 }
 
-func (d *dataWriter) write(ctx context.Context, data []byte) {
+func (d *responseWriter) write(ctx context.Context, data []byte) {
 	if _, err := d.writer.Write(data); err != nil {
-		log.Ctx(ctx).Error().Err(err).Msg("queryhandler: write error")
+		log.Ctx(ctx).Error().Err(err).Msg("responseWriter: write error")
 		debug.TraceErrorf(ctx, "write error: %s", err)
-		metrics.IncProcessErrorsCnt(metrics.ProcessWriteError)
+		metrics.IncErrorsCnt(metrics.ErrCategoryClientError)
 	} else {
 		d.written++
 	}
 }
 
-func (d *dataWriter) incScheduled() {
+func (d *responseWriter) incScheduled() {
 	d.scheduled++
 }
 
@@ -59,7 +61,7 @@ func (g InvalidRequestParameterError) Error() string {
 type requestParameters struct {
 	dbNames         []string
 	queryNames      []string
-	extraParameters map[string]any
+	extraParameters []string
 
 	queries []*conf.Query
 }
@@ -68,7 +70,7 @@ type requestParameters struct {
 func (r *requestParameters) MarshalZerologObject(event *zerolog.Event) {
 	event.Strs("dbNames", r.dbNames).
 		Strs("queryNames", r.queryNames).
-		Interface("extraParameters", r.extraParameters)
+		Strs("extraParameters", r.extraParameters)
 
 	qa := zerolog.Arr()
 	for _, q := range r.queries {
@@ -89,8 +91,7 @@ func newRequestParams(req *http.Request, cfg *conf.Configuration) (*requestParam
 	queryNames := req.URL.Query()["query"]
 
 	for _, g := range req.URL.Query()["group"] {
-		q := cfg.GroupQueries(g)
-		if len(q) > 0 {
+		if q, ok := cfg.Groups[g]; ok && len(q) > 0 {
 			queryNames = append(queryNames, q...)
 		} else {
 			errs = multierror.Append(errs, InvalidRequestParameterError("unknown group "+g))
@@ -135,28 +136,49 @@ func (r *requestParameters) iter() iter.Seq2[string, *conf.Query] {
 	}
 }
 
-func paramsFromQuery(req *http.Request) map[string]any {
-	params := make(map[string]any)
+//---------------------------------------------------------------
 
-	for k, v := range req.URL.Query() {
+func paramsFromQuery(req *http.Request) []string {
+	query := req.URL.Query()
+
+	var params []string
+
+	for k, v := range query {
 		// standard parameters
 		if k != "query" && k != "group" && k != "database" && len(v) > 0 {
-			params[k] = v[0]
+			params = append(params, k, v[0])
 		}
 	}
 
 	return params
 }
 
+// deduplicateStringList trim and remove empty and duplicated values from `inp`.
 func deduplicateStringList(inp []string) []string {
-	if len(inp) <= 1 {
-		return inp
-	}
+	switch len(inp) {
+	case 0:
+		return nil
 
-	tmpMap := make(map[string]bool, len(inp))
-	for _, s := range inp {
-		tmpMap[s] = true
-	}
+	case 1:
+		if s := strings.TrimSpace(inp[0]); s != "" {
+			return []string{s}
+		}
 
-	return slices.Collect(maps.Keys(tmpMap))
+		return nil
+
+	default:
+		tmpMap := make(map[string]struct{}, len(inp))
+
+		for _, s := range inp {
+			if s := strings.TrimSpace(s); s != "" {
+				tmpMap[s] = struct{}{}
+			}
+		}
+
+		if len(tmpMap) == 0 {
+			return nil
+		}
+
+		return slices.Collect(maps.Keys(tmpMap))
+	}
 }

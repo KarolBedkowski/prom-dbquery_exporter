@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"maps"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"prom-dbquery_exporter.app/internal/conf"
@@ -24,48 +24,103 @@ const (
 )
 
 type genericDatabase struct {
-	conn       *sqlx.DB
-	dbCfg      *conf.Database
-	connStr    string
-	driver     string
-	initialSQL []string
+	conn    *sqlx.DB
+	dbcfg   *conf.Database
+	connstr string
+	driver  string
 
-	lock sync.RWMutex
-
-	// metrics
-	totalOpenedConnections atomic.Uint32
-	totalFailedConnections atomic.Uint32
+	mu sync.Mutex
 }
 
-func (g *genericDatabase) Stats() *DatabaseStats {
-	if g.conn != nil {
-		return &DatabaseStats{
-			Name:                   g.dbCfg.Name,
-			DBStats:                g.conn.Stats(),
-			TotalOpenedConnections: g.totalOpenedConnections.Load(),
-			TotalFailedConnections: g.totalFailedConnections.Load(),
-		}
+func newGenericDatabase(connstr, driver string, dbcfg *conf.Database) Database {
+	return &genericDatabase{ //nolint:exhaustruct
+		connstr: connstr,
+		driver:  driver,
+		dbcfg:   dbcfg,
+	}
+}
+
+func (g *genericDatabase) CollectMetrics(resCh chan<- prometheus.Metric) { //nolint:funlen
+	if g.conn == nil {
+		return
 	}
 
-	return nil
+	name := g.dbcfg.Name
+	stat := g.conn.Stats()
+
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolOpenConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.OpenConnections),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolActConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.InUse),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolIdleConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.Idle),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolconfMaxConnsDesc,
+		prometheus.GaugeValue,
+		float64(stat.MaxOpenConnections),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnWaitCntDesc,
+		prometheus.CounterValue,
+		float64(stat.WaitCount),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnIdleClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.MaxIdleClosed),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnIdleTimeClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.MaxIdleTimeClosed),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnLifeTimeClosedDesc,
+		prometheus.CounterValue,
+		float64(stat.MaxLifetimeClosed),
+		name,
+	)
+	resCh <- prometheus.MustNewConstMetric(
+		dbpoolConnWaitTimeDesc,
+		prometheus.CounterValue,
+		stat.WaitDuration.Seconds(),
+		name,
+	)
 }
 
 // Query get data from database.
 func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params map[string]any,
 ) (*QueryResult, error) {
-	llog := loggerFromCtx(ctx).With().Str("db", g.dbCfg.Name).Str("query", query.Name).Logger()
+	llog := loggerFromCtx(ctx).With().Str("db", g.dbcfg.Name).Str("query", query.Name).Logger()
 	ctx = llog.WithContext(ctx)
-	result := &QueryResult{Start: time.Now()}
+	startts := time.Now()
 
 	debug.TracePrintf(ctx, "db: opening connection")
 
 	conn, err := g.getConnection(ctx)
 	if err != nil {
-		g.totalFailedConnections.Add(1)
+		dbpoolConnFailedTotal.WithLabelValues(g.dbcfg.Name).Inc()
 
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
-	defer conn.Close()
+
+	defer func() { logError(llog, conn.Close(), "close connection error") }()
 
 	// prepare query parameters; combine parameters from query and params
 	queryParams := cloneMap(query.Params, params)
@@ -81,7 +136,8 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	if err != nil {
 		return nil, fmt.Errorf("begin tx error: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+
+	defer func() { logError(llog, tx.Rollback(), "rollback error") }()
 
 	debug.TracePrintf(ctx, "db: begin query %q", query.Name)
 
@@ -90,12 +146,8 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 		return nil, fmt.Errorf("execute query error: %w", err)
 	}
 
-	if e := llog.Debug(); e.Enabled() {
-		if cols, err := rows.Columns(); err == nil {
-			e.Interface("cols", cols).Msg("db: generic: columns from query")
-		} else {
-			return nil, fmt.Errorf("get columns error: %w", err)
-		}
+	if err := g.logColumns(rows, llog); err != nil {
+		return nil, err
 	}
 
 	select {
@@ -104,24 +156,21 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	default:
 	}
 
-	result.Records, err = recordsFromRows(rows)
+	records, err := recordsFromRows(rows)
 	if err != nil {
 		return nil, fmt.Errorf("create record error: %w", err)
 	}
 
-	result.Params = queryParams
-	result.Duration = time.Since(result.Start).Seconds()
-
-	return result, nil
+	return newQueryResult(startts, queryParams, records), nil
 }
 
 // Close database connection.
 func (g *genericDatabase) Close(ctx context.Context) error {
 	// lock loader for write
-	g.lock.Lock()
-	defer g.lock.Unlock()
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
-	log.Ctx(ctx).Debug().Interface("conn", g.conn).Str("db", g.dbCfg.Name).Msg("db: generic: close conn")
+	log.Ctx(ctx).Debug().Interface("conn", g.conn).Str("db", g.dbcfg.Name).Msg("db: generic: close conn")
 
 	if g.conn == nil {
 		return nil
@@ -138,14 +187,14 @@ func (g *genericDatabase) Close(ctx context.Context) error {
 }
 
 func (g *genericDatabase) String() string {
-	return fmt.Sprintf("genericDatabase: name='%s' driver='%s' connstr='%v' connected=%v",
-		g.dbCfg.Name, g.driver, g.connStr, g.conn != nil)
+	return fmt.Sprintf("genericDatabase: name=%q driver=%q connstr=%q connected=%v",
+		g.dbcfg.Name, g.driver, g.connstr, g.conn != nil)
 }
 
 func (g *genericDatabase) configure(ctx context.Context) {
 	llog := log.Ctx(ctx)
 
-	pool := g.dbCfg.Pool
+	pool := g.dbcfg.Pool
 	if pool == nil {
 		llog.Warn().Msg("no pool configuration; using defaults")
 
@@ -170,18 +219,18 @@ func (g *genericDatabase) configure(ctx context.Context) {
 
 func (g *genericDatabase) openConnection(ctx context.Context) error {
 	// lock loader for write
-	g.lock.Lock()
-	defer g.lock.Unlock()
+	g.mu.Lock()
+	defer g.mu.Unlock()
 
 	if g.conn != nil {
 		return nil
 	}
 
 	llog := log.Ctx(ctx)
-	llog.Debug().Str("connstr", g.connStr).Str("driver", g.driver).Msg("db: generic: connecting")
+	llog.Debug().Str("connstr", g.connstr).Str("driver", g.driver).Msg("db: generic: connecting")
 
 	var err error
-	if g.conn, err = sqlx.Open(g.driver, g.connStr); err != nil {
+	if g.conn, err = sqlx.Open(g.driver, g.connstr); err != nil {
 		return fmt.Errorf("open error: %w", err)
 	}
 
@@ -201,7 +250,7 @@ func (g *genericDatabase) openConnection(ctx context.Context) error {
 }
 
 func (g *genericDatabase) ping(ctx context.Context) error {
-	lctx, cancel := context.WithTimeout(ctx, g.dbCfg.ConnectTimeout)
+	lctx, cancel := context.WithTimeout(ctx, g.dbcfg.ConnectTimeout)
 	defer cancel()
 
 	if err := g.conn.PingContext(lctx); err != nil {
@@ -216,23 +265,23 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 
 	// connect to database if not connected
 	if err := g.openConnection(ctx); err != nil {
-		g.totalFailedConnections.Add(1)
+		dbpoolConnFailedTotal.WithLabelValues(g.dbcfg.Name).Inc()
 
 		return nil, fmt.Errorf("open connection error: %w", err)
 	}
 
 	conn, err := g.conn.Connx(ctx)
 	if err != nil {
-		g.totalFailedConnections.Add(1)
+		dbpoolConnFailedTotal.WithLabelValues(g.dbcfg.Name).Inc()
 
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
 
-	g.totalOpenedConnections.Add(1)
+	dbpoolConnOpenedTotal.WithLabelValues(g.dbcfg.Name).Inc()
 
 	// launch initial sqls if defined
-	for idx, sql := range g.initialSQL {
-		llog.Debug().Str("sql", sql).Msg("db: generic: execute initial sql")
+	for idx, sql := range g.dbcfg.InitialQuery {
+		llog.Debug().Msgf("db: generic: execute initial sql: %q", sql)
 		debug.TracePrintf(ctx, "db: execute initial sql")
 
 		if err := g.executeInitialQuery(ctx, sql, conn); err != nil {
@@ -246,7 +295,12 @@ func (g *genericDatabase) getConnection(ctx context.Context) (*sqlx.Conn, error)
 }
 
 func (g *genericDatabase) executeInitialQuery(ctx context.Context, sql string, conn *sqlx.Conn) error {
-	lctx, cancel := context.WithTimeout(ctx, g.dbCfg.ConnectTimeout)
+	timeout := defaultTimeout
+	if g.dbcfg.Timeout > 0 {
+		timeout = g.dbcfg.Timeout
+	}
+
+	lctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	rows, err := conn.QueryxContext(lctx, sql)
@@ -267,12 +321,26 @@ func (g *genericDatabase) queryTimeout(q *conf.Query) time.Duration {
 	switch {
 	case q.Timeout > 0:
 		timeout = q.Timeout
-	case g.dbCfg.Timeout > 0:
-		timeout = g.dbCfg.Timeout
+	case g.dbcfg.Timeout > 0:
+		timeout = g.dbcfg.Timeout
 	}
 
 	return timeout
 }
+
+func (g *genericDatabase) logColumns(rows *sqlx.Rows, llog zerolog.Logger) error {
+	if e := llog.Debug(); e.Enabled() {
+		if cols, err := rows.Columns(); err == nil {
+			e.Msgf("db: generic: columns from query: %+v", cols)
+		} else {
+			return fmt.Errorf("get columns error: %w", err)
+		}
+	}
+
+	return nil
+}
+
+//---------------------------------------------------------------
 
 func loggerFromCtx(ctx context.Context) zerolog.Logger {
 	if llog := log.Ctx(ctx); llog != nil {
@@ -282,9 +350,13 @@ func loggerFromCtx(ctx context.Context) zerolog.Logger {
 	return log.Logger
 }
 
-// cloneMap create clone of `inp` map and optionally update it with values
-// from extra maps.
+// cloneMap - if there are `extra` maps - create clone of `inp` map and update it with values
+// from extra maps. Otherwise return `inp`.
 func cloneMap[K comparable, V any](inp map[K]V, extra ...map[K]V) map[K]V {
+	if len(extra) == 0 {
+		return inp
+	}
+
 	res := make(map[K]V, len(inp)+1)
 	maps.Copy(res, inp)
 
@@ -293,4 +365,10 @@ func cloneMap[K comparable, V any](inp map[K]V, extra ...map[K]V) map[K]V {
 	}
 
 	return res
+}
+
+func logError(llog zerolog.Logger, err error, format string, v ...any) {
+	if err != nil {
+		llog.Error().Err(err).Msgf(format, v...)
+	}
 }

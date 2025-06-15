@@ -10,9 +10,7 @@ run:
 linters:
   default: all
   disable:
-    - contextcheck
     - depguard
-    - exhaustruct
     - gochecknoglobals
     - gochecknoinits
     - tagliatelle
@@ -56,6 +54,7 @@ linters:
       - third_party$
       - builtin$
       - examples$
+      - tmp
 formatters:
   enable:
     - gci
@@ -68,3 +67,4 @@ formatters:
       - third_party$
       - builtin$
       - examples$
+      - tmp

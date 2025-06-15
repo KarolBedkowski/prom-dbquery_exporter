@@ -1,5 +1,7 @@
 global:
   request_timeout: 600s
+  # maximal number of concurrent request to /query endpoint; set 0 to no limit
+  max_request_in_flight: 10
 # sample database databases configuration
 database:
   testdb:

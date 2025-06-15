@@ -10,12 +10,12 @@ package db
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"maps"
 	"slices"
 	"sort"
 
 	"github.com/hashicorp/go-multierror"
+	"github.com/prometheus/client_golang/prometheus"
 	"prom-dbquery_exporter.app/internal/conf"
 )
 
@@ -31,21 +31,21 @@ type Database interface {
 	// Human-friendly info
 	String() string
 	// Stats return database stats if available
-	Stats() *DatabaseStats
+	CollectMetrics(resCh chan<- prometheus.Metric)
 }
 
 // DatabaseStats transfer stats from database driver.
 type DatabaseStats struct {
-	Name                   string
-	DBStats                sql.DBStats
-	TotalOpenedConnections uint32
-	TotalFailedConnections uint32
+	Name    string
+	DBStats sql.DBStats
 }
 
 type dbDefinition interface {
 	instanate(cfg *conf.Database) (Database, error)
 	validateConf(cfg *conf.Database) error
 }
+
+// -----------------------------------------------
 
 type Registry struct {
 	dbDefs map[string]dbDefinition
@@ -80,9 +80,7 @@ func (d Registry) Validate(cfg *conf.Database) error {
 		return NotSupportedError(cfg.Driver)
 	}
 
-	var errs *multierror.Error
-	errs = multierror.Append(errs, def.validateConf(cfg))
-	errs = multierror.Append(errs, validateCommon(cfg))
+	errs := multierror.Append(nil, def.validateConf(cfg), validateCommon(cfg))
 
 	return errs.ErrorOrNil()
 }
@@ -93,8 +91,10 @@ func (d Registry) GetInstance(cfg *conf.Database) (Database, error) {
 		return db.instanate(cfg)
 	}
 
-	return nil, InvalidConfigurationError(fmt.Sprintf("unsupported database type '%s'", cfg.Driver))
+	return nil, newInvalidConfigurationError("unsupported database type '%s'", cfg.Driver)
 }
+
+// ----------------------------------------------------------------
 
 func registerDatabase(def dbDefinition, names ...string) {
 	for _, n := range names {

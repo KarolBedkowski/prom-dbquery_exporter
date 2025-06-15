@@ -16,7 +16,7 @@ import (
 // QueryResult is result of Loader.Query.
 type QueryResult struct {
 	// query start time
-	Start time.Time
+	StartTS time.Time
 	// all query parameters
 	Params map[string]any
 	// rows
@@ -24,6 +24,17 @@ type QueryResult struct {
 	// query duration
 	Duration float64
 }
+
+func newQueryResult(startts time.Time, params map[string]any, records []Record) *QueryResult {
+	return &QueryResult{
+		StartTS:  startts,
+		Params:   params,
+		Duration: time.Since(startts).Seconds(),
+		Records:  records,
+	}
+}
+
+// -----------------------------------------------
 
 // Record is one record (row) loaded from database.
 type Record map[string]any

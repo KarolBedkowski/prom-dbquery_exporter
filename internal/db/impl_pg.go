@@ -30,7 +30,7 @@ func (postgresqlDef) instanate(cfg *conf.Database) (Database, error) {
 		connStr, ok = val.(string)
 
 		if !ok {
-			return nil, InvalidConfigurationError(fmt.Sprintf("invalid 'connstr' value: %v", val))
+			return nil, newInvalidConfigurationError("invalid 'connstr' value: %v", val)
 		}
 	} else {
 		p := make([]string, 0, len(cfg.Connection))
@@ -48,14 +48,7 @@ func (postgresqlDef) instanate(cfg *conf.Database) (Database, error) {
 		connStr = strings.Join(p, " ")
 	}
 
-	l := &genericDatabase{
-		connStr:    connStr,
-		driver:     "postgres",
-		initialSQL: cfg.InitialQuery,
-		dbCfg:      cfg,
-	}
-
-	return l, nil
+	return newGenericDatabase(connStr, "postgres", cfg), nil
 }
 
 func (postgresqlDef) validateConf(cfg *conf.Database) error {

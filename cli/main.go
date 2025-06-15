@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	stdlog "log"
 	"os"
@@ -40,7 +41,7 @@ func printVersion() {
 		fmt.Printf("Supported databases: %s\n", sdb) //nolint:forbidigo
 	}
 
-	fmt.Printf("Available template functions: %s\n", templates.AvailableTmplFunctions()) //nolint:forbidigo
+	fmt.Printf("Available template functions: %s\n", templates.TemplateFunctions()) //nolint:forbidigo
 }
 
 func printWelcome() {
@@ -55,7 +56,7 @@ func printWelcome() {
 		log.Logger.Log().Msgf("supported databases: %s", sdb)
 	}
 
-	log.Logger.Log().Msgf("available template functions: %s", templates.AvailableTmplFunctions())
+	log.Logger.Log().Msgf("available template functions: %s", templates.TemplateFunctions())
 }
 
 // Main is main function for cli.
@@ -69,77 +70,61 @@ func main() {
 
 	initializeLogger(conf.Args.LogLevel, conf.Args.LogFormat)
 	printWelcome()
-	log.Logger.Debug().Interface("args", conf.Args).Msg("cli arguments")
+	log.Logger.Debug().Msgf("cli arguments: %+v", conf.Args)
 
-	if err := startSDWatchdog(); err != nil {
-		log.Logger.Warn().Err(err).Msg("initialize systemd error")
+	sdw, err := newSdWatchdog()
+	if err != nil {
+		log.Logger.Warn().Err(err).Msg("systemd: init watchdog error")
 	}
 
 	cfg, err := conf.Load(conf.Args.ConfigFilename, db.GlobalRegistry)
 	if err != nil || cfg == nil {
-		log.Logger.Fatal().Err(err).Str("file", conf.Args.ConfigFilename).Msg("failed load config file")
+		log.Logger.Fatal().Err(err).Msgf("failed load config file %q", conf.Args.ConfigFilename)
 	}
 
 	log.Logger.Debug().Interface("conf", cfg).Msg("configuration loaded")
 
-	if err := start(cfg); err != nil {
+	if err := start(cfg, sdw); err != nil {
 		log.Logger.Fatal().Err(err).Msg("start failed")
 	}
 
 	log.Logger.Log().Msg("finished.")
 }
 
-func start(cfg *conf.Configuration) error {
-	collectors := collectors.New(cfg)
+func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
+	confHandler := newConfHandler(cfg)
+	collectors := collectors.New(cfg, confHandler.newReloadCh())
 	cache := cache.New[[]byte]("query_cache")
-	webHandler := server.New(cfg, cache, collectors)
-	sched := scheduler.New(cache, cfg, collectors)
+	webHandler := server.New(cfg, &cache, collectors, confHandler.newReloadCh())
+	sched := scheduler.New(cfg, &cache, collectors, confHandler.newReloadCh())
 	runGroup := run.Group{}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	runGroup.Add(func() error { return collectors.Run(ctx) }, func(_ error) { cancel() })
+	// stop all goroutines on error or first exit
+	stop := func(_ error) { cancel() }
+
+	runGroup.Add(func() error { return collectors.Run(ctx) }, stop)
+	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, stop)
+	runGroup.Add(confHandler.start, confHandler.stop)
 	runGroup.Add(webHandler.Run, webHandler.Stop)
-	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, sched.Close)
+
+	// start systemd watchdog when available
+	if sdw != nil {
+		runGroup.Add(func() error { return sdw.start(ctx) }, stop)
+	}
 
 	// Termination handler.
 	runGroup.Add(
 		func() error {
 			<-ctx.Done()
-			log.Logger.Warn().Msg("received SIGTERM, exiting...")
-			cancel()
+			log.Logger.Warn().Msg("exiting...")
 			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
 
 			return nil
 		},
-		func(_ error) {},
-	)
-
-	// Reload handler.
-	hup := make(chan os.Signal, 1)
-	signal.Notify(hup, syscall.SIGHUP)
-	runGroup.Add(
-		func() error {
-			for range hup {
-				log.Debug().Msg("reload configuration started")
-				daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
-
-				if newConf, err := cfg.Reload(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
-					webHandler.UpdateConf(newConf)
-					sched.UpdateConf(newConf)
-					collectors.UpdateConf(newConf)
-					log.Info().Interface("conf", newConf).Msg("configuration reloaded")
-				} else {
-					log.Logger.Error().Err(err).Msg("reloading configuration error; using old configuration")
-				}
-
-				daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
-			}
-
-			return nil
-		},
-		func(_ error) { close(hup) },
+		stop,
 	)
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
@@ -148,40 +133,56 @@ func start(cfg *conf.Configuration) error {
 	return runGroup.Run() //nolint:wrapcheck
 }
 
-func startSDWatchdog() error {
+// ------------------------------------------------------------
+
+var (
+	ErrSystemdNotAvailable = errors.New("systemd not available")
+	ErrSystemdNoWatchdog   = errors.New("systemd watchdog disabled")
+)
+
+type sdWatchdog struct{ interval time.Duration }
+
+func newSdWatchdog() (*sdWatchdog, error) {
 	ok, err := daemon.SdNotify(false, "STATUS=starting")
 	if err != nil {
-		return fmt.Errorf("send sd status error: %w", err)
+		return nil, fmt.Errorf("send status to systemd error: %w", err)
 	}
 
-	// not running under systemd?
 	if !ok {
-		return nil
+		return nil, ErrSystemdNotAvailable
 	}
 
 	interval, err := daemon.SdWatchdogEnabled(false)
 	if err != nil {
-		return fmt.Errorf("enable sdwatchdog error: %w", err)
+		return nil, fmt.Errorf("enable sdwatchdog error: %w", err)
 	}
 
-	// watchdog disabled?
 	if interval == 0 {
-		return nil
+		return nil, ErrSystemdNoWatchdog
 	}
 
-	interval /= 2
-
-	go func() {
-		tick := time.Tick(interval)
-		for range tick {
-			daemon.SdNotify(false, daemon.SdNotifyWatchdog) //nolint:errcheck
-		}
-	}()
-
-	log.Logger.Info().Err(err).Msg("systemd watchdog enabled")
-
-	return nil
+	return &sdWatchdog{interval}, nil
 }
+
+func (s sdWatchdog) start(ctx context.Context) error {
+	// watchdog disabled?
+	interval := s.interval / 2 //nolint:mnd
+
+	log.Logger.Info().Msg("systemd: watchdog started")
+
+	tick := time.Tick(interval)
+
+	for {
+		select {
+		case <-tick:
+			daemon.SdNotify(false, daemon.SdNotifyWatchdog) //nolint:errcheck
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+// ------------------------------------------------------------
 
 // InitializeLogger set log level and optional log filename.
 func initializeLogger(level string, format string) {
@@ -189,11 +190,11 @@ func initializeLogger(level string, format string) {
 
 	switch format {
 	default:
-		log.Error().Msg("logger: unknown log format; using logfmt")
+		log.Error().Msgf("logger: unknown log format %q; using logfmt", format)
 
 		fallthrough
 	case "logfmt":
-		llog = log.Output(zerolog.ConsoleWriter{
+		llog = log.Output(zerolog.ConsoleWriter{ //nolint:exhaustruct
 			Out:        os.Stderr,
 			NoColor:    !outputIsConsole(),
 			TimeFormat: time.RFC3339,
@@ -205,7 +206,7 @@ func initializeLogger(level string, format string) {
 	if l, err := zerolog.ParseLevel(level); err == nil {
 		zerolog.SetGlobalLevel(l)
 	} else {
-		log.Error().Msgf("logger: unknown log level '%s'; using debug", level)
+		log.Error().Msgf("logger: unknown log level %q; using debug", level)
 		zerolog.SetGlobalLevel(zerolog.DebugLevel)
 	}
 
@@ -219,4 +220,63 @@ func outputIsConsole() bool {
 	fileInfo, _ := os.Stdout.Stat()
 
 	return fileInfo != nil && (fileInfo.Mode()&os.ModeCharDevice) != 0
+}
+
+//--------------------------------------------------------
+
+type confHandler struct {
+	hupCh    chan os.Signal
+	cfg      *conf.Configuration
+	reloadCh []chan *conf.Configuration
+}
+
+func newConfHandler(cfg *conf.Configuration) confHandler {
+	return confHandler{
+		hupCh:    make(chan os.Signal, 1),
+		cfg:      cfg,
+		reloadCh: nil,
+	}
+}
+
+// newReloadCh create new channel for service that want receive configuration changes.
+func (h *confHandler) newReloadCh() chan *conf.Configuration {
+	ch := make(chan *conf.Configuration)
+	h.reloadCh = append(h.reloadCh, ch)
+
+	return ch
+}
+
+func (h *confHandler) start() error {
+	signal.Notify(h.hupCh, syscall.SIGHUP)
+
+	for range h.hupCh {
+		log.Debug().Msg("reload configuration started")
+		daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
+
+		if newConf, err := conf.Load(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
+			log.Debug().Msg("new configuration loaded")
+
+			for _, rh := range h.reloadCh {
+				rh <- newConf
+			}
+
+			h.cfg = newConf
+
+			log.Debug().Interface("conf", newConf).Msg("new configuration")
+			log.Info().Msg("configuration reloaded")
+			daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
+		} else {
+			log.Error().Err(err).Msg("reloading configuration failed; using old one")
+		}
+	}
+
+	return nil
+}
+
+func (h *confHandler) stop(_ error) {
+	close(h.hupCh)
+
+	for _, rh := range h.reloadCh {
+		close(rh)
+	}
 }

@@ -19,18 +19,22 @@ var (
 	// processErrorsCnt is total number of internal errors by category.
 	processErrorsCnt = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Namespace: MetricsNamespace,
-			Name:      "process_errors_total",
-			Help:      "Number of internal processing errors",
+			Namespace:   MetricsNamespace,
+			Subsystem:   "",
+			Name:        "process_errors_total",
+			Help:        "Number of processing errors",
+			ConstLabels: nil,
 		},
 		[]string{"error"},
 	)
 
 	uptime = prometheus.NewGauge(
 		prometheus.GaugeOpts{
-			Namespace: MetricsNamespace,
-			Name:      "start_time",
-			Help:      "dbquery_exporter start time",
+			Namespace:   MetricsNamespace,
+			Subsystem:   "",
+			Name:        "start_time",
+			Help:        "dbquery_exporter start time",
+			ConstLabels: nil,
 		},
 	)
 )
@@ -41,18 +45,21 @@ func init() {
 	uptime.SetToCurrentTime()
 }
 
+// -----------------------------------------------------------------
+
 type ErrorCategory string
 
 const (
-	ProcessFormatError     ErrorCategory = "format"
-	ProcessQueryError      ErrorCategory = "query"
-	ProcessWriteError      ErrorCategory = "write"
-	ProcessAuthError       ErrorCategory = "unauthorized"
-	ProcessCancelError     ErrorCategory = "cancel"
-	ProcessBadRequestError ErrorCategory = "bad_request"
+	ErrCategoryInternalError   ErrorCategory = "internal"
+	ErrCategorySourceError     ErrorCategory = "source"
+	ErrCategoryAuthError       ErrorCategory = "unauthorized"
+	ErrCategoryCanceledError   ErrorCategory = "canceled"
+	ErrCategoryBadRequestError ErrorCategory = "bad_request"
+	ErrCategoryFormatError     ErrorCategory = "format"
+	ErrCategoryClientError     ErrorCategory = "client"
 )
 
-// IncProcessErrorsCnt increment process errors count in category.
-func IncProcessErrorsCnt(category ErrorCategory) {
+// IncErrorsCnt increment process errors count in category.
+func IncErrorsCnt(category ErrorCategory) {
 	processErrorsCnt.WithLabelValues(string(category)).Inc()
 }

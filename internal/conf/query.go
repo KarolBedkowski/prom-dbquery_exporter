@@ -70,7 +70,7 @@ func (q *Query) validate() error {
 		return MissingFieldError("metrics template")
 	}
 
-	tmpl, err := templates.TemplateCompile(q.Name, q.Metrics+"\n")
+	tmpl, err := templates.CompileTemplate(q.Name, q.Metrics+"\n")
 	if err != nil {
 		return NewInvalidFieldError("metrics template", "", err.Error())
 	}
@@ -79,7 +79,7 @@ func (q *Query) validate() error {
 
 	// parse template for error response (if configured)
 	if q.OnError != "" {
-		tmpl, err := templates.TemplateCompile(q.Name, q.OnError+"\n")
+		tmpl, err := templates.CompileTemplate(q.Name, q.OnError+"\n")
 		if err != nil {
 			return NewInvalidFieldError("on error template", "", err.Error())
 		}

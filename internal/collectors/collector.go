@@ -29,23 +29,24 @@ var workerID atomic.Uint64
 
 // collector handle task for one loader.
 type collector struct {
-	log      zerolog.Logger
-	database db.Database
-	cfg      *conf.Database
-	name     string
-
-	// tasksQueue is queue of incoming task to schedule.
-	tasksQueue chan *Task
-	// stdWorkerQueue is chan that distribute task to workers.
-	stdWorkerQueue chan *Task
-	// bgWorkQueue is chan that distribute task created by scheduler to dedicated pool of workers.
-	bgWorkQueue chan *Task
+	log zerolog.Logger
 
 	// stdWorkersGroup is pool of workers that handle normal tasks and scheduled task when
 	// background workers are disabled.
 	stdWorkersGroup errgroup.Group
 	// bgWorkersGroup is pool of workers that handle only tasks created by scheduler.
 	bgWorkersGroup errgroup.Group
+	// database object
+	database db.Database
+	// database configuration
+	dbcfg *conf.Database
+
+	// tasksQueue is queue of incoming task to schedule.
+	tasksQueue chan *Task
+	// stdWorkQueue is chan that distribute task to workers.
+	stdWorkQueue chan *Task
+	// bgWorkQueue is chan that distribute task created by scheduler to dedicated pool of workers.
+	bgWorkQueue chan *Task
 }
 
 const (
@@ -53,37 +54,43 @@ const (
 	workerShutdownDelay = 10 * time.Second
 )
 
-func newCollector(name string, cfg *conf.Database) (*collector, error) {
-	database, err := db.GlobalRegistry.GetInstance(cfg)
+func newCollector(dbcfg *conf.Database) (*collector, error) {
+	database, err := db.GlobalRegistry.GetInstance(dbcfg)
 	if err != nil {
-		return nil, fmt.Errorf("get loader error: %w", err)
+		return nil, fmt.Errorf("create error: %w", err)
 	}
 
 	col := &collector{
-		name:           name,
-		database:       database,
-		stdWorkerQueue: make(chan *Task, tasksQueueSize),
-		bgWorkQueue:    make(chan *Task, tasksQueueSize),
-		cfg:            cfg,
-		log:            log.Logger.With().Str("database", name).Logger(),
+		database: database,
+		dbcfg:    dbcfg,
+		log:      log.Logger.With().Str("database", dbcfg.Name).Logger(),
+
+		tasksQueue:   nil,
+		stdWorkQueue: make(chan *Task, tasksQueueSize),
+		bgWorkQueue:  make(chan *Task, tasksQueueSize),
+
+		stdWorkersGroup: errgroup.Group{},
+		bgWorkersGroup:  errgroup.Group{},
 	}
 
-	col.stdWorkersGroup.SetLimit(cfg.MaxWorkers)
-	col.bgWorkersGroup.SetLimit(cfg.BackgroundWorkers)
+	// limit number of workers according to configuration
+	col.stdWorkersGroup.SetLimit(dbcfg.MaxWorkers)
+	col.bgWorkersGroup.SetLimit(dbcfg.BackgroundWorkers)
 
 	return col, nil
 }
 
 func (c *collector) addTask(ctx context.Context, task *Task) {
-	c.log.Debug().Msgf("collector: add new task; queue size: %d", len(c.tasksQueue))
+	c.log.Debug().Msgf("collector: add new task")
 
 	if c.tasksQueue == nil {
 		c.log.Warn().Msg("collector: try add new task to closed queue")
-		task.Output <- task.newResult(InternalError("collector inactive"), nil)
+		task.Output <- task.newErrorResult(InternalError("collector inactive"), metrics.ErrCategoryInternalError)
 
 		return
 	}
 
+	// wait for queue or cancel
 	select {
 	case c.tasksQueue <- task:
 	case <-ctx.Done():
@@ -100,7 +107,7 @@ func (c *collector) run(ctx context.Context) error {
 	c.tasksQueue = make(chan *Task, 1)
 	defer close(c.tasksQueue)
 
-	debug.SetGoroutineLabels(context.Background(), "main_worker", c.name)
+	debug.SetGoroutineLabels(ctx, "main_worker", c.dbcfg.Name)
 
 loop:
 	for {
@@ -111,11 +118,11 @@ loop:
 			break loop
 
 		case task := <-c.tasksQueue:
-			if task.IsScheduledJob && c.cfg.BackgroundWorkers > 0 {
+			if task.IsScheduledJob && c.dbcfg.BackgroundWorkers > 0 {
 				c.bgWorkQueue <- task
 				c.spawnBgWorker(ctx)
 			} else {
-				c.stdWorkerQueue <- task
+				c.stdWorkQueue <- task
 				c.spawnWorker(ctx)
 			}
 		}
@@ -136,14 +143,13 @@ loop:
 
 // spawnWorker start worker for normal queue.
 func (c *collector) spawnWorker(ctx context.Context) {
-	if len(c.stdWorkerQueue) == 0 {
+	if len(c.stdWorkQueue) == 0 {
 		return
 	}
 
+	// start new worker if below limit
 	c.stdWorkersGroup.TryGo(func() error {
-		c.worker(ctx, c.stdWorkerQueue, false)
-
-		return nil
+		return c.worker(ctx, c.stdWorkQueue, false)
 	})
 }
 
@@ -154,28 +160,26 @@ func (c *collector) spawnBgWorker(ctx context.Context) {
 	}
 
 	c.bgWorkersGroup.TryGo(func() error {
-		c.worker(ctx, c.bgWorkQueue, true)
-
-		return nil
+		return c.worker(ctx, c.bgWorkQueue, true)
 	})
 }
 
 // worker get process task from `workQueue` in loop. Exit when there is no new task for `workerShutdownDelay`.
-func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) {
-	idx, idxstr := generateWorkerID()
-	llog := c.log.With().Bool("bg", isBg).Uint64("worker_id", idx).Logger()
+func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool) error {
+	idx := generateWorkerID()
+	llog := c.log.With().Str("worker_id", idx).Logger()
 	ctx = llog.WithContext(ctx)
 
-	workersCreatedCnt.WithLabelValues(c.name, workerKind(isBg)).Inc()
-	llog.Debug().Msgf("collector: start worker %d  bg=%v", idx, isBg)
+	workersCreatedCnt.WithLabelValues(c.dbcfg.Name, workTypeString(isBg)).Inc()
+	llog.Debug().Msgf("collector: start worker id=%q bg=%v", idx, isBg)
 
-	// stop worker after 1 second of inactivity
+	// stop worker after some time of inactivity
 	shutdownTimer := time.NewTimer(workerShutdownDelay)
 	defer shutdownTimer.Stop()
 
 loop:
 	for {
-		debug.SetGoroutineLabels(context.Background(), "worker", idxstr, "db", c.name, "king", workerKind(isBg))
+		debug.SetGoroutineLabels(ctx, "worker", idx, "db", c.dbcfg.Name, "king", workTypeString(isBg))
 
 		// reset worker shutdown timer after each iteration.
 		if !shutdownTimer.Stop() {
@@ -193,8 +197,8 @@ loop:
 
 		case task, ok := <-workQueue:
 			if ok {
-				llog.Debug().Object("task", task).Int("queue_len", len(workQueue)).Msg("collector: handle task")
-				debug.SetGoroutineLabels(ctx, "query", task.QueryName, "worker", idxstr, "db", c.name, "req_id", task.ReqID)
+				llog.Debug().Object("task", task).Msg("collector: handle task")
+				debug.SetGoroutineLabels(ctx, "query", task.Query.Name, "worker", idx, "db", c.dbcfg.Name, "req_id", task.ReqID)
 
 				c.handleTask(ctx, task)
 			}
@@ -205,10 +209,12 @@ loop:
 	}
 
 	llog.Debug().Msg("collector: worker stopped")
+
+	return nil
 }
 
 func (c *collector) handleTask(ctx context.Context, task *Task) {
-	tasksQueueWaitTime.WithLabelValues(c.name, workerKind(task.IsScheduledJob)).
+	tasksQueueWaitTime.WithLabelValues(c.dbcfg.Name, workTypeString(task.IsScheduledJob)).
 		Observe(time.Since(task.RequestStart).Seconds())
 
 	llog := log.Ctx(ctx).With().Object("task", task).Logger()
@@ -228,8 +234,10 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 	defer cancel()
 
 	// get result
-	res := make(chan *TaskResult, 1)
-	go c.query(ctx, task, res)
+	resCh := make(chan *TaskResult, 1)
+	defer close(resCh)
+
+	go c.queryDatabase(ctx, task, resCh)
 
 	// check is task cancelled in meantime
 	select {
@@ -239,41 +247,39 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 	case <-task.Cancelled():
 		llog.Warn().Msg("collector: task cancelled when processing")
 
-	case r := <-res:
+	case r := <-resCh:
 		// send result
 		task.Output <- r
 	}
 }
 
-// query get result from loader.
-func (c *collector) query(ctx context.Context, task *Task, res chan *TaskResult) {
+// queryDatabase get result from loader.
+func (c *collector) queryDatabase(ctx context.Context, task *Task, resCh chan *TaskResult) {
 	llog := log.Ctx(ctx)
 
-	debug.TracePrintf(ctx, "start query %q in %q", task.QueryName, task.DBName)
+	debug.TracePrintf(ctx, "start query %q in %q", task.Query.Name, task.DBName)
 	llog.Debug().Msg("collector: start query")
 
 	result, err := c.database.Query(ctx, task.Query, task.Params)
 	if err != nil {
-		metrics.IncProcessErrorsCnt(metrics.ProcessQueryError)
-		res <- c.handleQueryError(ctx, task, err)
+		resCh <- c.handleQueryError(ctx, task, err)
 
 		return
 	}
 
-	queryDuration.WithLabelValues(task.QueryName, task.DBName).Observe(result.Duration)
+	queryDuration.WithLabelValues(task.Query.Name, task.DBName).Observe(result.Duration)
 	llog.Debug().Msgf("collector: result received in %0.5f", result.Duration)
 
-	output, err := formatResult(ctx, result, task.Query, c.cfg)
+	output, err := formatResult(ctx, result, task.Query, c.dbcfg)
 	if err != nil {
-		metrics.IncProcessErrorsCnt(metrics.ProcessFormatError)
-		res <- task.newResult(fmt.Errorf("format error: %w", err), nil)
+		resCh <- task.newErrorResult(fmt.Errorf("format error: %w", err), metrics.ErrCategoryFormatError)
 
 		return
 	}
 
 	llog.Debug().Msg("collector: result formatted")
-	debug.TracePrintf(ctx, "finished  query and formatting %q in %q", task.QueryName, task.DBName)
-	res <- task.newResult(nil, output)
+	debug.TracePrintf(ctx, "finished  query and formatting %q in %q", task.Query.Name, task.DBName)
+	resCh <- task.newSuccessResult(output)
 }
 
 func (c *collector) handleQueryError(ctx context.Context, task *Task, err error) *TaskResult {
@@ -282,115 +288,46 @@ func (c *collector) handleQueryError(ctx context.Context, task *Task, err error)
 		llog := log.Ctx(ctx)
 		llog.Warn().Err(err).Msg("collector: query error handled by on error template")
 
-		if output, err := formatError(ctx, err, task.Query, c.cfg); err != nil {
+		if output, err := formatError(ctx, err, task.Query, c.dbcfg); err != nil {
 			llog.Error().Err(err).Msg("collector: format error result error")
 		} else {
-			llog.Debug().Bytes("output", output).Msg("result")
+			llog.Debug().Bytes("output", output).Msg("collector: result")
 
-			return task.newResult(nil, output)
+			return task.newSuccessResult(output)
 		}
 	}
 
-	return task.newResult(fmt.Errorf("query error: %w", err), nil)
+	return task.newErrorResult(fmt.Errorf("query error: %w", err), metrics.ErrCategorySourceError)
 }
 
-func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) { //nolint:funlen
+func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) {
 	resCh <- prometheus.MustNewConstMetric(
 		collectorActiveDesc,
 		prometheus.GaugeValue,
 		1.0,
-		c.name,
+		c.dbcfg.Name,
 	)
-
-	stat := c.database.Stats()
-	if stat == nil {
-		return
-	}
-
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolOpenConnsDesc,
-		prometheus.GaugeValue,
-		float64(stat.DBStats.OpenConnections),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolActConnsDesc,
-		prometheus.GaugeValue,
-		float64(stat.DBStats.InUse),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolIdleConnsDesc,
-		prometheus.GaugeValue,
-		float64(stat.DBStats.Idle),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolconfMaxConnsDesc,
-		prometheus.GaugeValue,
-		float64(stat.DBStats.MaxOpenConnections),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnWaitCntDesc,
-		prometheus.CounterValue,
-		float64(stat.DBStats.WaitCount),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnIdleClosedDesc,
-		prometheus.CounterValue,
-		float64(stat.DBStats.MaxIdleClosed),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnIdleTimeClosedDesc,
-		prometheus.CounterValue,
-		float64(stat.DBStats.MaxIdleTimeClosed),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnLifeTimeClosedDesc,
-		prometheus.CounterValue,
-		float64(stat.DBStats.MaxLifetimeClosed),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnWaitTimeDesc,
-		prometheus.CounterValue,
-		stat.DBStats.WaitDuration.Seconds(),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnTotalConnectedDesc,
-		prometheus.CounterValue,
-		float64(stat.TotalOpenedConnections),
-		stat.Name,
-	)
-	resCh <- prometheus.MustNewConstMetric(
-		dbpoolConnTotalFailedDesc,
-		prometheus.CounterValue,
-		float64(stat.TotalFailedConnections),
-		stat.Name,
-	)
-
 	resCh <- prometheus.MustNewConstMetric(
 		collectorQueueLengthDesc,
 		prometheus.GaugeValue,
-		float64(len(c.stdWorkerQueue)),
-		stat.Name,
+		float64(len(c.stdWorkQueue)),
+		c.dbcfg.Name,
 		"main",
 	)
 	resCh <- prometheus.MustNewConstMetric(
 		collectorQueueLengthDesc,
 		prometheus.GaugeValue,
 		float64(len(c.bgWorkQueue)),
-		stat.Name,
+		c.dbcfg.Name,
 		"bg",
 	)
+
+	c.database.CollectMetrics(resCh)
 }
 
-func workerKind(isBg bool) string {
+// --------------------------------------------
+
+func workTypeString(isBg bool) string {
 	if isBg {
 		return "bg"
 	}
@@ -398,9 +335,9 @@ func workerKind(isBg bool) string {
 	return "std"
 }
 
-func generateWorkerID() (uint64, string) {
+func generateWorkerID() string {
 	idx := workerID.Add(1)
 	idxstr := strconv.FormatUint(idx, 10)
 
-	return idx, idxstr
+	return idxstr
 }

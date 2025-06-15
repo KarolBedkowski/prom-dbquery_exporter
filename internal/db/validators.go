@@ -47,11 +47,11 @@ func validateCommon(dbcfg *conf.Database) error {
 	}
 
 	if dbcfg.Timeout.Seconds() < 1 && dbcfg.Timeout > 0 {
-		log.Logger.Warn().Msgf("configuration: database %v: timeout < 1s: %s", dbcfg.Name, dbcfg.Timeout)
+		log.Logger.Warn().Msgf("configuration: database %q: timeout < 1s: %s", dbcfg.Name, dbcfg.Timeout)
 	}
 
 	if dbcfg.ConnectTimeout.Seconds() < 1 && dbcfg.ConnectTimeout > 0 {
-		log.Logger.Warn().Msgf("configuration: database %v: connect_timeout < 1s: %s", dbcfg.Name, dbcfg.ConnectTimeout)
+		log.Logger.Warn().Msgf("configuration: database %q: connect_timeout < 1s: %s", dbcfg.Name, dbcfg.ConnectTimeout)
 	}
 
 	return errs.ErrorOrNil()

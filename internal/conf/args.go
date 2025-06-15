@@ -1,6 +1,9 @@
 package conf
 
-import "flag"
+import (
+	"flag"
+	"strings"
+)
 
 //
 // cli.go
@@ -12,23 +15,32 @@ import "flag"
 type CliArguments struct {
 	ConfigFilename string
 
-	// Flags
+	// webserver configuration
+	ListenAddress string
+	WebConfig     string
+	Compression   string
 
+	// logging
+	LogLevel  string
+	LogFormat string
+
+	// Flags
 	DisableCache      bool
 	ParallelScheduler bool
 	ValidateOutput    bool
 	ShowVersion       bool
+}
 
-	// webserver configuration
-
-	ListenAddress string
-	WebConfig     string
-	EnableInfo    bool
-
-	// logging
-
-	LogLevel  string
-	LogFormat string
+func (c *CliArguments) EnableCompression() bool {
+	switch c.Compression {
+	case "true":
+		return true
+	case "false":
+		return false
+	default:
+		return !strings.HasPrefix(c.ListenAddress, "127.0.0.1:") &&
+			!strings.HasPrefix(c.ListenAddress, "localhost:")
+	}
 }
 
 var Args CliArguments
@@ -43,7 +55,8 @@ func ParseCliArgs() {
 		"Address to listen on for web interface and telemetry.")
 	flag.StringVar(&Args.WebConfig, "web.config", "",
 		"Path to config yaml file that can enable TLS or authentication.")
-	flag.BoolVar(&Args.EnableInfo, "enable-info", false, "Enable /info endpoint")
+	flag.StringVar(&Args.Compression, "web.compression", "auto",
+		"Enable/disable response compression (true/false/auto).")
 
 	flag.StringVar(&Args.LogLevel, "log.level", "info",
 		"Logging level (debug, info, warn, error, fatal)")
@@ -51,8 +64,12 @@ func ParseCliArgs() {
 		"Logging log format (logfmt, json).")
 
 	flag.BoolVar(&Args.DisableCache, "no-cache", false, "Disable query result caching")
-	flag.BoolVar(&Args.ParallelScheduler, "parallel-scheduler", false, "Run scheduler ask parallel")
+	flag.BoolVar(&Args.ParallelScheduler, "parallel-scheduler", false, "Run scheduler as parallel")
 	flag.BoolVar(&Args.ValidateOutput, "validate-output", false, "Enable output validation")
 
 	flag.Parse()
+
+	if Args.Compression != "true" && Args.Compression != "false" {
+		Args.Compression = "auto"
+	}
 }

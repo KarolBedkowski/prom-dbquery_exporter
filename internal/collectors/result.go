@@ -16,6 +16,8 @@ import (
 	"prom-dbquery_exporter.app/internal/db"
 )
 
+const initialBufferSize = 512
+
 // resultTmplData keep query result and some metadata parsed to template.
 type resultTmplData struct {
 	// Parameters
@@ -26,9 +28,12 @@ type resultTmplData struct {
 	Query string
 	// Database name
 	Database string
+
+	Error string
+
 	// Records (rows)
-	R              []db.Record
-	Error          string
+	R []db.Record
+
 	QueryStartTime int64
 	QueryDuration  float64
 	Count          int
@@ -44,14 +49,17 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 		R:              qRes.Records,
 		P:              qRes.Params,
 		L:              db.Labels,
-		QueryStartTime: qRes.Start.Unix(),
+		QueryStartTime: qRes.StartTS.Unix(),
 		QueryDuration:  qRes.Duration,
 		Count:          len(qRes.Records),
+		Error:          "",
 	}
 
 	log.Ctx(ctx).Debug().Interface("res", res).Msg("result: executing template")
 
 	var output bytes.Buffer
+
+	output.Grow(initialBufferSize)
 
 	if err := query.MetricTpl.Execute(&output, &res); err != nil {
 		return nil, fmt.Errorf("execute template error: %w", err)
@@ -63,7 +71,7 @@ func formatResult(ctx context.Context, qRes *db.QueryResult, query *conf.Query,
 func formatError(ctx context.Context, err error, query *conf.Query,
 	db *conf.Database,
 ) ([]byte, error) {
-	res := resultTmplData{
+	res := resultTmplData{ //nolint:exhaustruct
 		Query:    query.Name,
 		Database: db.Name,
 		L:        db.Labels,

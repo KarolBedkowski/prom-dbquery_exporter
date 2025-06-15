@@ -15,6 +15,11 @@ import (
 	"gopkg.in/yaml.v2"
 )
 
+type DatabaseProvider interface {
+	Validate(d *Database) error
+	IsSupported(d *Database) bool
+}
+
 // Configuration keep application configuration.
 type Configuration struct {
 	// Databases
@@ -25,12 +30,15 @@ type Configuration struct {
 	Jobs []*Job
 	// Global application settings
 	Global GlobalConf
+
+	Groups map[string][]string `yaml:"-"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	event.Object("global", &c.Global).
-		Interface("jobs", c.Jobs)
+		Interface("jobs", c.Jobs).
+		Interface("groups", c.Groups)
 
 	d := zerolog.Dict()
 
@@ -49,25 +57,12 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	event.Dict("query", qd)
 }
 
-// GroupQueries return queries that belong to given group.
-func (c *Configuration) GroupQueries(group string) []string {
-	var queries []string
-
-	for name, q := range c.Query {
-		if slices.Contains(q.Groups, group) {
-			queries = append(queries, name)
-		}
-	}
-
-	return queries
-}
-
 // LoadConfiguration from filename.
 func Load(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	logger := log.Logger.With().Str("module", "config").Logger()
-	conf := &Configuration{}
+	conf := &Configuration{} //nolint:exhaustruct
 
-	logger.Info().Msgf("Loading config file %s", filename)
+	logger.Info().Msgf("Loading config file %q", filename)
 
 	b, err := os.ReadFile(filename) // #nosec
 	if err != nil {
@@ -97,19 +92,22 @@ func Load(filename string, dbp DatabaseProvider) (*Configuration, error) {
 		return nil, newConfigurationError("validate error").Wrap(err)
 	}
 
+	conf.buildGroups()
+
 	configReloadTime.SetToCurrentTime()
 
 	return conf, nil
 }
 
-// LoadConfiguration from filename.
-func (c *Configuration) Reload(filename string, dbp DatabaseProvider) (*Configuration, error) {
-	newCfg, err := Load(filename, dbp)
-	if err != nil {
-		return nil, err
+// ValidDatabases get iter of valid databases.
+func (c *Configuration) ValidDatabases(yield func(*Database) bool) {
+	for _, d := range c.Database {
+		if d.Valid {
+			if !yield(d) {
+				return
+			}
+		}
 	}
-
-	return newCfg, nil
 }
 
 func (c *Configuration) validateJobs(ctx context.Context) error {
@@ -121,24 +119,16 @@ func (c *Configuration) validateJobs(ctx context.Context) error {
 		if err := job.validate(ctx, c); err != nil {
 			errs = multierror.Append(errs, newConfigurationError(
 				fmt.Sprintf("validate job %d error", i+1)).Wrap(err))
-		}
-
-		if job.IsValid {
+		} else if job.IsValid {
 			validJobs++
 		}
 	}
 
 	if len(c.Jobs) > 0 && validJobs == 0 {
-		logger := log.Ctx(ctx)
-		logger.Warn().Msgf("configuration: all jobs are invalid!")
+		log.Ctx(ctx).Warn().Msg("configuration: all jobs are invalid!")
 	}
 
 	return errs.ErrorOrNil()
-}
-
-type DatabaseProvider interface {
-	Validate(d *Database) error
-	IsSupported(d *Database) bool
 }
 
 func (c *Configuration) validate(ctx context.Context, dbp DatabaseProvider) error {
@@ -159,7 +149,9 @@ func (c *Configuration) validate(ctx context.Context, dbp DatabaseProvider) erro
 		}
 	}
 
-	errs = multierror.Append(errs, c.validateDatabases(ctx, dbp), c.validateJobs(ctx))
+	errs = multierror.Append(errs,
+		c.validateDatabases(ctx, dbp),
+		c.validateJobs(ctx))
 
 	return errs.ErrorOrNil()
 }
@@ -178,12 +170,12 @@ func (c *Configuration) validateDatabases(ctx context.Context, dbp DatabaseProvi
 		if dbp.IsSupported(db) {
 			if err := db.validate(dbp); err != nil {
 				errs = multierror.Append(errs, newConfigurationError(
-					fmt.Sprintf("validate database '%s' error", name)).Wrap(err))
+					fmt.Sprintf("validate database %q error", name)).Wrap(err))
 			} else {
 				anyDbConfigured = true
 			}
 		} else {
-			log.Ctx(ctx).Error().Str("database", name).Msgf("database %s is not supported", db.Driver)
+			log.Ctx(ctx).Error().Str("database", name).Msgf("database %q is not supported", db.Driver)
 		}
 	}
 
@@ -192,4 +184,23 @@ func (c *Configuration) validateDatabases(ctx context.Context, dbp DatabaseProvi
 	}
 
 	return errs.ErrorOrNil()
+}
+
+func (c *Configuration) buildGroups() {
+	groups := make(map[string][]string)
+
+	for queryName, q := range c.Query {
+		for _, group := range q.Groups {
+			if groupQueries, ok := groups[group]; ok {
+				// do no duplicate queries
+				if !slices.Contains(groupQueries, queryName) {
+					groups[group] = append(groupQueries, queryName)
+				}
+			} else {
+				groups[group] = []string{queryName}
+			}
+		}
+	}
+
+	c.Groups = groups
 }

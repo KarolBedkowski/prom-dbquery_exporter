@@ -117,12 +117,13 @@ func getConfig(configPath string) (*web.Config, error) {
 	}
 
 	cfg := &web.Config{
-		TLSConfig: web.TLSConfig{
+		TLSConfig: web.TLSConfig{ //nolint:exhaustruct
 			MinVersion:               tls.VersionTLS12,
 			MaxVersion:               tls.VersionTLS13,
 			PreferServerCipherSuites: true,
 		},
-		HTTPConfig: web.HTTPConfig{HTTP2: true},
+		HTTPConfig: web.HTTPConfig{HTTP2: true, Header: nil},
+		Users:      nil,
 	}
 
 	err = yaml.UnmarshalStrict(content, cfg)
@@ -135,23 +136,25 @@ func getConfig(configPath string) (*web.Config, error) {
 	return cfg, nil
 }
 
+// -------------------------------------------------
+
 type secWebHandler struct {
 	handler http.Handler
 	cache   map[string]bool
 	headers map[string]string
 	users   map[string]config_util.Secret
 
-	mtx sync.Mutex
+	mu sync.Mutex
 }
 
 func newSecWebHandler(conf *web.Config, handler http.Handler) *secWebHandler {
 	if cu := len(conf.Users); cu > 0 {
-		log.Logger.Info().Int("users", cu).Msg("sechandler: authorization enabled")
+		log.Logger.Info().Msgf("sechandler: authorization enabled; users: %d", cu)
 	} else {
 		log.Logger.Info().Msg("sechandler: authorization disabled")
 	}
 
-	return &secWebHandler{
+	return &secWebHandler{ //nolint:exhaustruct
 		handler: handler,
 		cache:   make(map[string]bool),
 		headers: conf.HTTPConfig.Header,
@@ -185,7 +188,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 		cacheKey := hex.EncodeToString(append(append([]byte(user), []byte(hashedPassword)...),
 			[]byte(pass)...))
 
-		wh.mtx.Lock()
+		wh.mu.Lock()
 
 		authOk, ok := wh.cache[cacheKey]
 		if !ok {
@@ -195,7 +198,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 			wh.cache[cacheKey] = authOk
 		}
 
-		wh.mtx.Unlock()
+		wh.mu.Unlock()
 
 		if authOk && validUser {
 			wh.handler.ServeHTTP(writer, req)
@@ -204,7 +207,7 @@ func (wh *secWebHandler) ServeHTTP(writer http.ResponseWriter, req *http.Request
 		}
 	}
 
-	metrics.IncProcessErrorsCnt(metrics.ProcessAuthError)
+	metrics.IncErrorsCnt(metrics.ErrCategoryAuthError)
 	writer.Header().Set("WWW-Authenticate", "Basic")
 	http.Error(writer, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 }

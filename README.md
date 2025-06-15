@@ -192,6 +192,7 @@ Multiple queries:
 
 * `/health` - simple health status
 * `/info` - current loaded configuration (available only from localhost)
+* '/' - landing page
 
 
 # Note

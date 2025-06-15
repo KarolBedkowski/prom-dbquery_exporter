@@ -34,14 +34,8 @@ func (m mysqlDef) instanate(cfg *conf.Database) (Database, error) {
 	}
 
 	connstr := m.connstr(params)
-	l := &genericDatabase{
-		connStr:    connstr,
-		driver:     "mysql",
-		initialSQL: cfg.InitialQuery,
-		dbCfg:      cfg,
-	}
 
-	return l, nil
+	return newGenericDatabase(connstr, "mysql", cfg), nil
 }
 
 func (mysqlDef) connstr(params standardParams) string {

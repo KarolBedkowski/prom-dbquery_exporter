@@ -23,6 +23,8 @@ const (
 	defaultConnectioTimeout = time.Duration(15) * time.Second
 )
 
+// ----------------------------------------------------
+
 // PoolConfiguration configure database connection pool.
 type PoolConfiguration struct {
 	MaxConnections     int           `yaml:"max_connections"`
@@ -54,6 +56,8 @@ func (p *PoolConfiguration) validate() error {
 
 	return err.ErrorOrNil()
 }
+
+// ----------------------------------------------------
 
 // Database define database connection.
 type Database struct {
@@ -100,7 +104,11 @@ func (d *Database) MarshalZerologObject(event *zerolog.Event) {
 
 	for k, v := range d.Connection {
 		if k == "password" {
-			conn.Str(k, "***")
+			if vs, ok := v.(string); ok && len(vs) > 0 {
+				conn.Str(k, "** set **")
+			} else {
+				conn.Str(k, "** NOT SET **")
+			}
 		} else {
 			conn.Interface(k, v)
 		}
@@ -112,6 +120,7 @@ func (d *Database) MarshalZerologObject(event *zerolog.Event) {
 func (d *Database) setup(name string) {
 	d.Name = name
 
+	// create default pool configuration when not defined in conf file
 	if d.Pool == nil {
 		d.Pool = &PoolConfiguration{
 			MaxConnections:     defaultMaxConnections,
@@ -128,7 +137,9 @@ func (d *Database) setup(name string) {
 
 	if d.BackgroundWorkers >= d.MaxWorkers {
 		log.Logger.Warn().
-			Msg("configuration: number of background workers must be lower than max_connections; disabling background jobs")
+			Msgf("configuration: number of background workers must be lower than max_connections (%d);"+
+				" disabling background jobs",
+				d.MaxWorkers)
 
 		d.BackgroundWorkers = 0
 	} else {

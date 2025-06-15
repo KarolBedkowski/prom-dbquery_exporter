@@ -9,12 +9,14 @@ package collectors
 
 import (
 	"context"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"golang.org/x/sync/errgroup"
 	"prom-dbquery_exporter.app/internal/conf"
+	"prom-dbquery_exporter.app/internal/metrics"
 )
 
 // Collectors is collection of all configured databases.
@@ -22,16 +24,19 @@ type Collectors struct {
 	log        zerolog.Logger
 	cfg        *conf.Configuration
 	collectors map[string]*collector
-	newConfCh  chan *conf.Configuration
+	newCfgCh   chan *conf.Configuration
+
+	mu sync.Mutex
 }
 
 // New create new Collectors object.
-func New(cfg *conf.Configuration) *Collectors {
+func New(cfg *conf.Configuration, cfgCh chan *conf.Configuration) *Collectors {
 	colls := &Collectors{
 		collectors: make(map[string]*collector),
 		cfg:        cfg,
 		log:        log.Logger.With().Str("module", "databases").Logger(),
-		newConfCh:  make(chan *conf.Configuration, 1),
+		newCfgCh:   cfgCh,
+		mu:         sync.Mutex{},
 	}
 
 	prometheus.MustRegister(colls)
@@ -43,34 +48,37 @@ func (cs *Collectors) Run(ctx context.Context) error {
 	for {
 		cs.log.Debug().Msg("collectors: starting...")
 
-		group, cancel, err := cs.startCollectors()
+		lctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		group, err := cs.startCollectors(lctx)
 		if err != nil {
 			return err
+		}
+
+		stop := func() {
+			cs.log.Debug().Msg("collectors: stopping...")
+			cs.collectors = nil
+
+			cancel()
+
+			if err := group.Wait(); err != nil {
+				cs.log.Error().Err(err).Msg("stopping collectors error")
+			}
+
+			cs.log.Debug().Msg("collectors: stopped")
 		}
 
 	loop:
 		for {
 			select {
-			case <-ctx.Done():
-				cs.log.Debug().Msg("collectors: stopping...")
-				cs.collectors = nil
-				cancel()
-
-				if err := group.Wait(); err != nil {
-					cs.log.Error().Err(err).Msg("stopping collectors for new conf error")
-				}
-
-				cs.log.Debug().Msg("collectors: stopped")
+			case <-lctx.Done():
+				stop()
 
 				return nil
 
-			case cfg := <-cs.newConfCh:
-				cs.log.Debug().Msg("collectors: stopping collectors for update configuration")
-				cancel()
-
-				if err := group.Wait(); err != nil {
-					cs.log.Error().Err(err).Msg("stopping collectors for new conf error")
-				}
+			case cfg := <-cs.newCfgCh:
+				stop()
 
 				cs.cfg = cfg
 				cs.log.Debug().Msg("collectors: update configuration finished")
@@ -82,23 +90,20 @@ func (cs *Collectors) Run(ctx context.Context) error {
 }
 
 func (cs *Collectors) AddTask(ctx context.Context, task *Task) {
-	if cs.collectors == nil {
+	dbloader := cs.getCollector(task.DBName)
+
+	if dbloader != nil {
+		dbloader.addTask(ctx, task)
+
 		return
 	}
 
-	if dbloader, ok := cs.collectors[task.DBName]; ok {
-		dbloader.addTask(ctx, task)
-	} else {
-		task.Output <- task.newResult(ErrAppNotConfigured, nil)
-	}
-}
-
-// UpdateConf update configuration for existing loaders:
-// close not existing any more loaders and close loaders with changed
-// configuration so they can be create with new conf on next use.
-func (cs *Collectors) UpdateConf(cfg *conf.Configuration) {
-	if cfg != nil {
-		cs.newConfCh <- cfg
+	select {
+	case task.Output <- task.newErrorResult(ErrUnknownDatabase, metrics.ErrCategoryInternalError):
+	case <-ctx.Done():
+		cs.log.Warn().Err(ctx.Err()).Msg("context cancelled")
+	case <-task.Cancelled():
+		cs.log.Warn().Msg("task cancelled")
 	}
 }
 
@@ -119,25 +124,22 @@ func (cs *Collectors) Collect(resCh chan<- prometheus.Metric) {
 }
 
 func (cs *Collectors) createCollectors() error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
 	collectors := make(map[string]*collector)
 
-	for dbName, dbCfg := range cs.cfg.Database {
-		if !dbCfg.Valid {
-			continue
-		}
-
-		dbloader, err := newCollector(dbName, dbCfg)
+	for dbcfg := range cs.cfg.ValidDatabases {
+		dbloader, err := newCollector(dbcfg)
 		if err != nil {
-			cs.log.Error().Err(err).Str("dbname", dbName).Msg("create collector error")
-
-			continue
+			cs.log.Error().Err(err).Str("database", dbcfg.Name).Msg("create collector error")
+		} else {
+			collectors[dbcfg.Name] = dbloader
 		}
-
-		collectors[dbName] = dbloader
 	}
 
 	if len(collectors) == 0 {
-		return InvalidConfigurationError("no databases available")
+		return ErrNoDatabases
 	}
 
 	cs.collectors = collectors
@@ -145,17 +147,29 @@ func (cs *Collectors) createCollectors() error {
 	return nil
 }
 
-func (cs *Collectors) startCollectors() (*errgroup.Group, context.CancelFunc, error) {
-	if err := cs.createCollectors(); err != nil {
-		return nil, nil, err
+func (cs *Collectors) startCollectors(ctx context.Context) (*errgroup.Group, error) {
+	err := cs.createCollectors()
+	if err != nil {
+		return nil, err
 	}
 
-	cctx, cancel := context.WithCancel(context.Background())
-	group, cctx := errgroup.WithContext(cctx)
+	group, cctx := errgroup.WithContext(ctx)
 
 	for _, dbloader := range cs.collectors {
 		group.Go(func() error { return dbloader.run(cctx) })
 	}
 
-	return group, cancel, nil
+	return group, nil
+}
+
+func (cs *Collectors) getCollector(name string) *collector {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	if cs.collectors == nil {
+		// this may happen when configuration is reloaded; we can't do anything
+		return nil
+	}
+
+	return cs.collectors[name]
 }

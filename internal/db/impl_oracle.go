@@ -23,14 +23,9 @@ type oracleDef struct{}
 
 func (o oracleDef) instanate(cfg *conf.Database) (Database, error) {
 	params := newStandardParams(cfg.Connection)
-
 	connstr := o.connstr(params)
-	l := &genericDatabase{
-		connStr: connstr, driver: "oracle", initialSQL: cfg.InitialQuery,
-		dbCfg: cfg,
-	}
 
-	return l, nil
+	return newGenericDatabase(connstr, "oracle", cfg), nil
 }
 
 func (oracleDef) validateConf(cfg *conf.Database) error {

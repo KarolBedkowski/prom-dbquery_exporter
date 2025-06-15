@@ -18,11 +18,14 @@ const defaultRequestTimeout = time.Duration(15) * time.Minute
 type GlobalConf struct {
 	// RequestTimeout is maximum processing request time.
 	RequestTimeout time.Duration `yaml:"request_timeout"`
+
+	MaxRequestInFlight uint `yaml:"max_request_in_flight"`
 }
 
 // MarshalZerologObject implements LogObjectMarshaler.
 func (g *GlobalConf) MarshalZerologObject(e *zerolog.Event) {
 	e.Dur("request_timeout", g.RequestTimeout)
+	e.Uint("max_request_in_flight", g.MaxRequestInFlight)
 }
 
 func (g *GlobalConf) setup() {

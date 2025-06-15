@@ -1,3 +1,14 @@
+v0.11.5 2025-06-15
+
+* feat: compress with gzip responses from /query
+* feat: option for limit in flight request to /query endpoint
+* feat: add landing page
+* feat: /info accept connection from listen ip address
+* feat: response compression is controlled by -web.compression argument
+* fix: trim and remove empty query and database names from req parameters
+* fix: fix scheduler: broken initial configuration
+* refactor: clean & simplify code; fix minor errors
+
 v0.11.4 2025-05-22
 * feat: validate configuration more precisely
 * feat(breaking): fix internal metrics names
