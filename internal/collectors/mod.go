@@ -9,6 +9,7 @@ package collectors
 
 import (
 	"context"
+	"sync"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/rs/zerolog"
@@ -24,6 +25,8 @@ type Collectors struct {
 	cfg        *conf.Configuration
 	collectors map[string]*collector
 	newCfgCh   chan *conf.Configuration
+
+	mu sync.Mutex
 }
 
 // New create new Collectors object.
@@ -33,6 +36,7 @@ func New(cfg *conf.Configuration, cfgCh chan *conf.Configuration) *Collectors {
 		cfg:        cfg,
 		log:        log.Logger.With().Str("module", "databases").Logger(),
 		newCfgCh:   cfgCh,
+		mu:         sync.Mutex{},
 	}
 
 	prometheus.MustRegister(colls)
@@ -52,29 +56,29 @@ func (cs *Collectors) Run(ctx context.Context) error {
 			return err
 		}
 
+		stop := func() {
+			cs.log.Debug().Msg("collectors: stopping...")
+			cs.collectors = nil
+
+			cancel()
+
+			if err := group.Wait(); err != nil {
+				cs.log.Error().Err(err).Msg("stopping collectors error")
+			}
+
+			cs.log.Debug().Msg("collectors: stopped")
+		}
+
 	loop:
 		for {
 			select {
 			case <-lctx.Done():
-				cs.log.Debug().Msg("collectors: stopping...")
-				cs.collectors = nil
-				cancel()
-
-				if err := group.Wait(); err != nil {
-					cs.log.Error().Err(err).Msg("stopping collectors for new conf error")
-				}
-
-				cs.log.Debug().Msg("collectors: stopped")
+				stop()
 
 				return nil
 
 			case cfg := <-cs.newCfgCh:
-				cs.log.Debug().Msg("collectors: stopping collectors for update configuration")
-				cancel()
-
-				if err := group.Wait(); err != nil {
-					cs.log.Error().Err(err).Msg("stopping collectors for new conf error")
-				}
+				stop()
 
 				cs.cfg = cfg
 				cs.log.Debug().Msg("collectors: update configuration finished")
@@ -86,11 +90,9 @@ func (cs *Collectors) Run(ctx context.Context) error {
 }
 
 func (cs *Collectors) AddTask(ctx context.Context, task *Task) {
-	if cs.collectors == nil {
-		return
-	}
+	dbloader := cs.getCollector(task.DBName)
 
-	if dbloader, ok := cs.collectors[task.DBName]; ok {
+	if dbloader != nil {
 		dbloader.addTask(ctx, task)
 
 		return
@@ -121,7 +123,10 @@ func (cs *Collectors) Collect(resCh chan<- prometheus.Metric) {
 	}
 }
 
-func (cs *Collectors) createCollectors() (map[string]*collector, error) {
+func (cs *Collectors) createCollectors() error {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
 	collectors := make(map[string]*collector)
 
 	for dbcfg := range cs.cfg.ValidDatabases {
@@ -134,19 +139,19 @@ func (cs *Collectors) createCollectors() (map[string]*collector, error) {
 	}
 
 	if len(collectors) == 0 {
-		return nil, ErrNoDatabases
-	}
-
-	return collectors, nil
-}
-
-func (cs *Collectors) startCollectors(ctx context.Context) (*errgroup.Group, error) {
-	collectors, err := cs.createCollectors()
-	if err != nil {
-		return nil, err
+		return ErrNoDatabases
 	}
 
 	cs.collectors = collectors
+
+	return nil
+}
+
+func (cs *Collectors) startCollectors(ctx context.Context) (*errgroup.Group, error) {
+	err := cs.createCollectors()
+	if err != nil {
+		return nil, err
+	}
 
 	group, cctx := errgroup.WithContext(ctx)
 
@@ -155,4 +160,16 @@ func (cs *Collectors) startCollectors(ctx context.Context) (*errgroup.Group, err
 	}
 
 	return group, nil
+}
+
+func (cs *Collectors) getCollector(name string) *collector {
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+
+	if cs.collectors == nil {
+		// this may happen when configuration is reloaded; we can't do anything
+		return nil
+	}
+
+	return cs.collectors[name]
 }

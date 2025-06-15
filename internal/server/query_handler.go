@@ -223,8 +223,10 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 	logger := zerolog.Ctx(ctx)
 	logger.Debug().Msg("queryhandler: database processing start")
 
+	// chan for results
 	output := make(chan *collectors.TaskResult, len(parameters.dbNames)*len(parameters.queryNames))
 	reqID, _ := hlog.IDFromCtx(ctx)
+	reqIDStr := reqID.String()
 
 	for dbname, query := range parameters.iter() {
 		queryTotalCnt.WithLabelValues(query.Name, dbname).Inc()
@@ -239,13 +241,15 @@ func (q *queryHandler) queryDatabases(ctx context.Context, parameters *requestPa
 
 		task := collectors.NewTask(dbname, query, output).
 			WithParams(parameters.extraParameters).
-			WithReqID(reqID.String()).
+			WithReqID(reqIDStr).
 			UseCancel(cancelCh)
 
 		logger.Debug().Object("task", task).Msg("queryhandler: schedule task")
+
 		q.taskQueue.AddTask(ctx, task)
-		debug.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbname)
 		respWriter.incScheduled()
+
+		debug.TracePrintf(ctx, "scheduled %q to %q", query.Name, dbname)
 	}
 
 	return output

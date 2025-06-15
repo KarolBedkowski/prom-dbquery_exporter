@@ -6,7 +6,6 @@ package conf
 import (
 	"context"
 	"fmt"
-	"iter"
 	"os"
 	"slices"
 
@@ -15,6 +14,11 @@ import (
 	"github.com/rs/zerolog/log"
 	"gopkg.in/yaml.v2"
 )
+
+type DatabaseProvider interface {
+	Validate(d *Database) error
+	IsSupported(d *Database) bool
+}
 
 // Configuration keep application configuration.
 type Configuration struct {
@@ -51,17 +55,6 @@ func (c *Configuration) MarshalZerologObject(event *zerolog.Event) {
 	}
 
 	event.Dict("query", qd)
-}
-
-// GroupQueries return queries that belong to given group.
-func (c *Configuration) GroupQueries(group string) iter.Seq[string] {
-	return func(yield func(string) bool) {
-		for name, q := range c.Query {
-			if slices.Contains(q.Groups, group) && !yield(name) {
-				return
-			}
-		}
-	}
 }
 
 // LoadConfiguration from filename.
@@ -106,16 +99,7 @@ func Load(filename string, dbp DatabaseProvider) (*Configuration, error) {
 	return conf, nil
 }
 
-// LoadConfiguration from filename.
-func (c *Configuration) Reload(filename string, dbp DatabaseProvider) (*Configuration, error) {
-	newCfg, err := Load(filename, dbp)
-	if err != nil {
-		return nil, err
-	}
-
-	return newCfg, nil
-}
-
+// ValidDatabases get iter of valid databases.
 func (c *Configuration) ValidDatabases(yield func(*Database) bool) {
 	for _, d := range c.Database {
 		if d.Valid {
@@ -135,9 +119,7 @@ func (c *Configuration) validateJobs(ctx context.Context) error {
 		if err := job.validate(ctx, c); err != nil {
 			errs = multierror.Append(errs, newConfigurationError(
 				fmt.Sprintf("validate job %d error", i+1)).Wrap(err))
-		}
-
-		if job.IsValid {
+		} else if job.IsValid {
 			validJobs++
 		}
 	}
@@ -147,11 +129,6 @@ func (c *Configuration) validateJobs(ctx context.Context) error {
 	}
 
 	return errs.ErrorOrNil()
-}
-
-type DatabaseProvider interface {
-	Validate(d *Database) error
-	IsSupported(d *Database) bool
 }
 
 func (c *Configuration) validate(ctx context.Context, dbp DatabaseProvider) error {

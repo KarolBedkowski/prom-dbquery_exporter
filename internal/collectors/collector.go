@@ -36,8 +36,10 @@ type collector struct {
 	stdWorkersGroup errgroup.Group
 	// bgWorkersGroup is pool of workers that handle only tasks created by scheduler.
 	bgWorkersGroup errgroup.Group
-	database       db.Database
-	dbcfg          *conf.Database
+	// database object
+	database db.Database
+	// database configuration
+	dbcfg *conf.Database
 
 	// tasksQueue is queue of incoming task to schedule.
 	tasksQueue chan *Task
@@ -45,8 +47,6 @@ type collector struct {
 	stdWorkQueue chan *Task
 	// bgWorkQueue is chan that distribute task created by scheduler to dedicated pool of workers.
 	bgWorkQueue chan *Task
-
-	name string
 }
 
 const (
@@ -61,7 +61,6 @@ func newCollector(dbcfg *conf.Database) (*collector, error) {
 	}
 
 	col := &collector{
-		name:     dbcfg.Name,
 		database: database,
 		dbcfg:    dbcfg,
 		log:      log.Logger.With().Str("database", dbcfg.Name).Logger(),
@@ -74,6 +73,7 @@ func newCollector(dbcfg *conf.Database) (*collector, error) {
 		bgWorkersGroup:  errgroup.Group{},
 	}
 
+	// limit number of workers according to configuration
 	col.stdWorkersGroup.SetLimit(dbcfg.MaxWorkers)
 	col.bgWorkersGroup.SetLimit(dbcfg.BackgroundWorkers)
 
@@ -90,6 +90,7 @@ func (c *collector) addTask(ctx context.Context, task *Task) {
 		return
 	}
 
+	// wait for queue or cancel
 	select {
 	case c.tasksQueue <- task:
 	case <-ctx.Done():
@@ -106,7 +107,7 @@ func (c *collector) run(ctx context.Context) error {
 	c.tasksQueue = make(chan *Task, 1)
 	defer close(c.tasksQueue)
 
-	debug.SetGoroutineLabels(ctx, "main_worker", c.name)
+	debug.SetGoroutineLabels(ctx, "main_worker", c.dbcfg.Name)
 
 loop:
 	for {
@@ -146,6 +147,7 @@ func (c *collector) spawnWorker(ctx context.Context) {
 		return
 	}
 
+	// start new worker if below limit
 	c.stdWorkersGroup.TryGo(func() error {
 		return c.worker(ctx, c.stdWorkQueue, false)
 	})
@@ -168,7 +170,7 @@ func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool)
 	llog := c.log.With().Str("worker_id", idx).Logger()
 	ctx = llog.WithContext(ctx)
 
-	workersCreatedCnt.WithLabelValues(c.name, workTypeString(isBg)).Inc()
+	workersCreatedCnt.WithLabelValues(c.dbcfg.Name, workTypeString(isBg)).Inc()
 	llog.Debug().Msgf("collector: start worker id=%q bg=%v", idx, isBg)
 
 	// stop worker after some time of inactivity
@@ -177,7 +179,7 @@ func (c *collector) worker(ctx context.Context, workQueue chan *Task, isBg bool)
 
 loop:
 	for {
-		debug.SetGoroutineLabels(ctx, "worker", idx, "db", c.name, "king", workTypeString(isBg))
+		debug.SetGoroutineLabels(ctx, "worker", idx, "db", c.dbcfg.Name, "king", workTypeString(isBg))
 
 		// reset worker shutdown timer after each iteration.
 		if !shutdownTimer.Stop() {
@@ -196,7 +198,7 @@ loop:
 		case task, ok := <-workQueue:
 			if ok {
 				llog.Debug().Object("task", task).Msg("collector: handle task")
-				debug.SetGoroutineLabels(ctx, "query", task.Query.Name, "worker", idx, "db", c.name, "req_id", task.ReqID)
+				debug.SetGoroutineLabels(ctx, "query", task.Query.Name, "worker", idx, "db", c.dbcfg.Name, "req_id", task.ReqID)
 
 				c.handleTask(ctx, task)
 			}
@@ -212,7 +214,7 @@ loop:
 }
 
 func (c *collector) handleTask(ctx context.Context, task *Task) {
-	tasksQueueWaitTime.WithLabelValues(c.name, workTypeString(task.IsScheduledJob)).
+	tasksQueueWaitTime.WithLabelValues(c.dbcfg.Name, workTypeString(task.IsScheduledJob)).
 		Observe(time.Since(task.RequestStart).Seconds())
 
 	llog := log.Ctx(ctx).With().Object("task", task).Logger()
@@ -303,20 +305,20 @@ func (c *collector) collectMetrics(resCh chan<- prometheus.Metric) {
 		collectorActiveDesc,
 		prometheus.GaugeValue,
 		1.0,
-		c.name,
+		c.dbcfg.Name,
 	)
 	resCh <- prometheus.MustNewConstMetric(
 		collectorQueueLengthDesc,
 		prometheus.GaugeValue,
 		float64(len(c.stdWorkQueue)),
-		c.name,
+		c.dbcfg.Name,
 		"main",
 	)
 	resCh <- prometheus.MustNewConstMetric(
 		collectorQueueLengthDesc,
 		prometheus.GaugeValue,
 		float64(len(c.bgWorkQueue)),
-		c.name,
+		c.dbcfg.Name,
 		"bg",
 	)
 

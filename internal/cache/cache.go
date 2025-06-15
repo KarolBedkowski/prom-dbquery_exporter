@@ -59,7 +59,7 @@ type (
 		cache map[string]cacheItem[T]
 		name  string
 
-		mu sync.Mutex
+		mu sync.RWMutex
 	}
 
 	cacheItem[T any] struct {
@@ -74,7 +74,7 @@ func New[T any](name string) Cache[T] {
 		name:  name,
 		cache: make(map[string]cacheItem[T]),
 		log:   log.Logger.With().Str("subsystem", "cache").Str("cache_name", name).Logger(),
-		mu:    sync.Mutex{},
+		mu:    sync.RWMutex{},
 	}
 }
 
@@ -82,8 +82,8 @@ func New[T any](name string) Cache[T] {
 func (r *Cache[T]) Get(key string) (T, bool) {
 	r.log.Debug().Msgf("cache: get %q", key)
 
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	item, ok := r.cache[key]
 	if !ok {
@@ -98,7 +98,6 @@ func (r *Cache[T]) Get(key string) (T, bool) {
 		return item.content, true
 	}
 
-	delete(r.cache, key)
 	queryCacheMiss.WithLabelValues(r.name).Inc()
 
 	return *new(T), false
@@ -127,8 +126,8 @@ func (r *Cache[T]) Clear() {
 }
 
 func (r *Cache[T]) Content() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 
 	res := make([]string, 0, len(r.cache))
 	for k, v := range r.cache {

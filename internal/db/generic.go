@@ -119,7 +119,8 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 
 		return nil, fmt.Errorf("get connection error: %w", err)
 	}
-	defer conn.Close()
+
+	defer func() { logError(llog, conn.Close(), "close connection error") }()
 
 	// prepare query parameters; combine parameters from query and params
 	queryParams := cloneMap(query.Params, params)
@@ -135,7 +136,8 @@ func (g *genericDatabase) Query(ctx context.Context, query *conf.Query, params m
 	if err != nil {
 		return nil, fmt.Errorf("begin tx error: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+
+	defer func() { logError(llog, tx.Rollback(), "rollback error") }()
 
 	debug.TracePrintf(ctx, "db: begin query %q", query.Name)
 
@@ -363,4 +365,10 @@ func cloneMap[K comparable, V any](inp map[K]V, extra ...map[K]V) map[K]V {
 	}
 
 	return res
+}
+
+func logError(llog zerolog.Logger, err error, format string, v ...any) {
+	if err != nil {
+		llog.Error().Err(err).Msgf(format, v...)
+	}
 }

@@ -45,6 +45,8 @@ type dbDefinition interface {
 	validateConf(cfg *conf.Database) error
 }
 
+// -----------------------------------------------
+
 type Registry struct {
 	dbDefs map[string]dbDefinition
 }

@@ -102,15 +102,15 @@ func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
 
-	stop := func(_ error) {
-		cancel()
-	}
+	// stop all goroutines on error or first exit
+	stop := func(_ error) { cancel() }
 
 	runGroup.Add(func() error { return collectors.Run(ctx) }, stop)
 	runGroup.Add(func() error { return sched.Run(ctx, conf.Args.ParallelScheduler) }, stop)
 	runGroup.Add(confHandler.start, confHandler.stop)
 	runGroup.Add(webHandler.Run, webHandler.Stop)
 
+	// start systemd watchdog when available
 	if sdw != nil {
 		runGroup.Add(func() error { return sdw.start(ctx) }, stop)
 	}
@@ -119,13 +119,12 @@ func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 	runGroup.Add(
 		func() error {
 			<-ctx.Done()
-			log.Logger.Warn().Msg("received SIGTERM, exiting...")
+			log.Logger.Warn().Msg("exiting...")
 			daemon.SdNotify(false, daemon.SdNotifyStopping) //nolint:errcheck
-			cancel()
 
 			return nil
 		},
-		stop, // stop all goroutines on error
+		stop,
 	)
 
 	daemon.SdNotify(false, daemon.SdNotifyReady) //nolint:errcheck
@@ -136,7 +135,10 @@ func start(cfg *conf.Configuration, sdw *sdWatchdog) error {
 
 // ------------------------------------------------------------
 
-var ErrSystemdNotAvailable = errors.New("systemd not available")
+var (
+	ErrSystemdNotAvailable = errors.New("systemd not available")
+	ErrSystemdNoWatchdog   = errors.New("systemd watchdog disabled")
+)
 
 type sdWatchdog struct{ interval time.Duration }
 
@@ -156,7 +158,7 @@ func newSdWatchdog() (*sdWatchdog, error) {
 	}
 
 	if interval == 0 {
-		return nil, ErrSystemdNotAvailable
+		return nil, ErrSystemdNoWatchdog
 	}
 
 	return &sdWatchdog{interval}, nil
@@ -251,7 +253,7 @@ func (h *confHandler) start() error {
 		log.Debug().Msg("reload configuration started")
 		daemon.SdNotify(false, daemon.SdNotifyReloading) //nolint:errcheck
 
-		if newConf, err := h.cfg.Reload(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
+		if newConf, err := conf.Load(conf.Args.ConfigFilename, db.GlobalRegistry); err == nil {
 			log.Debug().Msg("new configuration loaded")
 
 			for _, rh := range h.reloadCh {

@@ -34,6 +34,8 @@ func newQueryResult(startts time.Time, params map[string]any, records []Record) 
 	}
 }
 
+// -----------------------------------------------
+
 // Record is one record (row) loaded from database.
 type Record map[string]any
 

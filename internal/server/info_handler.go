@@ -70,6 +70,8 @@ var funcMap = template.FuncMap{
 	"redact": redact,
 }
 
+// --------------------------------------------------------------------------------
+
 // infoHandler handle request and return information about current configuration.
 type infoHandler struct {
 	cfg  *conf.Configuration

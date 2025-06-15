@@ -36,6 +36,8 @@ func (c ConfigurationError) Unwrap() error {
 	return c.Err
 }
 
+// -----------------------------------------------
+
 // MissingFieldError is error generated when `field` is missing in configuration.
 type MissingFieldError string
 

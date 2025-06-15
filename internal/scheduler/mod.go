@@ -119,13 +119,6 @@ func (s *Scheduler) Run(ctx context.Context, parallel bool) error {
 	return s.runSerial(ctx)
 }
 
-// Close scheduler.
-func (s *Scheduler) Close(err error) {
-	_ = err
-
-	s.log.Debug().Msg("scheduler: stopping")
-}
-
 // RunSerial scheduler process that get data for all defined jobs sequential.
 func (s *Scheduler) runSerial(ctx context.Context) error {
 	s.log.Debug().Msgf("scheduler: starting serial scheduler")

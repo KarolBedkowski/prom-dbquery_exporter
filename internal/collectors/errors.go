@@ -8,8 +8,9 @@ package collectors
 import "errors"
 
 var (
-	ErrUnknownDatabase = errors.New("unknown database")
-	ErrNoDatabases     = errors.New("no databases available")
+	ErrUnknownDatabase     = errors.New("unknown database")
+	ErrNoDatabases         = errors.New("no databases available")
+	ErrCollectorUnavilable = errors.New("collector unavailable")
 )
 
 type InternalError string
