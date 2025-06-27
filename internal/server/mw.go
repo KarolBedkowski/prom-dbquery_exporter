@@ -198,3 +198,28 @@ func newGzipHandler(next http.Handler) http.Handler {
 		next.ServeHTTP(gzr, req)
 	})
 }
+
+// -----------------------------------------------------------------
+
+func newRecoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		defer func() { //nolint:contextcheck
+			rec := recover()
+
+			if rec != nil {
+				switch t := rec.(type) {
+				case error:
+					log.Ctx(req.Context()).Error().Err(t).Msg("panic when handling request")
+				case string:
+					log.Ctx(req.Context()).Error().Str("err", t).Msg("panic when handling request")
+				default:
+					log.Ctx(req.Context()).Error().Str("err", "unknown error").Msg("panic when handling request")
+				}
+
+				http.Error(w, "internal server error", http.StatusInternalServerError)
+			}
+		}()
+
+		next.ServeHTTP(w, req)
+	})
+}

@@ -1,3 +1,9 @@
+v0.11.6 2025-06-27
+
+fix: catch panics when processing request to query_handler
+fix: fix panic on cancelled requests
+
+
 v0.11.5 2025-06-15
 
 * feat: compress with gzip responses from /query

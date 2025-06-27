@@ -1,18 +1,19 @@
 #
 # Makefile
 #
-VERSION=`git describe --always`
-REVISION=`git rev-parse HEAD`
-DATE=`date +%Y%m%d%H%M%S`
-USER=`whoami`
+CURRENT_DIR = $(shell pwd)
+VERSION = $(shell git describe --always)
+REVISION = $(shell git rev-parse HEAD)
+DATE = $(shell date +%Y%m%d%H%M%S)
+USER = $(shell whoami)
 # BRANCH=`git branch | grep '^\*' | cut -d ' ' -f 2`
-BRANCH=`git rev-parse --abbrev-ref HEAD`
-LDFLAGS=" -w -s \
-	-X github.com/prometheus/common/version.Version=$(VERSION) \
-	-X github.com/prometheus/common/version.Revision=$(REVISION) \
-	-X github.com/prometheus/common/version.BuildDate=$(DATE) \
-	-X github.com/prometheus/common/version.BuildUser=$(USER) \
-	-X github.com/prometheus/common/version.Branch=$(BRANCH)"
+BRANCH = $(shell git rev-parse --abbrev-ref HEAD)
+LDFLAGS = " -w -s \
+  -X github.com/prometheus/common/version.Version=$(VERSION) \
+  -X github.com/prometheus/common/version.Revision=$(REVISION) \
+  -X github.com/prometheus/common/version.BuildDate=$(DATE) \
+  -X github.com/prometheus/common/version.BuildUser=$(USER) \
+  -X github.com/prometheus/common/version.Branch=$(BRANCH)"
 
 .PHONY: build
 build: build_amd64_debug
@@ -24,6 +25,8 @@ build_release: build_amd64
 build_amd64_debug:
 	go build -v -o dbquery_exporter \
 		--tags pg,mssql,oracle,mysql,sqlite,tmpl_extra_func,debug \
+		-gcflags=-trimpath=$(CURRENT_DIR) \
+		-asmflags=-trimpath=$(CURRENT_DIR) \
 		cli/main.go
 
 .PHONY: build_amd64
@@ -32,8 +35,9 @@ build_amd64:
 		go build -v -o dbquery_exporter  \
 			--tags pg,mssql,oracle,mysql,sqlite,tmpl_extra_func \
 			--ldflags $(LDFLAGS) \
+			-gcflags=-trimpath=$(CURRENT_DIR) \
+			-asmflags=-trimpath=$(CURRENT_DIR) \
 			cli/main.go
-
 
 .PHONY: build_arm64_debug
 build_arm64_debug:
@@ -41,6 +45,8 @@ build_arm64_debug:
 		go build -v -o dbquery_exporter_arm64  \
 			--ldflags $(LDFLAGS) \
 			--tags debug,pg,tmpl_extra_func \
+			-gcflags=-trimpath=$(CURRENT_DIR) \
+			-asmflags=-trimpath=$(CURRENT_DIR) \
 			cli/main.go
 
 .PHONY: build_arm64
@@ -51,6 +57,8 @@ build_arm64:
 		go build -v -o dbquery_exporter_arm64  \
 			--tags pg,tmpl_extra_func \
 			--ldflags $(LDFLAGS) \
+			-gcflags=-trimpath=$(CURRENT_DIR) \
+			-asmflags=-trimpath=$(CURRENT_DIR) \
 			cli/main.go
 
 .PHONY: run
@@ -70,7 +78,6 @@ lint:
 	# go install go.uber.org/nilaway/cmd/nilaway@latest
 	nilaway ./... || true
 	typos
-
 
 .PHONY: format
 format:

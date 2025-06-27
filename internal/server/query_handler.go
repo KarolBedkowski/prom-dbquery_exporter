@@ -97,6 +97,8 @@ func newQueryHandler(c *conf.Configuration, cache *cache.Cache[[]byte], taskQueu
 
 func (q *queryHandler) Handler() http.Handler {
 	var handler http.Handler = q
+	// 6. handle panics
+	handler = newRecoverMiddleware(handler)
 	// 5. log request traces
 	handler = debug.NewTraceMiddleware("dbquery_exporter")(handler)
 	// 4. update logger, log req, response
