@@ -235,7 +235,6 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 
 	// get result
 	resCh := make(chan *TaskResult, 1)
-	defer close(resCh)
 
 	go c.queryDatabase(ctx, task, resCh)
 
@@ -256,6 +255,8 @@ func (c *collector) handleTask(ctx context.Context, task *Task) {
 // queryDatabase get result from loader.
 func (c *collector) queryDatabase(ctx context.Context, task *Task, resCh chan *TaskResult) {
 	llog := log.Ctx(ctx)
+
+	defer close(resCh)
 
 	debug.TracePrintf(ctx, "start query %q in %q", task.Query.Name, task.DBName)
 	llog.Debug().Msg("collector: start query")
